@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -108,13 +109,61 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the per-zone number controls."""
+    """Set up the per-zone number controls plus the auto-standby timer."""
     controller: AxiumController = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
+    entities: list[NumberEntity] = [
         AxiumNumber(controller, entry, item[ZONE_KEY], desc)
         for item in get_zones(entry)
         for desc in NUMBERS
-    )
+    ]
+    entities.append(AxiumStandbyTime(controller, entry))
+    async_add_entities(entities)
+
+
+class AxiumStandbyTime(NumberEntity):
+    """Auto-standby timeout for the amplifier (snaps to the nearest 2^n s)."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_name = "Auto standby time"
+    _attr_native_min_value = 1
+    _attr_native_max_value = 7200
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = "s"
+    _attr_mode = NumberMode.BOX
+    _attr_icon = "mdi:timer-outline"
+
+    def __init__(self, controller: AxiumController, entry: ConfigEntry) -> None:
+        """Initialise the standby-time number."""
+        self._controller = controller
+        self._attr_unique_id = f"{entry.entry_id}_standby_time"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to diagnostic updates."""
+        self.async_on_remove(
+            self._controller.register_diagnostic_listener(self._handle_update)
+        )
+
+    @callback
+    def _handle_update(self) -> None:
+        """Write state on change."""
+        self.async_write_ha_state()
+
+    @property
+    def available(self) -> bool:
+        """Return whether the amplifier connection is up."""
+        return self._controller.available
+
+    @property
+    def native_value(self) -> int:
+        """Return the current standby timeout in seconds."""
+        return self._controller.standby_seconds
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set the standby timeout."""
+        await self._controller.async_set_standby_seconds(value)
 
 
 class AxiumNumber(NumberEntity):

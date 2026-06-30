@@ -13,13 +13,19 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 import logging
+import math
 
 from . import protocol
 from .const import (
     AUDIO_DELAY_STEP,
+    AUTO_POWER_ON_BIT,
+    AUTO_STANDBY_BIT,
+    CLIP_CLIPPED,
     CMD_AUDIO_DELAY,
+    CMD_AUTO_POWER,
     CMD_BALANCE,
     CMD_BASS,
+    CMD_CLIPPING,
     CMD_LINK_ZONES,
     CMD_MAX_VOLUME,
     CMD_POWER_ON_VOLUME,
@@ -28,7 +34,11 @@ from .const import (
     CMD_MEDIA_STATUS_REQUEST,
     CMD_MUTE,
     CMD_POWER,
+    CMD_PRESET,
+    CMD_PRESET_NAME,
+    CMD_PRESET_NAME_REQUEST,
     CMD_REQUEST_DEVICE_INFO,
+    CMD_REQUEST_EXTENDED_INFO,
     CMD_SOURCE,
     CMD_SOURCE_NAME,
     CMD_TREBLE,
@@ -58,10 +68,12 @@ from .const import (
     MS_TITLE,
     POWER_OFF_VALUES,
     POWER_ON_VALUES,
+    PRESET_COUNT,
     REPEAT_ALL,
     REPEAT_OFF,
     REPEAT_TRACK,
     RESP_DEVICE_INFO,
+    RESP_EXTENDED_DEVICE_INFO,
     SOURCE_ID_MASK,
     SOURCE_NAME_FLAG_DISABLED,
     VOLUME_MAX,
@@ -213,6 +225,18 @@ class AxiumController:
         self._source_meta: dict[int, tuple[int, int]] = {}
         # Now-playing state keyed by media source data byte.
         self._media: dict[int, MediaState] = {}
+        # Diagnostics / amp-wide state.
+        self._diag_listeners: list[CallbackType] = []
+        self._temperature: int | None = None
+        self._peak_temperature: int | None = None
+        self._clipping: bool = False
+        self._clipping_source: int | None = None
+        # Auto power on/off (0x16): cached options bitfield + standby exponent.
+        self._auto_power_options: int = 0
+        self._auto_power_standby_n: int = 0
+        # Preset (0x1E) selection + names (index 1..15 -> name).
+        self._preset_current: int = 0
+        self._preset_names: dict[int, str] = {}
 
     @property
     def host(self) -> str:
@@ -304,6 +328,7 @@ class AxiumController:
             await self._request_device_info()
             await self._request_link_groups()
             await self._request_source_names()
+            await self._request_preset_names()
             try:
                 await self._read_loop()
             except asyncio.CancelledError:
@@ -394,6 +419,31 @@ class AxiumController:
         elif command == CMD_MEDIA_STATUS and len(data) >= 2:
             self._handle_media_status(data)
             return
+        elif command == CMD_AUTO_POWER and len(data) >= 4:
+            self._auto_power_options = data[2]
+            self._auto_power_standby_n = data[3]
+            self._notify_diagnostics()
+            return
+        elif command == CMD_PRESET and data:
+            self._preset_current = data[1] if len(data) >= 2 else data[0] & 0x0F
+            self._notify_diagnostics()
+            return
+        elif command == CMD_PRESET_NAME and len(data) >= 2:
+            name = data[1:].decode("utf-8", errors="replace").rstrip("\x00")
+            if name:
+                self._preset_names[data[0]] = name
+            self._notify_diagnostics()
+            return
+        elif command == CMD_CLIPPING and data:
+            self._clipping = data[0] == CLIP_CLIPPED
+            self._clipping_source = data[1] if len(data) >= 2 else None
+            self._notify_diagnostics()
+            return
+        elif command == RESP_EXTENDED_DEVICE_INFO and len(data) >= 9:
+            self._temperature = protocol.from_signed_byte(data[7])
+            self._peak_temperature = protocol.from_signed_byte(data[8])
+            self._notify_diagnostics()
+            return
 
         if changed:
             state.available = True
@@ -417,6 +467,9 @@ class AxiumController:
         )
         if self._device_info_callback is not None:
             self._device_info_callback(info)
+        # Now that the unit id is known, fetch unit-scoped details.
+        asyncio.ensure_future(self._request_auto_power())
+        asyncio.ensure_future(self.async_request_extended_info())
 
     def _handle_media_status(self, data: bytes) -> None:
         """Update now-playing state from a Media Status (0x3E) notification."""
@@ -535,6 +588,71 @@ class AxiumController:
         """Invoke every registered listener (e.g. on (dis)connect)."""
         for zone in list(self._listeners):
             self._notify(zone)
+        self._notify_diagnostics()
+
+    def register_diagnostic_listener(
+        self, callback: CallbackType
+    ) -> Callable[[], None]:
+        """Register a callback for amp-wide diagnostic/preset/auto-power changes."""
+        self._diag_listeners.append(callback)
+
+        def _remove() -> None:
+            if callback in self._diag_listeners:
+                self._diag_listeners.remove(callback)
+
+        return _remove
+
+    def _notify_diagnostics(self) -> None:
+        """Invoke diagnostic listeners."""
+        for callback in list(self._diag_listeners):
+            callback()
+
+    # -- diagnostic / preset / auto-power accessors ----------------------
+
+    @property
+    def temperature(self) -> int | None:
+        """Current amplifier temperature in °C, if known."""
+        return self._temperature
+
+    @property
+    def peak_temperature(self) -> int | None:
+        """Peak amplifier temperature in °C, if known."""
+        return self._peak_temperature
+
+    @property
+    def clipping(self) -> bool:
+        """Whether an analogue input is currently clipping."""
+        return self._clipping
+
+    @property
+    def clipping_source(self) -> int | None:
+        """The source that is clipping, if any."""
+        return self._clipping_source
+
+    @property
+    def auto_power_on(self) -> bool:
+        """Whether auto power-on (on audio) is enabled."""
+        return bool(self._auto_power_options & AUTO_POWER_ON_BIT)
+
+    @property
+    def auto_standby(self) -> bool:
+        """Whether auto standby (on silence) is enabled."""
+        return bool(self._auto_power_options & AUTO_STANDBY_BIT)
+
+    @property
+    def standby_seconds(self) -> int:
+        """Auto standby timeout in seconds."""
+        return 2 ** min(self._auto_power_standby_n, 30)
+
+    @property
+    def preset_names(self) -> dict[int, str]:
+        """Map of preset index (1..15) -> name."""
+        return dict(self._preset_names)
+
+    @property
+    def preset_current(self) -> int:
+        """Currently active preset index (0 = standard)."""
+        return self._preset_current
 
     def _mark_unavailable(self) -> None:
         """Flag all known zones as unavailable."""
@@ -595,6 +713,68 @@ class AxiumController:
     async def _request_source_names(self) -> None:
         """Ask the amplifier for all source names (command 0x29, no data)."""
         await self.async_send(CMD_SOURCE_NAME, ZONE_ALL)
+
+    # -- presets ---------------------------------------------------------
+
+    async def async_select_preset(self, index: int) -> None:
+        """Select a preset (0 = standard, 1..15 = preset A..O). Sent to all."""
+        await self.async_send(CMD_PRESET, ZONE_ALL, index & 0x0F)
+
+    async def _request_preset_names(self) -> None:
+        """Request the name of every preset (1..15)."""
+        for index in range(1, PRESET_COUNT + 1):
+            await self.async_send(CMD_PRESET_NAME_REQUEST, ZONE_ALL, index)
+
+    # -- auto power / standby (0x16, per unit) ---------------------------
+
+    def _unit_bytes(self) -> tuple[int, int] | None:
+        """Return the directly-connected unit id as two bytes, if known."""
+        if self._device_info is None or self._device_info.unit_id is None:
+            return None
+        unit = self._device_info.unit_id
+        return (unit >> 8) & 0xFF, unit & 0xFF
+
+    async def _write_auto_power(self) -> None:
+        """Write the cached auto power options + standby time to the amp."""
+        unit = self._unit_bytes()
+        if unit is None:
+            return
+        await self.async_send(
+            CMD_AUTO_POWER,
+            ZONE_ALL,
+            unit[0],
+            unit[1],
+            self._auto_power_options,
+            self._auto_power_standby_n,
+        )
+
+    async def async_set_auto_power_bit(self, bit: int, enabled: bool) -> None:
+        """Enable/disable an auto-power option bit, preserving the others."""
+        if enabled:
+            self._auto_power_options |= bit
+        else:
+            self._auto_power_options &= ~bit
+        await self._write_auto_power()
+
+    async def async_set_standby_seconds(self, seconds: float) -> None:
+        """Set the auto standby timeout (snapped to the nearest 2^n seconds)."""
+        seconds = max(1, seconds)
+        self._auto_power_standby_n = max(0, min(30, round(math.log2(seconds))))
+        await self._write_auto_power()
+
+    async def _request_auto_power(self) -> None:
+        """Request the current auto power configuration (unit id only)."""
+        unit = self._unit_bytes()
+        if unit is not None:
+            await self.async_send(CMD_AUTO_POWER, ZONE_ALL, unit[0], unit[1])
+
+    # -- extended device info / diagnostics ------------------------------
+
+    async def async_request_extended_info(self) -> None:
+        """Request extended device info (temperature etc.) for the unit."""
+        unit = self._unit_bytes()
+        if unit is not None:
+            await self.async_send(CMD_REQUEST_EXTENDED_INFO, ZONE_ALL, unit[0], unit[1])
 
     async def async_media_control(
         self, source: int, control: int, *extra: int

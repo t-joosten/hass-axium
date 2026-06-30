@@ -22,6 +22,7 @@ from a keypad or the front panel (a `local_push` integration — no polling).
 - 🧩 **Group zones from the player card** (Sonos-style join/unjoin) — linked on the amplifier and kept in sync by the amp
 - ▶️ **Transport + now-playing** on media sources — play/pause/next/previous, shuffle/repeat, and title/artist/album/cover-art/position
 - 🎛️ Per-zone **bass, treble, balance, max-volume limit, power-on volume, lip-sync delay** (number entities)
+- 🌙 **Auto power-on / auto-standby**, **preset/scene recall**, and **temperature + clipping diagnostics**
 - 🔎 Automatic **model and firmware detection** — no need to pick your amp
 - 🔌 Power on/off per zone (command `0x01`)
 - 🔇 Mute / unmute (command `0x02`)
@@ -223,6 +224,30 @@ Each zone's device page exposes these sliders:
 - **Maximum volume** — a volume limit, e.g. for kids' rooms (`0x0D`)
 - **Power-on volume** — the volume a zone starts at (`0x48`)
 - **Audio delay** — lip-sync delay in 5 ms steps, for TV zones (`0x31`)
+
+### Presets / scenes
+
+If your amplifier has presets configured (A–O), a **Preset** select appears on
+the amplifier device — pick one to recall it (command `0x1E`), or *Standard* to
+return to normal. Preset names are read from the amplifier (`0x2A`/`0x2B`).
+
+### Auto power & standby
+
+On the amplifier device you'll find **Auto power on** and **Auto standby**
+switches and an **Auto standby time** field (command `0x16`). With auto-standby
+on, idle zones drop to standby after the timeout; with auto-power-on, a zone
+wakes when audio is detected on its source.
+
+### Diagnostics
+
+The amplifier device's **Diagnostics** section (settings page) shows:
+
+- **Temperature** and **Peak temperature** sensors (`0x39`)
+- a **Clipping** problem sensor that turns on when an analogue input overloads,
+  with the offending source in its attributes (`0x34`)
+
+These are normal entities, so you can also add them to dashboard cards, graph
+their history, or alert on them.
 
 ### Amplifier model & firmware
 

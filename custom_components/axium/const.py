@@ -35,6 +35,13 @@ CMD_POWER_ON_VOLUME: Final = 0x48
 AUDIO_DELAY_STEP: Final = 5
 AUDIO_DELAY_MAX: Final = 255 * AUDIO_DELAY_STEP
 CMD_REQUEST_PROTOCOL: Final = 0x08
+CMD_AUTO_POWER: Final = 0x16
+CMD_PRESET: Final = 0x1E
+CMD_PRESET_NAME: Final = 0x2A
+CMD_PRESET_NAME_REQUEST: Final = 0x2B
+CMD_CLIPPING: Final = 0x34
+CMD_REQUEST_EXTENDED_INFO: Final = 0x39
+RESP_EXTENDED_DEVICE_INFO: Final = 0xB9
 CMD_VOLUME_UP: Final = 0x11
 CMD_VOLUME_DOWN: Final = 0x12
 CMD_REQUEST_DEVICE_INFO: Final = 0x14
@@ -82,6 +89,17 @@ REPEAT_ALL: Final = 0x02
 MEDIA_SOURCE_BYTES: Final = frozenset(
     {0x10, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19}
 )
+
+# Auto power on/off (0x16) option bits.
+AUTO_POWER_ON_BIT: Final = 0x01
+AUTO_STANDBY_BIT: Final = 0x02
+
+# Clipping notification (0x34) event types.
+CLIP_CLIPPED: Final = 0x01
+CLIP_UNCLIPPED: Final = 0x02
+
+# Number of selectable presets (A..O).
+PRESET_COUNT: Final = 15
 
 # Tone control ranges (signed), per the protocol.
 BASS_MIN: Final = -12

@@ -145,6 +145,13 @@ class Simulator:
         }
         # Now-playing state for media sources (source byte -> dict).
         self.media: dict[int, dict] = {}
+        # Auto power/standby (0x16), presets (0x1E/0x2A), diagnostics (0x39/0x34).
+        self.auto_power_options = 0
+        self.auto_power_standby_n = 8  # 2^8 = 256 s
+        self.preset_current = 0
+        self.preset_names = {1: "Movie", 2: "Party", 3: "Night"}
+        self.temperature = 42
+        self.peak_temperature = 55
 
     @staticmethod
     def _new_media() -> dict:
@@ -348,6 +355,45 @@ class Simulator:
             for frame_out in self._media_status_frames(source):
                 await self.broadcast(frame_out, "media")
             return
+        if command == 0x16:  # Auto power on/off (set when 4+ bytes, else request)
+            if len(data) >= 4:
+                self.auto_power_options = data[2]
+                self.auto_power_standby_n = data[3]
+            reply = encode(
+                0x16, 0xFF, data[0] if data else 0, data[1] if len(data) > 1 else 0,
+                self.auto_power_options, self.auto_power_standby_n,
+            )
+            await self.broadcast(reply, "auto power")
+            return
+        if command == 0x1E:  # Preset selection / status
+            if data:
+                self.preset_current = data[0] & 0x0F
+            reply = encode(0x1E, 0xFF, self.preset_current, self.preset_current)
+            await self.broadcast(reply, f"preset {self.preset_current}")
+            return
+        if command == 0x2B and data:  # Request preset name
+            index = data[0]
+            if index in self.preset_names:
+                frame_out = encode(0x2A, 0xFF, index, *self.preset_names[index].encode("utf-8"))
+                writer.write(frame_out)
+                log("-> reply  ", frame_out, f"preset name {index}")
+                await self._safe_drain(writer)
+            return
+        if command == 0x39:  # Request extended device information
+            reply = encode(
+                0xB9, 0x00,
+                0x00, 0x00, 0x12, 0x34,  # 32-bit unit id
+                FIRMWARE_MAJOR, 0x00, 0x00,  # fw major, minor, beta
+                self.temperature & 0xFF, self.peak_temperature & 0xFF,
+                192, 168, 1, 50,  # IP
+                0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,  # MAC
+                26, 6, 30,  # manufacture date
+                0x02,  # flags
+            )
+            writer.write(reply)
+            log("-> reply  ", reply, f"ext info temp={self.temperature}")
+            await self._safe_drain(writer)
+            return
         if command == 0x29:  # Source Name and Options (request or set)
             if len(data) <= 1:  # request: all sources, or one if an id is given
                 ids = [data[0]] if data else sorted(self.source_names)
@@ -514,6 +560,9 @@ class Simulator:
             "  mute <zone> on|off      set zone mute\n"
             "  vol <zone> <0-100>      set zone volume %\n"
             "  source <zone> <name>    e.g. airplay, mediaplayer, 1..16\n"
+            "  preset <0-15>           recall a preset (0 = standard)\n"
+            "  clip [source] / unclip  raise/clear a clipping alert\n"
+            "  temp <celsius>          set the reported temperature\n"
             "  help                    show this help\n"
             "  quit                    stop the simulator\n"
         )
@@ -531,6 +580,24 @@ class Simulator:
             return True
         if cmd == "status":
             self.print_status()
+            return True
+        if cmd == "clip":
+            source = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+            await self.broadcast(encode(0x34, 0xFF, 0x01, source), f"clip src {source}")
+            return True
+        if cmd == "unclip":
+            await self.broadcast(encode(0x34, 0xFF, 0x02), "unclip")
+            return True
+        if cmd == "temp" and len(parts) > 1 and parts[1].lstrip("-").isdigit():
+            self.temperature = int(parts[1])
+            print(f"   temperature set to {self.temperature}")
+            return True
+        if cmd == "preset" and len(parts) > 1 and parts[1].isdigit():
+            self.preset_current = int(parts[1]) & 0x0F
+            await self.broadcast(
+                encode(0x1E, 0xFF, self.preset_current, self.preset_current),
+                f"preset {self.preset_current}",
+            )
             return True
 
         if cmd in ("power", "mute", "vol", "source") and len(parts) >= 3:
