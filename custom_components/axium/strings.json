@@ -1,0 +1,43 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Axium Amplifier",
+        "description": "Enter the connection details for your Axium amplifier. Commands are sent over Ethernet to TCP port 17037.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "name": "Name",
+          "zones": "Zones"
+        },
+        "data_description": {
+          "zones": "Comma-separated list of zone numbers to control (e.g. 1,2,3,4)."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the amplifier. Check the host and port.",
+      "invalid_zones": "Enter a comma-separated list of zone numbers between 0 and 95."
+    },
+    "abort": {
+      "already_configured": "This amplifier is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Axium Amplifier",
+        "description": "Update the list of controlled zones.",
+        "data": {
+          "zones": "Zones"
+        },
+        "data_description": {
+          "zones": "Comma-separated list of zone numbers to control (e.g. 1,2,3,4)."
+        }
+      }
+    },
+    "error": {
+      "invalid_zones": "Enter a comma-separated list of zone numbers between 0 and 95."
+    }
+  }
+}
