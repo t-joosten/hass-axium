@@ -73,6 +73,10 @@ status                # show all zones
 quit                  # stop
 ```
 
+> The simulator emulates the **Axium control protocol only** (power, volume,
+> source, etc.). It is **not** an AirPlay receiver, so it will not appear in
+> Music Assistant — AirPlay streaming can only be tested against real hardware.
+
 ### Probe script
 
 [`scripts/probe.py`](scripts/probe.py) is a standalone, dependency-free tool
@@ -264,6 +268,26 @@ mode: single
   (RAOP), which Music Assistant supports. If it does not appear in the AirPlay
   provider, confirm AirPlay is enabled and that the amplifier and Music
   Assistant server are on the same subnet.
+
+**Why don't the Axium zones appear as Music Assistant players?**
+
+This is expected. Music Assistant only lists players that can **play a media
+URL** (`play_media`); an Axium zone only switches physical inputs and controls
+volume/power, so it is filtered out. The amplifier reaches Music Assistant
+**only through Music Assistant's own AirPlay provider**, not through this
+integration — and:
+
+- It must be the **real amplifier** with AirPlay enabled. The
+  [simulator](#simulator) speaks only the control protocol and is **not** an
+  AirPlay device, so it will never show up in Music Assistant.
+- The Music Assistant server and the amplifier must be on the **same subnet**
+  (AirPlay discovery uses mDNS/Bonjour, which does not cross VLANs/subnets by
+  default).
+- Add and enable the **AirPlay** provider in Music Assistant; the amp appears
+  there, not in the Home Assistant player list.
+
+This integration's job is the amplifier side (power, volume, source). Music
+Assistant carries the audio over AirPlay.
 
 ## How it works
 
