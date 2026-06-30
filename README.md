@@ -19,7 +19,7 @@ from a keypad or the front panel (a `local_push` integration — no polling).
 ## Features
 
 - 🏷️ **All zones auto-created** (discovered from the amp), each its own device — just rename them (e.g. *Kitchen*, *Living room*)
-- 🧩 User-defined **zone groups** that bundle zone entities and control them as one
+- 🧩 User-defined **zone groups** linked on the amplifier (volume/source/power kept in sync by the amp)
 - 🔎 Automatic **model and firmware detection** — no need to pick your amp
 - 🔌 Power on/off per zone (command `0x01`)
 - 🔇 Mute / unmute (command `0x02`)
@@ -165,10 +165,13 @@ amplifier did not report its zones correctly.)
 
 ### Zone groups
 
-A zone group is a single `media_player` that **bundles several zone entities and
-controls them all at once** — power, volume, mute and source are applied to
-every member zone. Its member entities are exposed in the standard
-`group_members` attribute. You can create as many groups as you like.
+A zone group bundles several zones and controls them together. Grouping is
+performed **on the amplifier** using the protocol's *Link zones* command
+(`0x30`): the integration links the member zones, and the **amplifier itself
+keeps them in sync** for **volume, source and power**. This is more robust than
+sending commands to each zone separately, and volume changes preserve each
+zone's relative offset. The group `media_player` also exposes its members in the
+standard `group_members` attribute.
 
 In the **Configure** dialog:
 
@@ -176,11 +179,20 @@ In the **Configure** dialog:
   zones it should control.
 - **Remove a zone group** – delete groups you no longer need.
 
+Then choose **Save and finish** to apply.
+
+Because grouping is done on the amplifier, two protocol rules apply:
+
+- **A zone can be in only one group** (the picker only offers ungrouped zones).
+- **Linked zones are coupled:** controlling an individual member zone also
+  affects the rest of its group — that is how the amplifier's linking works.
+
+The integration asserts the configured links on the amplifier each time it
+loads, so links created outside Home Assistant may be overwritten.
+
 A group reports an aggregated state: it is *on* if any member is on, shows the
 average member volume, is *muted* only when every member is muted, and shows a
 source only when all members agree.
-
-Remember to choose **Save and finish** in the menu to apply your changes.
 
 ### Sources
 

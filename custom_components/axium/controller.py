@@ -332,6 +332,17 @@ class AxiumController:
 
         await self.async_send(CMD_ZONE_NAME_REQUEST, zone)
 
+    async def async_link_zones(self, zones: list[int], options: int) -> None:
+        """Link a set of zones into a group on the amplifier (command 0x30).
+
+        Sent to all zones (zone byte 0xFF). A single-zone list effectively
+        leaves that zone ungrouped. The amplifier then keeps the linked zones
+        in sync for the enabled options.
+        """
+        from .const import CMD_LINK_ZONES, ZONE_ALL
+
+        await self.async_send(CMD_LINK_ZONES, ZONE_ALL, options, *zones)
+
     async def _request_device_info(self) -> None:
         """Ask the directly-connected amplifier to identify itself (0x14)."""
         await self.async_send(

@@ -228,8 +228,13 @@ class AxiumOptionsFlow(OptionsFlow):
                 )
                 return await self.async_step_init()
 
+        # A zone may belong to only one group on the amplifier, so only offer
+        # zones that are not already in a group.
+        taken = {zone for group in self._groups for zone in group[ZONES_KEY]}
         zone_options = {
-            str(item[ZONE_KEY]): item[NAME_KEY] for item in self._zones
+            str(item[ZONE_KEY]): item[NAME_KEY]
+            for item in self._zones
+            if item[ZONE_KEY] not in taken
         }
         schema = vol.Schema(
             {

@@ -97,8 +97,17 @@ class _AxiumBase(MediaPlayerEntity):
 
     @property
     def _zones(self) -> list[int]:
-        """Return the zone numbers this entity controls."""
+        """Return the zone numbers this entity reflects (for state/listeners)."""
         raise NotImplementedError
+
+    @property
+    def _target_zones(self) -> list[int]:
+        """Return the zone(s) to send commands to.
+
+        Defaults to the reflected zones; groups override this to send to a
+        single member and let the amplifier propagate to the linked zones.
+        """
+        return self._zones
 
     @property
     def available(self) -> bool:
@@ -118,9 +127,12 @@ class _AxiumBase(MediaPlayerEntity):
         self.async_write_ha_state()
 
     async def _send_all(self, command: int, *data: int) -> None:
-        """Send a command to every controlled zone."""
+        """Send a command to the target zone(s)."""
         await asyncio.gather(
-            *(self._controller.async_send(command, zone, *data) for zone in self._zones)
+            *(
+                self._controller.async_send(command, zone, *data)
+                for zone in self._target_zones
+            )
         )
 
     async def async_turn_on(self) -> None:
@@ -250,8 +262,13 @@ class AxiumGroup(_AxiumBase):
 
     @property
     def _zones(self) -> list[int]:
-        """Return the member zone numbers."""
+        """Return the member zone numbers (reflected in group state)."""
         return self._group_zones
+
+    @property
+    def _target_zones(self) -> list[int]:
+        """Send to the first member; the amplifier propagates to the link."""
+        return self._group_zones[:1]
 
     def _states(self) -> list:
         """Return the cached state of every member zone."""

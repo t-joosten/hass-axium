@@ -52,6 +52,23 @@ SOURCE_NAME_TO_BYTE.update({str(n): b for n, b in SOURCE_NUMBER_TO_BYTE.items()}
 POWER_ON_VALUES = {0x01, 0x03, 0x07}
 POWER_OFF_VALUES = {0x00, 0x02, 0x06}
 
+# Link zones (0x30) option bits.
+LINK_OPT_SOURCE = 0x01
+LINK_OPT_VOLUME = 0x02
+LINK_OPT_STANDBY = 0x04
+
+
+def opts_text(opts: int) -> str:
+    """Describe the enabled link options."""
+    names = []
+    if opts & LINK_OPT_SOURCE:
+        names.append("source")
+    if opts & LINK_OPT_VOLUME:
+        names.append("volume")
+    if opts & LINK_OPT_STANDBY:
+        names.append("power")
+    return "+".join(names) or "none"
+
 
 def encode(*data_bytes: int) -> bytes:
     """Encode bytes into an ASCII-hex frame terminated by a line feed."""
@@ -107,6 +124,8 @@ class Simulator:
     def __init__(self, zones: dict[int, str]) -> None:
         self.zones = {n: Zone(n, name) for n, name in zones.items()}
         self.clients: set[asyncio.StreamWriter] = set()
+        # Active zone links: list of (set of zone numbers, options byte).
+        self.links: list[tuple[set[int], int]] = []
 
     # -- frame production -------------------------------------------------
 
@@ -213,23 +232,76 @@ class Simulator:
                 writer.write(encode(0x1C, zone_byte, *z.name.encode("utf-8")))
                 await self._safe_drain(writer)
             return
-
-        targets = self._resolve_zones(zone_byte)
-        if not targets:
+        if command == 0x30:  # Link zones
+            self._handle_link(data)
             return
-        for z in targets:
-            if command == 0x01 and data:  # Power
-                await self.set_power(z, self._power_target(data[0], z))
-            elif command == 0x02 and data:  # Mute
-                await self.set_mute(z, self._mute_target(data[0], z))
-            elif command == 0x04 and data:  # Volume
+
+        base = self._resolve_zones(zone_byte)
+        if not base:
+            return
+        primary = base[0]
+        if command == 0x01 and data:  # Power
+            on = self._power_target(data[0], primary)
+            for z in self._expand(base, LINK_OPT_STANDBY):
+                await self.set_power(z, on)
+        elif command == 0x02 and data:  # Mute
+            muted = self._mute_target(data[0], primary)
+            for z in self._expand(base, LINK_OPT_VOLUME):
+                await self.set_mute(z, muted)
+        elif command == 0x04 and data:  # Volume
+            for z in self._expand(base, LINK_OPT_VOLUME):
                 await self.set_volume(z, data[0])
-            elif command == 0x11:  # Volume up
-                await self.set_volume(z, z.volume + (data[0] if data else 4))
-            elif command == 0x12:  # Volume down
-                await self.set_volume(z, z.volume - (data[0] if data else 4))
-            elif command == 0x03 and data:  # Source select
-                await self.set_source(z, data[0], bool(data[0] & 0x80))
+        elif command == 0x11:  # Volume up (relative keeps per-zone offsets)
+            step = data[0] if data else 4
+            for z in self._expand(base, LINK_OPT_VOLUME):
+                await self.set_volume(z, z.volume + step)
+        elif command == 0x12:  # Volume down
+            step = data[0] if data else 4
+            for z in self._expand(base, LINK_OPT_VOLUME):
+                await self.set_volume(z, z.volume - step)
+        elif command == 0x03 and data:  # Source select
+            turn_on = bool(data[0] & 0x80)
+            for z in self._expand(base, LINK_OPT_SOURCE):
+                await self.set_source(z, data[0], turn_on)
+
+    def _group_for(self, number: int) -> tuple[set[int], int]:
+        """Return the link group and options for a zone, or (empty, 0)."""
+        for zones, opts in self.links:
+            if number in zones:
+                return zones, opts
+        return set(), 0
+
+    def _expand(self, base: list[Zone], opt_bit: int) -> list[Zone]:
+        """Expand addressed zones to their linked group for a given option."""
+        result: dict[int, Zone] = {}
+        for z in base:
+            result[z.number] = z
+            zones, opts = self._group_for(z.number)
+            if opts & opt_bit:
+                for n in zones:
+                    if n in self.zones:
+                        result[n] = self.zones[n]
+        return list(result.values())
+
+    def _handle_link(self, data: bytes) -> None:
+        """Apply a Link zones (0x30) command: <options><zone>[<zone>...]."""
+        if not data:
+            return
+        opts = data[0]
+        zones = [b for b in data[1:] if b in self.zones]
+        zoneset = set(zones)
+        # Remove these zones from any existing group; keep groups of 2+.
+        self.links = [
+            (grp - zoneset, o)
+            for grp, o in self.links
+            if len(grp - zoneset) >= 2
+        ]
+        if len(zones) >= 2:
+            self.links.append((zoneset, opts))
+            names = ", ".join(self.zones[n].name for n in sorted(zoneset))
+            print(f"   linked group ({opts_text(opts)}): {names}")
+        elif zones:
+            print(f"   ungrouped zone: {self.zones[zones[0]].name}")
 
     def _resolve_zones(self, zone_byte: int) -> list[Zone]:
         if zone_byte in (0xFF, 0xFE):  # all / all-local zones
