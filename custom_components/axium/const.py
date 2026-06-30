@@ -58,6 +58,42 @@ VOLUME_MAX: Final = 0xA0
 # Special zone value meaning "all zones".
 ZONE_ALL: Final = 0xFF
 
+# Response command bytes are the request command with bit 7 set.
+RESP_DEVICE_INFO: Final = 0x94  # response to Request Device information (0x14)
+
+# Request Device information (0x14) data-byte option bits. Setting both keeps a
+# single reply on our connection: bit 0 = don't reply on the expansion bus,
+# bit 1 = only reply on the port the command was received on.
+DEVICE_INFO_NO_EXPANSION_REPLY: Final = 0x01
+DEVICE_INFO_REPLY_ON_PORT_ONLY: Final = 0x02
+
+# Device-type byte (first data byte of a 0x94 response).
+DEVICE_TYPES: Final[dict[int, str]] = {
+    0x00: "Amplifier",
+    0x03: "Video matrix",
+    0x04: "Media manager",
+    0x05: "Virtual zone host",
+}
+
+# Device-specific model code (third data byte of a 0x94 response). See
+# AxiumCommsProtocol.pdf, command 0x14 response.
+DEVICE_MODELS: Final[dict[int, str]] = {
+    0x80: "AX4750",
+    0x81: "AX4752",
+    0x83: "AX-451/452-AV",
+    0x84: "AX-800DAV",
+    0x86: "AX-400DA",
+    0x89: "AX-400DA",
+    0x8A: "AX-1250",
+    0x8F: "AX-Mini4",
+    0x90: "AX-800-X",
+    0x91: "AX-400-X",
+    0x92: "AX-400-X",
+    0x96: "AX-Mini1",
+    0x97: "AX-Mini4",
+    0x9C: "AX-Mini4",
+}
+
 # Mapping of physical source number (S1..S16, as labelled on the amplifier) to
 # the data byte used by the Source Selection command. The protocol's data-byte
 # ordering does not follow the S-number ordering, so this lookup is required.

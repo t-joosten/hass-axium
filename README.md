@@ -20,6 +20,7 @@ from a keypad or the front panel (a `local_push` integration — no polling).
 
 - 🏷️ Named zones (e.g. *Kitchen*, *Living room*), each its own device
 - 🧩 User-defined **zone groups** to control several zones as one
+- 🔎 Automatic **model and firmware detection** — no need to pick your amp
 - 🔌 Power on/off per zone (command `0x01`)
 - 🔇 Mute / unmute (command `0x02`)
 - 🔊 Volume set and step up/down (commands `0x04`, `0x11`, `0x12`)
@@ -97,6 +98,18 @@ Remember to choose **Save and finish** in the menu to apply your changes.
 Sources are exposed as `Source 1` … `Source 8` and map to the amplifier's
 physical inputs S1–S16. Selecting a source also powers the zone on. You can
 rename sources from the Home Assistant entity settings.
+
+### Amplifier model & firmware
+
+You do **not** select your amplifier model during setup. On connection the
+integration sends a *Request Device information* command (`0x14`) and reads the
+amplifier's reply, which reports the device type, model code and firmware
+version. The amplifier (hub) device in Home Assistant is then updated
+automatically with the detected **model** (e.g. *AX-800-X*, *AX-1250*,
+*AX-400-X*, *AX-Mini1*) and **firmware** version.
+
+If the amplifier does not respond to the query, control still works and the
+device simply remains labelled generically as *Amplifier*.
 
 ## How it works
 

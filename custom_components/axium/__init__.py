@@ -6,12 +6,12 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
 from .const import DEFAULT_PORT, DOMAIN
-from .controller import AxiumController
+from .controller import AxiumController, AxiumDeviceInfo
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,6 +24,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     port = entry.data.get(CONF_PORT, DEFAULT_PORT)
 
     controller = AxiumController(host, port)
+
+    # Register the amplifier as a hub device so each zone/group device nests
+    # under it via their `via_device` reference. Model/firmware are filled in
+    # automatically once the amplifier identifies itself (command 0x14).
+    device_registry = dr.async_get(hass)
+    hub = device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+        manufacturer="Axium",
+        name=entry.title,
+        model="Amplifier",
+        configuration_url=f"http://{host}",
+    )
+
+    @callback
+    def _update_hub_device(info: AxiumDeviceInfo) -> None:
+        """Enrich the hub device with the reported model and firmware."""
+        updates: dict[str, str] = {}
+        if info.model or info.device_type:
+            updates["model"] = info.model or info.device_type  # type: ignore[assignment]
+        if info.firmware_major is not None:
+            updates["sw_version"] = f"v{info.firmware_major}"
+        if updates:
+            device_registry.async_update_device(hub.id, **updates)
+
+    controller.set_device_info_callback(_update_hub_device)
+
     try:
         await controller.async_start()
     except (ConnectionError, OSError) as err:
@@ -32,18 +59,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ) from err
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = controller
-
-    # Register the amplifier as a hub device so each zone/group device nests
-    # under it via their `via_device` reference.
-    device_registry = dr.async_get(hass)
-    device_registry.async_get_or_create(
-        config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, entry.entry_id)},
-        manufacturer="Axium",
-        name=entry.title,
-        model="Amplifier",
-        configuration_url=f"http://{host}",
-    )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))

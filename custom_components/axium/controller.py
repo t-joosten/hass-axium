@@ -19,12 +19,19 @@ from .const import (
     BYTE_TO_SOURCE_NUMBER,
     CMD_MUTE,
     CMD_POWER,
+    CMD_REQUEST_DEVICE_INFO,
     CMD_SOURCE,
     CMD_VOLUME,
     CMD_ZONE_NAME,
+    DEVICE_INFO_NO_EXPANSION_REPLY,
+    DEVICE_INFO_REPLY_ON_PORT_ONLY,
+    DEVICE_MODELS,
+    DEVICE_TYPES,
     POWER_OFF_VALUES,
     POWER_ON_VALUES,
+    RESP_DEVICE_INFO,
     SOURCE_ID_MASK,
+    ZONE_ALL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -46,7 +53,19 @@ class ZoneState:
     available: bool = False
 
 
+@dataclass
+class AxiumDeviceInfo:
+    """Identity reported by the amplifier (command 0x14 response)."""
+
+    device_type: str | None = None
+    model: str | None = None
+    model_code: int | None = None
+    firmware_major: int | None = None
+    unit_id: int | None = None
+
+
 CallbackType = Callable[[], None]
+DeviceInfoCallback = Callable[[AxiumDeviceInfo], None]
 
 
 class AxiumController:
@@ -64,11 +83,22 @@ class AxiumController:
         self._connected = asyncio.Event()
         self._states: dict[int, ZoneState] = {}
         self._listeners: dict[int, list[CallbackType]] = {}
+        self._device_info: AxiumDeviceInfo | None = None
+        self._device_info_callback: DeviceInfoCallback | None = None
 
     @property
     def host(self) -> str:
         """Return the amplifier host."""
         return self._host
+
+    @property
+    def device_info(self) -> AxiumDeviceInfo | None:
+        """Return the last reported amplifier identity, if known."""
+        return self._device_info
+
+    def set_device_info_callback(self, callback: DeviceInfoCallback) -> None:
+        """Register a callback invoked when device identity is reported."""
+        self._device_info_callback = callback
 
     @property
     def available(self) -> bool:
@@ -142,6 +172,7 @@ class AxiumController:
             delay = _RECONNECT_DELAY
             self._connected.set()
             self._notify_all()
+            await self._request_device_info()
             try:
                 await self._read_loop()
             except asyncio.CancelledError:
@@ -197,10 +228,38 @@ class AxiumController:
         elif command == CMD_ZONE_NAME and data:
             state.name = data.decode("utf-8", errors="replace").rstrip("\x00") or None
             changed = True
+        elif command == RESP_DEVICE_INFO:
+            self._handle_device_info(data)
+            return
 
         if changed:
             state.available = True
             self._notify(zone)
+
+    def _handle_device_info(self, data: bytes) -> None:
+        """Parse a Request Device information response (command 0x94).
+
+        Layout (data bytes, after command + zone): device type, firmware major
+        version, device-specific model code, then a two-byte unit ID.
+        """
+        if len(data) < 3:
+            return
+        info = AxiumDeviceInfo(
+            device_type=DEVICE_TYPES.get(data[0]),
+            model=DEVICE_MODELS.get(data[2]),
+            model_code=data[2],
+            firmware_major=data[1],
+            unit_id=(data[3] << 8 | data[4]) if len(data) >= 5 else None,
+        )
+        self._device_info = info
+        _LOGGER.debug(
+            "Axium device info: type=%s model=%s fw=%s",
+            info.device_type,
+            info.model or f"code 0x{info.model_code:02X}",
+            info.firmware_major,
+        )
+        if self._device_info_callback is not None:
+            self._device_info_callback(info)
 
     def _notify(self, zone: int) -> None:
         """Invoke listeners registered for ``zone``."""
@@ -254,3 +313,11 @@ class AxiumController:
         from .const import CMD_ZONE_NAME_REQUEST
 
         await self.async_send(CMD_ZONE_NAME_REQUEST, zone)
+
+    async def _request_device_info(self) -> None:
+        """Ask the directly-connected amplifier to identify itself (0x14)."""
+        await self.async_send(
+            CMD_REQUEST_DEVICE_INFO,
+            ZONE_ALL,
+            DEVICE_INFO_NO_EXPANSION_REPLY | DEVICE_INFO_REPLY_ON_PORT_ONLY,
+        )
