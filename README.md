@@ -18,8 +18,8 @@ from a keypad or the front panel (a `local_push` integration — no polling).
 
 ## Features
 
-- 🏷️ Named zones (e.g. *Kitchen*, *Living room*), each its own device
-- 🧩 User-defined **zone groups** to control several zones as one
+- 🏷️ **All zones auto-created** (discovered from the amp), each its own device — just rename them (e.g. *Kitchen*, *Living room*)
+- 🧩 User-defined **zone groups** that bundle zone entities and control them as one
 - 🔎 Automatic **model and firmware detection** — no need to pick your amp
 - 🔌 Power on/off per zone (command `0x01`)
 - 🔇 Mute / unmute (command `0x02`)
@@ -89,9 +89,10 @@ assignments, then prints every frame it receives — both the raw ASCII-hex and 
 decoded interpretation:
 
 ```
->> sent  14 FF 03                 Request Device information
-<< recv  94 00 00 02 8A 00 07     Response: Device information  zone=0 (zone 96)
+>> sent  14 FF 07                 Request Device information + zones
+<< recv  94 00 00 02 8A 00 07 ... Response: Device information  zone=0 (zone 96)
         device=Amplifier  model=AX-1250  fw=v2  unit_id=0x0007
+        zones: 1, 2, 3, 4, 5, 6, 7, 8
 << recv  01 0B 01                 Standby / Power  zone=11  ->  A Power On
 << recv  04 0B 50                 Volume  zone=11  ->  50% (v1=0x50)
 ```
@@ -125,13 +126,15 @@ identify command, or a firewall is blocking the reply.
 
 1. Go to **Settings → Devices & Services → Add Integration**.
 2. Search for **Axium Amplifier**.
-3. Enter:
+3. Enter just the connection details:
    - **Host** – the amplifier's IP address or hostname.
    - **Port** – defaults to `17037`.
    - **Name** – a friendly name for the amplifier.
-   - **Zones** – a comma-separated list of zones as `number=Name`, for example
-     `1=Kitchen, 2=Living room, 3=Bedroom`. The name is optional (defaults to
-     `Zone N`), and zone numbers may be any value the amplifier uses (0–95).
+
+That's it — **all of the amplifier's zones are added automatically.** On
+connection the integration asks the amplifier which zones it has and creates a
+`media_player` for each one (named `Zone N` by default), so every zone is
+available out of the box. You then rename them to suit your home.
 
 During setup the integration verifies that an **actual Axium amplifier
 responds** at the address (it sends a *Request Device information* command and
@@ -142,20 +145,26 @@ waits for the reply), so you get a clear error instead of a silent failure:
 - **No Axium amplifier responded** – something answered on the port, but it was
   not an Axium amplifier (or it did not reply in time).
 
-Each zone becomes its own `media_player` device named after the room, nested
-under the amplifier device. Zones are always created, so they are available as
-soon as the amplifier connects.
+Each zone becomes its own device, nested under the amplifier device.
 
-### Naming and editing zones
+### Renaming zones
 
-Use the integration's **Configure** dialog → **Edit zones and names** to rename
-zones or change which zones exist at any time.
+Open the integration's **Configure** dialog → **Edit zones and names**. You will
+see every zone pre-filled as `number=Name`; just change the names, for example:
+
+```
+11=Kitchen, 12=Living room, 13=Bedroom
+```
+
+Then choose **Save and finish**. (You can also adjust the zone list here if the
+amplifier did not report its zones correctly.)
 
 ### Zone groups
 
-A zone group is a single `media_player` that controls several zones together —
-power, volume, mute and source are applied to every member zone. You can create
-as many groups as you like.
+A zone group is a single `media_player` that **bundles several zone entities and
+controls them all at once** — power, volume, mute and source are applied to
+every member zone. Its member entities are exposed in the standard
+`group_members` attribute. You can create as many groups as you like.
 
 In the **Configure** dialog:
 
@@ -165,8 +174,7 @@ In the **Configure** dialog:
 
 A group reports an aggregated state: it is *on* if any member is on, shows the
 average member volume, is *muted* only when every member is muted, and shows a
-source only when all members agree. The member zone numbers are exposed in the
-`zones` attribute.
+source only when all members agree.
 
 Remember to choose **Save and finish** in the menu to apply your changes.
 

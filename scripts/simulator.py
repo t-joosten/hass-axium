@@ -110,12 +110,19 @@ class Simulator:
 
     # -- frame production -------------------------------------------------
 
-    def device_info_frame(self) -> bytes:
-        """Build the Request Device information response (0x94)."""
-        return encode(
+    def device_info_frame(self, include_zones: bool = False) -> bytes:
+        """Build the Request Device information response (0x94).
+
+        When ``include_zones`` is set (request option bit 2), the unit's zone
+        numbers are appended after the unit ID.
+        """
+        payload = [
             0x94, 0x00, DEVICE_TYPE, FIRMWARE_MAJOR, MODEL_CODE,
             (UNIT_ID >> 8) & 0xFF, UNIT_ID & 0xFF,
-        )
+        ]
+        if include_zones:
+            payload.extend(self.zones)
+        return encode(*payload)
 
     def snapshot_frames(self) -> list[bytes]:
         """Build notifications describing the current state of every zone."""
@@ -185,10 +192,12 @@ class Simulator:
         log("<- recv   ", frame)
 
         if command == 0x14:  # Request Device information
-            reply = self.device_info_frame()
+            include_zones = bool(data and data[0] & 0x04)
+            reply = self.device_info_frame(include_zones=include_zones)
             writer.write(reply)
             await self._safe_drain(writer)
-            log("-> reply  ", reply, "AX-800DAV")
+            note = "AX-800DAV" + (" + zones" if include_zones else "")
+            log("-> reply  ", reply, note)
             return
         if command == 0x08:  # Request Protocol Version
             writer.write(encode(0x88, zone_byte, 0x01))

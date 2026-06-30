@@ -22,6 +22,7 @@ from .const import (
     CMD_SOURCE,
     CMD_VOLUME,
     CMD_ZONE_NAME,
+    DEVICE_INFO_LIST_ZONES,
     DEVICE_INFO_NO_EXPANSION_REPLY,
     DEVICE_INFO_REPLY_ON_PORT_ONLY,
     DEVICE_MODELS,
@@ -61,6 +62,7 @@ class AxiumDeviceInfo:
     model_code: int | None = None
     firmware_major: int | None = None
     unit_id: int | None = None
+    zones: list[int] = field(default_factory=list)
 
 
 CallbackType = Callable[[], None]
@@ -75,12 +77,19 @@ def parse_device_info(data: bytes) -> AxiumDeviceInfo | None:
     """
     if len(data) < 3:
         return None
+    # For amplifiers (device type 0x00) any bytes past the unit ID are the
+    # optional zone list (each zone is 0..95), present when the request asked
+    # for it. Filter to valid zone numbers defensively.
+    zones: list[int] = []
+    if data[0] == 0x00 and len(data) > 5:
+        zones = [b for b in data[5:] if 0 <= b <= 95]
     return AxiumDeviceInfo(
         device_type=DEVICE_TYPES.get(data[0]),
         model=DEVICE_MODELS.get(data[2]),
         model_code=data[2],
         firmware_major=data[1],
         unit_id=(data[3] << 8 | data[4]) if len(data) >= 5 else None,
+        zones=zones,
     )
 
 
@@ -328,5 +337,7 @@ class AxiumController:
         await self.async_send(
             CMD_REQUEST_DEVICE_INFO,
             ZONE_ALL,
-            DEVICE_INFO_NO_EXPANSION_REPLY | DEVICE_INFO_REPLY_ON_PORT_ONLY,
+            DEVICE_INFO_NO_EXPANSION_REPLY
+            | DEVICE_INFO_REPLY_ON_PORT_ONLY
+            | DEVICE_INFO_LIST_ZONES,
         )

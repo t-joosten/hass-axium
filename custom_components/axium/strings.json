@@ -3,22 +3,17 @@
     "step": {
       "user": {
         "title": "Axium Amplifier",
-        "description": "Enter the connection details for your Axium amplifier. Commands are sent over Ethernet to TCP port 17037.",
+        "description": "Enter the connection details for your Axium amplifier. Commands are sent over Ethernet to TCP port 17037. All of the amplifier's zones are added automatically; you can rename them afterwards.",
         "data": {
           "host": "Host",
           "port": "Port",
-          "name": "Name",
-          "zones": "Zones"
-        },
-        "data_description": {
-          "zones": "Comma-separated list of zones as number=Name, e.g. 1=Kitchen, 2=Living room, 3=Bedroom. The name is optional."
+          "name": "Name"
         }
       }
     },
     "error": {
       "cannot_connect": "Failed to connect. Check the host and port (Axium uses TCP 17037).",
-      "no_amplifier": "Connected, but no Axium amplifier responded at this address. Check that this is an Axium device and that it is powered on.",
-      "invalid_zones": "Use a comma-separated list like 1=Kitchen, 2=Living room. Zone numbers must be unique and between 0 and 95."
+      "no_amplifier": "Connected, but no Axium amplifier responded at this address. Check that this is an Axium device and that it is powered on."
     },
     "abort": {
       "already_configured": "This amplifier is already configured."

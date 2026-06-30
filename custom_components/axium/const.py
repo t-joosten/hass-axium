@@ -66,6 +66,10 @@ RESP_DEVICE_INFO: Final = 0x94  # response to Request Device information (0x14)
 # bit 1 = only reply on the port the command was received on.
 DEVICE_INFO_NO_EXPANSION_REPLY: Final = 0x01
 DEVICE_INFO_REPLY_ON_PORT_ONLY: Final = 0x02
+DEVICE_INFO_LIST_ZONES: Final = 0x04  # append the unit's zone list to the reply
+
+# Fallback number of zones to create if the amplifier does not report its zones.
+DEFAULT_ZONE_COUNT: Final = 8
 
 # Device-type byte (first data byte of a 0x94 response).
 DEVICE_TYPES: Final[dict[int, str]] = {

@@ -14,6 +14,7 @@ from homeassistant.components.media_player import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import slugify
@@ -219,9 +220,11 @@ class AxiumGroup(_AxiumBase):
     ) -> None:
         """Initialise the group entity."""
         super().__init__(controller)
+        self._entry_id = entry.entry_id
         self._group_zones = list(zones)
         slug = slugify(name)
         self._attr_unique_id = f"{entry.entry_id}_group_{slug}"
+        self._attr_group_members: list[str] = []
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"{entry.entry_id}_group_{slug}")},
             name=name,
@@ -229,6 +232,21 @@ class AxiumGroup(_AxiumBase):
             model="Zone Group",
             via_device=(DOMAIN, entry.entry_id),
         )
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to member zones and resolve their entity IDs."""
+        await super().async_added_to_hass()
+        registry = er.async_get(self.hass)
+        self._attr_group_members = [
+            entity_id
+            for zone in self._group_zones
+            if (
+                entity_id := registry.async_get_entity_id(
+                    "media_player", DOMAIN, f"{self._entry_id}_zone_{zone}"
+                )
+            )
+            is not None
+        ]
 
     @property
     def _zones(self) -> list[int]:

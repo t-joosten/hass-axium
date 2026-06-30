@@ -26,6 +26,8 @@ from .const import (
     CONF_ZONES,
     DEFAULT_NAME,
     DEFAULT_PORT,
+    DEFAULT_ZONE_COUNT,
+    DEVICE_INFO_LIST_ZONES,
     DEVICE_INFO_NO_EXPANSION_REPLY,
     DEVICE_INFO_REPLY_ON_PORT_ONLY,
     DOMAIN,
@@ -41,11 +43,11 @@ from .helpers import (
     get_groups,
     get_zones,
     parse_zone_spec,
+    zones_from_numbers,
 )
 
 _CONNECT_TIMEOUT = 10.0
 _PROBE_TIMEOUT = 6.0
-_DEFAULT_ZONES = "1=Zone 1, 2=Zone 2, 3=Zone 3, 4=Zone 4"
 
 
 async def _async_probe_amplifier(host: str, port: int) -> AxiumDeviceInfo | None:
@@ -65,7 +67,9 @@ async def _async_probe_amplifier(host: str, port: int) -> AxiumDeviceInfo | None
             protocol.encode(
                 CMD_REQUEST_DEVICE_INFO,
                 ZONE_ALL,
-                DEVICE_INFO_NO_EXPANSION_REPLY | DEVICE_INFO_REPLY_ON_PORT_ONLY,
+                DEVICE_INFO_NO_EXPANSION_REPLY
+                | DEVICE_INFO_REPLY_ON_PORT_ONLY
+                | DEVICE_INFO_LIST_ZONES,
             )
         )
         await writer.drain()
@@ -105,31 +109,31 @@ class AxiumConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             host = user_input[CONF_HOST]
             port = user_input[CONF_PORT]
+            await self.async_set_unique_id(f"{host}:{port}")
+            self._abort_if_unique_id_configured()
             try:
-                zones = parse_zone_spec(user_input[CONF_ZONES])
-            except ValueError:
-                errors[CONF_ZONES] = "invalid_zones"
+                device_info = await _async_probe_amplifier(host, port)
+            except (OSError, asyncio.TimeoutError):
+                errors["base"] = "cannot_connect"
             else:
-                await self.async_set_unique_id(f"{host}:{port}")
-                self._abort_if_unique_id_configured()
-                try:
-                    device_info = await _async_probe_amplifier(host, port)
-                except (OSError, asyncio.TimeoutError):
-                    errors["base"] = "cannot_connect"
-                else:
-                    if device_info is None:
-                        errors["base"] = "no_amplifier"
-                if not errors:
-                    return self.async_create_entry(
-                        title=user_input[CONF_NAME],
-                        data={
-                            CONF_HOST: host,
-                            CONF_PORT: port,
-                            CONF_NAME: user_input[CONF_NAME],
-                            CONF_ZONES: zones,
-                            CONF_GROUPS: [],
-                        },
-                    )
+                if device_info is None:
+                    errors["base"] = "no_amplifier"
+            if not errors:
+                # Create every zone the amplifier reports (or a sensible
+                # default if it does not list them). Names are edited later.
+                numbers = device_info.zones or list(
+                    range(1, DEFAULT_ZONE_COUNT + 1)
+                )
+                return self.async_create_entry(
+                    title=user_input[CONF_NAME],
+                    data={
+                        CONF_HOST: host,
+                        CONF_PORT: port,
+                        CONF_NAME: user_input[CONF_NAME],
+                        CONF_ZONES: zones_from_numbers(numbers),
+                        CONF_GROUPS: [],
+                    },
+                )
 
         suggested = user_input or {}
         schema = vol.Schema(
@@ -142,9 +146,6 @@ class AxiumConfigFlow(ConfigFlow, domain=DOMAIN):
                 ): cv.port,
                 vol.Required(
                     CONF_NAME, default=suggested.get(CONF_NAME, DEFAULT_NAME)
-                ): cv.string,
-                vol.Required(
-                    CONF_ZONES, default=suggested.get(CONF_ZONES, _DEFAULT_ZONES)
                 ): cv.string,
             }
         )

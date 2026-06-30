@@ -82,6 +82,12 @@ def format_zone_spec(zones: list[dict[str, Any]]) -> str:
     return ", ".join(f"{item[ZONE_KEY]}={item[NAME_KEY]}" for item in zones)
 
 
+def zones_from_numbers(numbers: list[int]) -> list[dict[str, Any]]:
+    """Build default-named zone dicts from a list of zone numbers."""
+    unique = sorted({int(n) for n in numbers if ZONE_MIN <= int(n) <= ZONE_MAX})
+    return [{ZONE_KEY: n, NAME_KEY: default_zone_name(n)} for n in unique]
+
+
 def normalise_groups(raw: Any) -> list[dict[str, Any]]:
     """Normalise stored group definitions, dropping malformed entries."""
     if not isinstance(raw, list):

@@ -130,7 +130,15 @@ def describe(frame: bytes) -> str:
         model = DEVICE_MODELS.get(data[2], f"unknown code 0x{data[2]:02X}")
         dtype = DEVICE_TYPES.get(data[0], f"0x{data[0]:02X}")
         unit = f"0x{(data[3] << 8 | data[4]):04X}" if len(data) >= 5 else "?"
-        return f"{head}\n        device={dtype}  model={model}  fw=v{data[1]}  unit_id={unit}"
+        zones = (
+            ", ".join(str(b) for b in data[5:])
+            if data[0] == 0x00 and len(data) > 5
+            else "(not reported)"
+        )
+        return (
+            f"{head}\n        device={dtype}  model={model}  fw=v{data[1]}  "
+            f"unit_id={unit}\n        zones: {zones}"
+        )
     if command == 0x01 and data:
         return f"{head}  ->  {POWER_TEXT.get(data[0], f'0x{data[0]:02X}')}"
     if command == 0x02 and data:
@@ -171,8 +179,9 @@ async def run(host: str, port: int, duration: float, extra: list[str]) -> int:
         await writer.drain()
         print(f">> sent  {hexbytes(decode(frame) or b''):<24} {label}")
 
-    # Identify the amplifier (bit0 = no expansion reply, bit1 = reply on this port).
-    await send(encode(0x14, 0xFF, 0x03), "Request Device information")
+    # Identify the amplifier and list its zones (bit0 = no expansion reply,
+    # bit1 = reply on this port, bit2 = include zone list).
+    await send(encode(0x14, 0xFF, 0x07), "Request Device information + zones")
     # Ask which zones the directly-connected device owns.
     await send(encode(0x2F, 0xFF), "Request zone assignments")
     for raw in extra:
