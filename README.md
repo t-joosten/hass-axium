@@ -36,7 +36,41 @@ from a keypad or the front panel (a `local_push` integration — no polling).
 - Home Assistant 2024.1.0 or newer.
 
 You can verify connectivity before installing by opening a telnet session to the
-amplifier on port 17037 (the protocol explicitly supports this for testing).
+amplifier on port 17037 (the protocol explicitly supports this for testing), or
+by running the bundled [probe script](#testing-with-the-probe-script).
+
+## Testing with the probe script
+
+[`scripts/probe.py`](scripts/probe.py) is a standalone, dependency-free tool
+(Python 3.9+ stdlib only) you can run from any PC on the same network to confirm
+the amplifier responds and to inspect the raw protocol framing — handy before
+installing the integration.
+
+```bash
+python scripts/probe.py 192.168.1.50
+```
+
+It connects, asks the amplifier to identify itself, requests its zone
+assignments, then prints every frame it receives — both the raw ASCII-hex and a
+decoded interpretation:
+
+```
+>> sent  14 FF 03                 Request Device information
+<< recv  94 00 00 02 8A 00 07     Response: Device information  zone=0 (zone 96)
+        device=Amplifier  model=AX-1250  fw=v2  unit_id=0x0007
+<< recv  01 0B 01                 Standby / Power  zone=11  ->  A Power On
+<< recv  04 0B 50                 Volume  zone=11  ->  50% (v1=0x50)
+```
+
+Options:
+
+- `--port 17037` – override the TCP port.
+- `--duration 15` – how long to listen for frames (default 10s).
+- `--send 38FF` – send an extra raw command as hex (repeatable), e.g. request a
+  zone name.
+
+If you see no frames, it is either not an Axium amplifier, does not answer the
+identify command, or a firewall is blocking the reply.
 
 ## Installation
 
