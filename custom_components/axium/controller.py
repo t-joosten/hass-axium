@@ -68,6 +68,23 @@ CallbackType = Callable[[], None]
 DeviceInfoCallback = Callable[[AxiumDeviceInfo], None]
 
 
+def parse_device_info(data: bytes) -> AxiumDeviceInfo | None:
+    """Parse the data bytes of a Request Device information response (0x94).
+
+    Layout: device type, firmware major version, device-specific model code,
+    then an optional two-byte unit ID. Returns ``None`` if too short.
+    """
+    if len(data) < 3:
+        return None
+    return AxiumDeviceInfo(
+        device_type=DEVICE_TYPES.get(data[0]),
+        model=DEVICE_MODELS.get(data[2]),
+        model_code=data[2],
+        firmware_major=data[1],
+        unit_id=(data[3] << 8 | data[4]) if len(data) >= 5 else None,
+    )
+
+
 class AxiumController:
     """Manage the connection to an Axium amplifier and dispatch updates."""
 
@@ -242,15 +259,9 @@ class AxiumController:
         Layout (data bytes, after command + zone): device type, firmware major
         version, device-specific model code, then a two-byte unit ID.
         """
-        if len(data) < 3:
+        info = parse_device_info(data)
+        if info is None:
             return
-        info = AxiumDeviceInfo(
-            device_type=DEVICE_TYPES.get(data[0]),
-            model=DEVICE_MODELS.get(data[2]),
-            model_code=data[2],
-            firmware_major=data[1],
-            unit_id=(data[3] << 8 | data[4]) if len(data) >= 5 else None,
-        )
         self._device_info = info
         _LOGGER.debug(
             "Axium device info: type=%s model=%s fw=%s",

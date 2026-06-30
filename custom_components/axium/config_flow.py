@@ -17,18 +17,25 @@ from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT
 from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
 
+from . import protocol
 from .const import (
+    CMD_REQUEST_DEVICE_INFO,
     CONF_GROUP_NAME,
     CONF_GROUP_ZONES,
     CONF_GROUPS,
     CONF_ZONES,
     DEFAULT_NAME,
     DEFAULT_PORT,
+    DEVICE_INFO_NO_EXPANSION_REPLY,
+    DEVICE_INFO_REPLY_ON_PORT_ONLY,
     DOMAIN,
     NAME_KEY,
+    RESP_DEVICE_INFO,
+    ZONE_ALL,
     ZONE_KEY,
     ZONES_KEY,
 )
+from .controller import AxiumDeviceInfo, parse_device_info
 from .helpers import (
     format_zone_spec,
     get_groups,
@@ -37,19 +44,52 @@ from .helpers import (
 )
 
 _CONNECT_TIMEOUT = 10.0
+_PROBE_TIMEOUT = 6.0
 _DEFAULT_ZONES = "1=Zone 1, 2=Zone 2, 3=Zone 3, 4=Zone 4"
 
 
-async def _async_test_connection(host: str, port: int) -> None:
-    """Open and close a TCP connection to validate host/port."""
+async def _async_probe_amplifier(host: str, port: int) -> AxiumDeviceInfo | None:
+    """Connect and confirm an Axium amplifier is present.
+
+    Sends a Request Device information command and waits for the matching
+    response. Returns the parsed device info (possibly empty but non-None) when
+    an amplifier replies, or ``None`` if nothing answers within the timeout.
+    Raises ``OSError``/``asyncio.TimeoutError`` if the connection cannot open.
+    """
     reader, writer = await asyncio.wait_for(
         asyncio.open_connection(host, port), timeout=_CONNECT_TIMEOUT
     )
-    writer.close()
+    loop = asyncio.get_running_loop()
     try:
-        await writer.wait_closed()
-    except OSError:
-        pass
+        writer.write(
+            protocol.encode(
+                CMD_REQUEST_DEVICE_INFO,
+                ZONE_ALL,
+                DEVICE_INFO_NO_EXPANSION_REPLY | DEVICE_INFO_REPLY_ON_PORT_ONLY,
+            )
+        )
+        await writer.drain()
+
+        deadline = loop.time() + _PROBE_TIMEOUT
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return None
+            try:
+                line = await asyncio.wait_for(reader.readline(), timeout=remaining)
+            except asyncio.TimeoutError:
+                return None
+            if not line:  # connection closed by peer
+                return None
+            frame = protocol.decode(line)
+            if frame is not None and len(frame) >= 2 and frame[0] == RESP_DEVICE_INFO:
+                return parse_device_info(frame[2:]) or AxiumDeviceInfo()
+    finally:
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except OSError:
+            pass
 
 
 class AxiumConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -73,10 +113,13 @@ class AxiumConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(f"{host}:{port}")
                 self._abort_if_unique_id_configured()
                 try:
-                    await _async_test_connection(host, port)
+                    device_info = await _async_probe_amplifier(host, port)
                 except (OSError, asyncio.TimeoutError):
                     errors["base"] = "cannot_connect"
                 else:
+                    if device_info is None:
+                        errors["base"] = "no_amplifier"
+                if not errors:
                     return self.async_create_entry(
                         title=user_input[CONF_NAME],
                         data={

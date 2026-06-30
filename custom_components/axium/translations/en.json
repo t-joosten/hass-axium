@@ -16,7 +16,8 @@
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to the amplifier. Check the host and port.",
+      "cannot_connect": "Failed to connect. Check the host and port (Axium uses TCP 17037).",
+      "no_amplifier": "Connected, but no Axium amplifier responded at this address. Check that this is an Axium device and that it is powered on.",
       "invalid_zones": "Use a comma-separated list like 1=Kitchen, 2=Living room. Zone numbers must be unique and between 0 and 95."
     },
     "abort": {

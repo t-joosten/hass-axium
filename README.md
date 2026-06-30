@@ -65,6 +65,15 @@ amplifier on port 17037 (the protocol explicitly supports this for testing).
      `1=Kitchen, 2=Living room, 3=Bedroom`. The name is optional (defaults to
      `Zone N`), and zone numbers may be any value the amplifier uses (0–95).
 
+During setup the integration verifies that an **actual Axium amplifier
+responds** at the address (it sends a *Request Device information* command and
+waits for the reply), so you get a clear error instead of a silent failure:
+
+- **Failed to connect** – nothing accepted the connection (wrong host/port, or
+  the amplifier is offline).
+- **No Axium amplifier responded** – something answered on the port, but it was
+  not an Axium amplifier (or it did not reply in time).
+
 Each zone becomes its own `media_player` device named after the room, nested
 under the amplifier device. Zones are always created, so they are available as
 soon as the amplifier connects.
