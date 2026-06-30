@@ -117,9 +117,27 @@ SOURCE_NUMBER_TO_BYTE: Final[dict[int, int]] = {
     16: 0x0F,  # S16
 }
 
-BYTE_TO_SOURCE_NUMBER: Final[dict[int, int]] = {
-    byte: number for number, byte in SOURCE_NUMBER_TO_BYTE.items()
+# Number of physical sources (S1..Sn) exposed by default. Most amps have 8.
+DEFAULT_SOURCE_COUNT: Final = 8
+
+# AirPlay is a dedicated source on Ethernet amplifiers (e.g. AX-800DAV).
+SOURCE_AIRPLAY_BYTE: Final = 0x10
+# Media Player 1 (the amplifier's internal media player) per Source Selection.
+SOURCE_MEDIA_PLAYER_BYTE: Final = 0x12
+
+# Friendly display name for each source data byte (after masking off the
+# turn-on / audio-only flag bits).
+SOURCE_BYTE_TO_NAME: Final[dict[int, str]] = {
+    byte: f"Source {number}" for number, byte in SOURCE_NUMBER_TO_BYTE.items()
+}
+SOURCE_BYTE_TO_NAME[SOURCE_AIRPLAY_BYTE] = "AirPlay"
+SOURCE_BYTE_TO_NAME[SOURCE_MEDIA_PLAYER_BYTE] = "Media Player"
+
+SOURCE_NAME_TO_BYTE: Final[dict[str, int]] = {
+    name: byte for byte, name in SOURCE_BYTE_TO_NAME.items()
 }
 
-# Number of sources exposed by default. Most Axium amplifiers expose 8.
-DEFAULT_SOURCE_COUNT: Final = 8
+# Sources offered in the Home Assistant source dropdown.
+DEFAULT_SOURCE_LIST: Final[list[str]] = [
+    f"Source {number}" for number in range(1, DEFAULT_SOURCE_COUNT + 1)
+] + ["AirPlay"]

@@ -16,7 +16,6 @@ import logging
 
 from . import protocol
 from .const import (
-    BYTE_TO_SOURCE_NUMBER,
     CMD_MUTE,
     CMD_POWER,
     CMD_REQUEST_DEVICE_INFO,
@@ -48,7 +47,7 @@ class ZoneState:
     power: bool | None = None
     muted: bool | None = None
     volume: float | None = None
-    source: int | None = None  # physical source number (S1..S16)
+    source: int | None = None  # masked source data byte (see SOURCE_BYTE_TO_NAME)
     name: str | None = None
     available: bool = False
 
@@ -237,9 +236,8 @@ class AxiumController:
             state.volume = protocol.volume_to_level(data[0])
             changed = True
         elif command == CMD_SOURCE and data:
-            source_byte = data[0] & SOURCE_ID_MASK
-            state.source = BYTE_TO_SOURCE_NUMBER.get(source_byte)
-            if data[0] & 0x80:
+            state.source = data[0] & SOURCE_ID_MASK
+            if data[0] & 0x80:  # bit 7 set means the zone is turned on
                 state.power = True
             changed = True
         elif command == CMD_ZONE_NAME and data:

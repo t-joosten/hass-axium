@@ -25,15 +25,16 @@ from .const import (
     CMD_VOLUME,
     CMD_VOLUME_DOWN,
     CMD_VOLUME_UP,
-    DEFAULT_SOURCE_COUNT,
+    DEFAULT_SOURCE_LIST,
     DOMAIN,
     MUTE_OFF,
     MUTE_ON,
     NAME_KEY,
     POWER_OFF,
     POWER_ON,
+    SOURCE_BYTE_TO_NAME,
     SOURCE_FLAG_TURN_ON,
-    SOURCE_NUMBER_TO_BYTE,
+    SOURCE_NAME_TO_BYTE,
     ZONE_KEY,
     ZONES_KEY,
 )
@@ -52,16 +53,12 @@ SUPPORT_AXIUM = (
     | MediaPlayerEntityFeature.SELECT_SOURCE
 )
 
-SOURCE_NAMES = [f"Source {n}" for n in range(1, DEFAULT_SOURCE_COUNT + 1)]
+SOURCE_NAMES = DEFAULT_SOURCE_LIST
 
 
 def _source_byte(source: str) -> int | None:
-    """Return the Source Selection data byte for a ``Source N`` name."""
-    try:
-        number = int(source.split()[-1])
-    except (ValueError, IndexError):
-        return None
-    return SOURCE_NUMBER_TO_BYTE.get(number)
+    """Return the Source Selection data byte for a source name."""
+    return SOURCE_NAME_TO_BYTE.get(source)
 
 
 async def async_setup_entry(
@@ -206,8 +203,8 @@ class AxiumZone(_AxiumBase):
     @property
     def source(self) -> str | None:
         """Return the currently selected source."""
-        number = self._controller.zone_state(self._zone).source
-        return None if number is None else f"Source {number}"
+        byte = self._controller.zone_state(self._zone).source
+        return None if byte is None else SOURCE_BYTE_TO_NAME.get(byte)
 
 
 class AxiumGroup(_AxiumBase):
@@ -267,7 +264,7 @@ class AxiumGroup(_AxiumBase):
         """Return the source only when all members agree."""
         sources = {s.source for s in self._states() if s.source is not None}
         if len(sources) == 1:
-            return f"Source {sources.pop()}"
+            return SOURCE_BYTE_TO_NAME.get(sources.pop())
         return None
 
     @property

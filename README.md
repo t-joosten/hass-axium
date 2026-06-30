@@ -24,7 +24,8 @@ from a keypad or the front panel (a `local_push` integration — no polling).
 - 🔌 Power on/off per zone (command `0x01`)
 - 🔇 Mute / unmute (command `0x02`)
 - 🔊 Volume set and step up/down (commands `0x04`, `0x11`, `0x12`)
-- 🎚️ Source selection, S1–S16 (command `0x03`)
+- 🎚️ Source selection, S1–S16 **and AirPlay** (command `0x03`)
+- 🎵 Works with **Music Assistant** for streaming via the amplifier's AirPlay input
 - 📡 Live state updates pushed from the amplifier (notifications)
 - ♻️ Automatic reconnection with backoff
 
@@ -138,9 +139,10 @@ Remember to choose **Save and finish** in the menu to apply your changes.
 
 ### Sources
 
-Sources are exposed as `Source 1` … `Source 8` and map to the amplifier's
-physical inputs S1–S16. Selecting a source also powers the zone on. You can
-rename sources from the Home Assistant entity settings.
+Sources are exposed as `Source 1` … `Source 8` (mapping to the amplifier's
+physical inputs S1–S16) plus **`AirPlay`** on amplifiers that support it.
+Selecting a source also powers the zone on. You can rename sources from the
+Home Assistant entity settings.
 
 ### Amplifier model & firmware
 
@@ -153,6 +155,74 @@ automatically with the detected **model** (e.g. *AX-800-X*, *AX-1250*,
 
 If the amplifier does not respond to the query, control still works and the
 device simply remains labelled generically as *Amplifier*.
+
+## Streaming music with Music Assistant (AirPlay)
+
+[Music Assistant](https://www.music-assistant.io/) streams audio by handing a
+player a URL to play, so an Axium zone — which only switches between physical
+inputs and controls volume/power — cannot itself appear as a Music Assistant
+player. The clean way to stream music to the amplifier is via **AirPlay**:
+
+Ethernet Axium amplifiers such as the **AX-800DAV** include an internal media
+player that is an **AirPlay receiver**. Music Assistant has a mature
+[AirPlay player provider](https://www.music-assistant.io/player-support/airplay/)
+that streams directly to it. So Music Assistant carries the audio, and this
+integration handles the amplifier side — powering the zone on and selecting the
+**AirPlay** source.
+
+**Setup**
+
+1. Make sure AirPlay is enabled on the amplifier.
+2. In Music Assistant, enable the **AirPlay** provider. It should discover the
+   amplifier as an AirPlay player.
+3. Add an automation so that when Music Assistant starts playing to the
+   amplifier's AirPlay player, the desired Axium zone powers on and switches to
+   the AirPlay source (and optionally powers off when playback stops):
+
+```yaml
+alias: "Axium: follow Music Assistant AirPlay (Living room)"
+triggers:
+  - trigger: state
+    entity_id: media_player.ax_800dav_airplay   # the AirPlay player in MA
+    to: "playing"
+    id: started
+  - trigger: state
+    entity_id: media_player.ax_800dav_airplay
+    to: ["idle", "off"]
+    for: "00:05:00"
+    id: stopped
+actions:
+  - choose:
+      - conditions: "{{ trigger.id == 'started' }}"
+        sequence:
+          # select_source also powers the zone on
+          - action: media_player.select_source
+            target:
+              entity_id: media_player.living_room   # the Axium zone (or group)
+            data:
+              source: AirPlay
+      - conditions: "{{ trigger.id == 'stopped' }}"
+        sequence:
+          - action: media_player.turn_off
+            target:
+              entity_id: media_player.living_room
+mode: single
+```
+
+> Replace the entity IDs with your own. Point the Axium target at a **zone
+> group** instead of a single zone to send the same AirPlay stream to several
+> rooms at once.
+
+**Good to know**
+
+- The amplifier's internal player is effectively a single stream, fanned to the
+  zone(s) that select AirPlay. For *different* music in different rooms at the
+  same time, use a separate streamer per input (e.g. one MA-capable streamer per
+  zone).
+- The AX-800DAV is an early-firmware device, so its AirPlay is likely AirPlay 1
+  (RAOP), which Music Assistant supports. If it does not appear in the AirPlay
+  provider, confirm AirPlay is enabled and that the amplifier and Music
+  Assistant server are on the same subnet.
 
 ## How it works
 
