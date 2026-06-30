@@ -23,6 +23,7 @@ from a keypad or the front panel (a `local_push` integration — no polling).
 - ▶️ **Transport + now-playing** on media sources — play/pause/next/previous, shuffle/repeat, and title/artist/album/cover-art/position
 - 🎛️ Per-zone **bass, treble, balance, max-volume limit, power-on volume, lip-sync delay** (number entities)
 - 🌙 **Auto power-on / auto-standby**, **preset/scene recall**, and **temperature + clipping diagnostics**
+- 🃏 **Source-centric dashboard card** — tap zone chips to assign them to a source, with transport/volume/mute
 - 🔎 Automatic **model and firmware detection** — no need to pick your amp
 - 🔌 Power on/off per zone (command `0x01`)
 - 🔇 Mute / unmute (command `0x02`)
@@ -341,6 +342,35 @@ integration — and:
 
 This integration's job is the amplifier side (power, volume, source). Music
 Assistant carries the audio over AirPlay.
+
+## Dashboard card (Axium Source Card)
+
+A custom Lovelace card is included for a **source-centric** view: one card per
+source shows every zone as a tappable chip. Tap a zone to start it on that
+source; because an Axium zone has a single source, this **automatically moves it
+off whatever source it was on** — so a zone is only ever "active" on one source
+card at a time. Tapping an active zone turns it off. The card also has
+previous / play-pause / next, mute and volume controls for the zones currently
+playing that source.
+
+It follows touch/UX guidance: chips use a clear *selected* state (accent fill +
+check), ≥40px tall with 8px spacing, and the transport buttons are 48px targets.
+
+**Install** — nothing to do. The integration **registers the card
+automatically**; just clear your browser cache / hard-refresh after installing
+or updating. (If it doesn't appear, add the resource manually: Settings →
+Dashboards → ⋮ → Resources → Add → URL `/axium/axium-source-card.js`, type
+**JavaScript Module**.)
+
+**Add a card** (one per source):
+
+```yaml
+type: custom:axium-source-card
+source: Apple TV
+```
+
+Zones are auto-detected (any zone whose source list includes the source). You
+can override with explicit `entities:` and a custom `name:`.
 
 ## How it works
 

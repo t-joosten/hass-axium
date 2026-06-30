@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
@@ -25,10 +26,34 @@ PLATFORMS: list[Platform] = [
 ]
 
 
+_CARD_URL = "/axium/axium-source-card.js"
+_CARD_PATH = "lovelace/axium-source-card.js"
+
+
+async def _async_register_card(hass: HomeAssistant) -> None:
+    """Serve and register the bundled Lovelace card (best effort, once)."""
+    if hass.data.get(f"{DOMAIN}_card_registered"):
+        return
+    hass.data[f"{DOMAIN}_card_registered"] = True
+    try:
+        from homeassistant.components.frontend import add_extra_js_url
+        from homeassistant.components.http import StaticPathConfig
+
+        path = Path(__file__).parent / _CARD_PATH
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(_CARD_URL, str(path), True)]
+        )
+        add_extra_js_url(hass, _CARD_URL)
+    except Exception as err:  # noqa: BLE001 - card is optional, never block setup
+        _LOGGER.debug("Could not auto-register the Axium dashboard card: %s", err)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Axium from a config entry."""
     host = entry.data[CONF_HOST]
     port = entry.data.get(CONF_PORT, DEFAULT_PORT)
+
+    await _async_register_card(hass)
 
     controller = AxiumController(host, port)
 
