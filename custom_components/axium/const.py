@@ -12,10 +12,12 @@ DEFAULT_NAME: Final = "Axium"
 
 # Configuration / option keys.
 CONF_ZONES: Final = "zones"
+CONF_SOURCES: Final = "sources"
 
-# Keys within a stored zone definition.
+# Keys within a stored zone / source definition.
 ZONE_KEY: Final = "zone"
 NAME_KEY: Final = "name"
+ID_KEY: Final = "id"
 
 # Axium command bytes (see AxiumCommsProtocol.pdf, section 2).
 CMD_POWER: Final = 0x01
@@ -27,8 +29,12 @@ CMD_VOLUME_UP: Final = 0x11
 CMD_VOLUME_DOWN: Final = 0x12
 CMD_REQUEST_DEVICE_INFO: Final = 0x14
 CMD_ZONE_NAME: Final = 0x1C
+CMD_SOURCE_NAME: Final = 0x29  # Source Name and Options (report/request/set)
 CMD_LINK_ZONES: Final = 0x30
 CMD_ZONE_NAME_REQUEST: Final = 0x38
+
+# Source Name and Options (0x29) flag byte (4th data byte) bits.
+SOURCE_NAME_FLAG_DISABLED: Final = 0x04  # source is disabled when set
 
 # Link zones (command 0x30) option bits. The amplifier keeps the linked zones
 # in sync for whichever of these are set.

@@ -133,6 +133,13 @@ class Simulator:
         self.clients: set[asyncio.StreamWriter] = set()
         # Active zone links: list of (set of zone numbers, options byte).
         self.links: list[tuple[set[int], int]] = []
+        # Enabled sources reported by this amp: source data byte -> name.
+        self.source_names: dict[int, str] = {
+            0x00: "CD player",
+            0x05: "Apple TV",
+            0x06: "Turntable",
+            0x10: "AirPlay",
+        }
 
     # -- frame production -------------------------------------------------
 
@@ -250,6 +257,22 @@ class Simulator:
                 writer.write(encode(0x1C, zone_byte, *z.name.encode("utf-8")))
                 await self._safe_drain(writer)
             return
+        if command == 0x29:  # Source Name and Options (request or set)
+            if len(data) <= 1:  # request: all sources, or one if an id is given
+                ids = [data[0]] if data else sorted(self.source_names)
+                for sid in ids:
+                    if sid in self.source_names:
+                        reply = self._source_name_frame(sid)
+                        writer.write(reply)
+                        log("-> reply  ", reply, f"source {sid}")
+                await self._safe_drain(writer)
+            elif len(data) >= 4:  # set the source name
+                sid = data[0]
+                name = bytes(data[4:]).decode("utf-8", "replace").rstrip("\x00")
+                self.source_names[sid] = name
+                print(f"   source {sid} renamed to '{name}'")
+                await self.broadcast(self._source_name_frame(sid), f"source {sid} name")
+            return
         if command == 0x30:  # Link zones (command, or request when 0x30 FF 20)
             if len(data) <= 1:  # request for the current groups
                 for grp, opts in self.links:
@@ -290,6 +313,11 @@ class Simulator:
             turn_on = bool(data[0] & 0x80)
             for z in self._expand(base, LINK_OPT_SOURCE):
                 await self.set_source(z, data[0], turn_on)
+
+    def _source_name_frame(self, source_id: int) -> bytes:
+        """Build a Source Name and Options (0x29) report for one source."""
+        name = self.source_names[source_id].encode("utf-8")
+        return encode(0x29, 0xFF, source_id, 0x00, 0x00, 0x00, *name)
 
     def _group_for(self, number: int) -> tuple[set[int], int]:
         """Return the link group and options for a zone, or (empty, 0)."""

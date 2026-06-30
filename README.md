@@ -24,7 +24,7 @@ from a keypad or the front panel (a `local_push` integration — no polling).
 - 🔌 Power on/off per zone (command `0x01`)
 - 🔇 Mute / unmute (command `0x02`)
 - 🔊 Volume set and step up/down (commands `0x04`, `0x11`, `0x12`)
-- 🎚️ Source selection, S1–S16 **and AirPlay** (command `0x03`)
+- 🎚️ Source selection with **auto-detected source names** (rename in HA, written back to the amp)
 - 🎵 Works with **Music Assistant** for streaming via the amplifier's AirPlay input
 - 📡 Live state updates pushed from the amplifier (notifications)
 - ♻️ Automatic reconnection with backoff
@@ -194,10 +194,16 @@ Two protocol rules apply:
 
 ### Sources
 
-Sources are exposed as `Source 1` … `Source 8` (mapping to the amplifier's
-physical inputs S1–S16) plus **`AirPlay`** on amplifiers that support it.
-Selecting a source also powers the zone on. You can rename sources from the
-Home Assistant entity settings.
+Sources are **auto-detected from the amplifier**: on setup the integration asks
+for each input's name and which inputs are enabled (disabled inputs are hidden),
+so your real source names (e.g. *Apple TV*, *Turntable*) appear instead of
+generic labels. If the amplifier reports nothing, it falls back to
+`Source 1`…`Source 8` plus `AirPlay`.
+
+You can **rename sources** in the integration's **Configure** dialog (the
+**Sources** field, `id=Name`). Renamed sources are **written back to the
+amplifier**, so the new names persist there too. Selecting a source also powers
+the zone on.
 
 ### Amplifier model & firmware
 

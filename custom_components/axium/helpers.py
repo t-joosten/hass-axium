@@ -12,10 +12,22 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 
-from .const import CONF_ZONES, NAME_KEY, ZONE_KEY
+from .const import (
+    CONF_SOURCES,
+    CONF_ZONES,
+    DEFAULT_SOURCE_COUNT,
+    ID_KEY,
+    NAME_KEY,
+    SOURCE_AIRPLAY_BYTE,
+    SOURCE_BYTE_TO_NAME,
+    SOURCE_NUMBER_TO_BYTE,
+    ZONE_KEY,
+)
 
 ZONE_MIN = 0
 ZONE_MAX = 95
+SOURCE_ID_MIN = 0
+SOURCE_ID_MAX = 63
 
 
 def default_zone_name(zone: int) -> str:
@@ -91,3 +103,96 @@ def get_zones(entry: ConfigEntry) -> list[dict[str, Any]]:
         return parse_zone_spec(raw)
     except ValueError:
         return []
+
+
+def default_source_name(source_id: int) -> str:
+    """Return a readable default name for a source data byte."""
+    return SOURCE_BYTE_TO_NAME.get(source_id, f"Source {source_id}")
+
+
+def default_sources() -> list[dict[str, Any]]:
+    """Return the fallback source list (S1..S8 plus AirPlay)."""
+    sources = [
+        {ID_KEY: SOURCE_NUMBER_TO_BYTE[n], NAME_KEY: f"Source {n}"}
+        for n in range(1, DEFAULT_SOURCE_COUNT + 1)
+    ]
+    sources.append({ID_KEY: SOURCE_AIRPLAY_BYTE, NAME_KEY: "AirPlay"})
+    return sources
+
+
+def parse_source_spec(raw: Any) -> list[dict[str, Any]]:
+    """Normalise a source specification into a list of source dicts.
+
+    Accepts the UI ``id=Name`` string form or a list of ``{"id", "name"}``
+    dicts. Order is preserved; duplicate ids raise. Raises ``ValueError`` on
+    invalid input.
+    """
+    sources: list[dict[str, Any]] = []
+    if isinstance(raw, str):
+        for part in raw.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if "=" in part:
+                id_text, name = part.split("=", 1)
+                source_id = int(id_text.strip())
+                name = name.strip() or default_source_name(source_id)
+            else:
+                source_id = int(part)
+                name = default_source_name(source_id)
+            sources.append({ID_KEY: source_id, NAME_KEY: name})
+    elif isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                source_id = int(item[ID_KEY])
+                name = str(item.get(NAME_KEY) or default_source_name(source_id))
+            else:
+                source_id = int(item)
+                name = default_source_name(source_id)
+            sources.append({ID_KEY: source_id, NAME_KEY: name})
+    else:
+        raise ValueError("unsupported source specification")
+
+    seen: set[int] = set()
+    for item in sources:
+        source_id = item[ID_KEY]
+        if not SOURCE_ID_MIN <= source_id <= SOURCE_ID_MAX:
+            raise ValueError(f"source id {source_id} out of range")
+        if source_id in seen:
+            raise ValueError(f"duplicate source id {source_id}")
+        seen.add(source_id)
+
+    if not sources:
+        raise ValueError("no sources specified")
+
+    return sources
+
+
+def format_source_spec(sources: list[dict[str, Any]]) -> str:
+    """Render a list of source dicts back into the ``id=Name`` UI string."""
+    return ", ".join(f"{item[ID_KEY]}={item[NAME_KEY]}" for item in sources)
+
+
+def sources_from_detection(detected: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build a source list from detected sources, keeping only enabled ones."""
+    sources: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for item in detected:
+        source_id = int(item[ID_KEY])
+        if not item.get("enabled", True) or source_id in seen:
+            continue
+        seen.add(source_id)
+        name = str(item.get(NAME_KEY) or "").strip() or default_source_name(source_id)
+        sources.append({ID_KEY: source_id, NAME_KEY: name})
+    return sources
+
+
+def get_sources(entry: ConfigEntry) -> list[dict[str, Any]]:
+    """Return the effective source list for a config entry (options win)."""
+    raw = entry.options.get(CONF_SOURCES, entry.data.get(CONF_SOURCES))
+    if raw is None:
+        return default_sources()
+    try:
+        return parse_source_spec(raw)
+    except ValueError:
+        return default_sources()

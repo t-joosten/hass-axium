@@ -23,17 +23,20 @@
     "step": {
       "init": {
         "title": "Axium Amplifier",
-        "description": "Edit the zones and their names. To group zones, use the grouping control on each player's card.",
+        "description": "Edit zone and source names. Renamed sources are also written back to the amplifier. To group zones, use the grouping control on each player's card.",
         "data": {
-          "zones": "Zones"
+          "zones": "Zones",
+          "sources": "Sources"
         },
         "data_description": {
-          "zones": "Comma-separated list of zones as number=Name, e.g. 1=Kitchen, 2=Living room, 3=Bedroom."
+          "zones": "Comma-separated list of zones as number=Name, e.g. 1=Kitchen, 2=Living room, 3=Bedroom.",
+          "sources": "Comma-separated list of sources as id=Name, e.g. 5=Apple TV, 6=Turntable."
         }
       }
     },
     "error": {
-      "invalid_zones": "Use a comma-separated list like 1=Kitchen, 2=Living room. Zone numbers must be unique and between 0 and 95."
+      "invalid_zones": "Use a comma-separated list like 1=Kitchen, 2=Living room. Zone numbers must be unique and between 0 and 95.",
+      "invalid_sources": "Use a comma-separated list like 5=Apple TV, 6=Turntable. Source ids must be unique and between 0 and 63."
     }
   }
 }

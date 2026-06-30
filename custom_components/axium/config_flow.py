@@ -20,17 +20,36 @@ from homeassistant.helpers import config_validation as cv
 from . import protocol
 from .const import (
     CMD_REQUEST_DEVICE_INFO,
+    CMD_SOURCE_NAME,
+    CONF_SOURCES,
     CONF_ZONES,
     DEFAULT_NAME,
     DEFAULT_PORT,
     DEFAULT_ZONE_COUNT,
     DEVICE_INFO_LIST_ZONES,
     DOMAIN,
+    ID_KEY,
+    NAME_KEY,
     RESP_DEVICE_INFO,
     ZONE_ALL,
 )
-from .controller import AxiumDeviceInfo, parse_device_info
-from .helpers import format_zone_spec, get_zones, parse_zone_spec, zones_from_numbers
+from .controller import (
+    AxiumController,
+    AxiumDeviceInfo,
+    parse_device_info,
+    parse_source_name,
+)
+from .helpers import (
+    default_sources,
+    format_source_spec,
+    format_zone_spec,
+    get_sources,
+    get_zones,
+    parse_source_spec,
+    parse_zone_spec,
+    sources_from_detection,
+    zones_from_numbers,
+)
 
 _CONNECT_TIMEOUT = 10.0
 _PROBE_TIMEOUT = 6.0
@@ -54,10 +73,12 @@ async def _async_probe_amplifier(host: str, port: int) -> AxiumDeviceInfo | None
         writer.write(
             protocol.encode(CMD_REQUEST_DEVICE_INFO, ZONE_ALL, DEVICE_INFO_LIST_ZONES)
         )
+        writer.write(protocol.encode(CMD_SOURCE_NAME, ZONE_ALL))  # request all names
         await writer.drain()
 
         device_info: AxiumDeviceInfo | None = None
         all_zones: set[int] = set()
+        sources: list[dict] = []
         end = loop.time() + _PROBE_TIMEOUT
         while True:
             remaining = end - loop.time()
@@ -77,13 +98,18 @@ async def _async_probe_amplifier(host: str, port: int) -> AxiumDeviceInfo | None
                 all_zones.update(info.zones)
                 if device_info is None:
                     # First reply (the directly-connected amp) labels the hub;
-                    # wait a short grace for other stack members to reply.
+                    # wait a short grace for other stack members and names.
                     device_info = info
                     end = min(end, loop.time() + _STACK_GRACE)
+            elif frame[0] == CMD_SOURCE_NAME:
+                parsed = parse_source_name(frame[2:])
+                if parsed is not None:
+                    sources.append(parsed)
 
         if device_info is None:
             return None
         device_info.zones = sorted(all_zones)
+        device_info.sources = sources
         return device_info
     finally:
         writer.close()
@@ -121,6 +147,7 @@ class AxiumConfigFlow(ConfigFlow, domain=DOMAIN):
                 numbers = device_info.zones or list(
                     range(1, DEFAULT_ZONE_COUNT + 1)
                 )
+                sources = sources_from_detection(device_info.sources) or default_sources()
                 return self.async_create_entry(
                     title=user_input[CONF_NAME],
                     data={
@@ -128,6 +155,7 @@ class AxiumConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_PORT: port,
                         CONF_NAME: user_input[CONF_NAME],
                         CONF_ZONES: zones_from_numbers(numbers),
+                        CONF_SOURCES: sources,
                     },
                 )
 
@@ -170,24 +198,50 @@ class AxiumOptionsFlow(OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Edit the zones; saves immediately."""
+        """Edit zone and source names; saves immediately."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            zones = sources = None
             try:
                 zones = parse_zone_spec(user_input[CONF_ZONES])
             except ValueError:
                 errors[CONF_ZONES] = "invalid_zones"
-            else:
-                return self.async_create_entry(data={CONF_ZONES: zones})
+            try:
+                sources = parse_source_spec(user_input[CONF_SOURCES])
+            except ValueError:
+                errors[CONF_SOURCES] = "invalid_sources"
+            if not errors:
+                await self._async_write_source_names(sources)
+                return self.async_create_entry(
+                    data={CONF_ZONES: zones, CONF_SOURCES: sources}
+                )
 
-        current = get_zones(self._config_entry)
         schema = vol.Schema(
             {
                 vol.Required(
-                    CONF_ZONES, default=format_zone_spec(current)
+                    CONF_ZONES,
+                    default=format_zone_spec(get_zones(self._config_entry)),
+                ): cv.string,
+                vol.Required(
+                    CONF_SOURCES,
+                    default=format_source_spec(get_sources(self._config_entry)),
                 ): cv.string,
             }
         )
         return self.async_show_form(
             step_id="init", data_schema=schema, errors=errors
         )
+
+    async def _async_write_source_names(
+        self, sources: list[dict[str, Any]]
+    ) -> None:
+        """Write changed source names back to the amplifier, if connected."""
+        controller: AxiumController | None = self.hass.data.get(DOMAIN, {}).get(
+            self._config_entry.entry_id
+        )
+        if controller is None:
+            return
+        previous = {item[ID_KEY]: item[NAME_KEY] for item in get_sources(self._config_entry)}
+        for item in sources:
+            if previous.get(item[ID_KEY]) != item[NAME_KEY]:
+                await controller.async_set_source_name(item[ID_KEY], item[NAME_KEY])

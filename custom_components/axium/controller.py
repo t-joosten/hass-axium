@@ -21,6 +21,7 @@ from .const import (
     CMD_POWER,
     CMD_REQUEST_DEVICE_INFO,
     CMD_SOURCE,
+    CMD_SOURCE_NAME,
     CMD_VOLUME,
     CMD_ZONE_NAME,
     DEVICE_INFO_LIST_ZONES,
@@ -34,6 +35,7 @@ from .const import (
     POWER_ON_VALUES,
     RESP_DEVICE_INFO,
     SOURCE_ID_MASK,
+    SOURCE_NAME_FLAG_DISABLED,
     ZONE_ALL,
 )
 
@@ -67,6 +69,7 @@ class AxiumDeviceInfo:
     unit_id: int | None = None
     zones: list[int] = field(default_factory=list)
     link_groups: list[list[int]] = field(default_factory=list)
+    sources: list[dict] = field(default_factory=list)  # {id, name, enabled}
 
 
 CallbackType = Callable[[], None]
@@ -95,6 +98,26 @@ def parse_device_info(data: bytes) -> AxiumDeviceInfo | None:
         unit_id=(data[3] << 8 | data[4]) if len(data) >= 5 else None,
         zones=zones,
     )
+
+
+def parse_source_name(data: bytes) -> dict | None:
+    """Parse a Source Name and Options (0x29) report into a dict.
+
+    Layout: source ID, a (legacy) byte, device-specific byte, flags byte, then
+    the UTF-8 name. Returns ``{id, name, enabled, device, flags}`` or ``None``
+    if it is not a full report (a 0/1-byte frame is a request, not a report).
+    """
+    if len(data) < 4:
+        return None
+    flags = data[3]
+    name = data[4:].decode("utf-8", errors="replace").rstrip("\x00")
+    return {
+        "id": data[0],
+        "name": name,
+        "enabled": not flags & SOURCE_NAME_FLAG_DISABLED,
+        "device": data[2],
+        "flags": flags,
+    }
 
 
 def parse_link_group(data: bytes) -> list[int] | None:
@@ -134,6 +157,8 @@ class AxiumController:
         self._links: list[tuple[set[int], int]] = []
         # Map of zone number -> media_player entity_id, for group membership.
         self._zone_entity_ids: dict[int, str] = {}
+        # Cached per-source (device byte, flags) so writes preserve options.
+        self._source_meta: dict[int, tuple[int, int]] = {}
 
     @property
     def host(self) -> str:
@@ -224,6 +249,7 @@ class AxiumController:
             self._notify_all()
             await self._request_device_info()
             await self._request_link_groups()
+            await self._request_source_names()
             try:
                 await self._read_loop()
             except asyncio.CancelledError:
@@ -283,6 +309,11 @@ class AxiumController:
             return
         elif command == CMD_LINK_ZONES:
             self._update_link(data)
+            return
+        elif command == CMD_SOURCE_NAME:
+            info = parse_source_name(data)
+            if info is not None:
+                self._source_meta[info["id"]] = (info["device"], info["flags"])
             return
 
         if changed:
@@ -438,6 +469,27 @@ class AxiumController:
     async def _request_link_groups(self) -> None:
         """Ask the amplifier for its current zone groups (command 0x30)."""
         await self.async_send(CMD_LINK_ZONES, ZONE_ALL, LINK_REQUEST_GROUPED)
+
+    async def _request_source_names(self) -> None:
+        """Ask the amplifier for all source names (command 0x29, no data)."""
+        await self.async_send(CMD_SOURCE_NAME, ZONE_ALL)
+
+    async def async_set_source_name(self, source_id: int, name: str) -> None:
+        """Write a source name to the amplifier (command 0x29).
+
+        Preserves the source's device byte and flags from the last report so the
+        write does not change enabled state or other options.
+        """
+        device, flags = self._source_meta.get(source_id, (0x00, 0x00))
+        await self.async_send(
+            CMD_SOURCE_NAME,
+            ZONE_ALL,
+            source_id,
+            0x00,
+            device,
+            flags,
+            *name.encode("utf-8"),
+        )
 
     async def _request_device_info(self) -> None:
         """Ask the directly-connected amplifier to identify itself (0x14)."""
