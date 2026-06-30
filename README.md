@@ -21,7 +21,7 @@ from a keypad or the front panel (a `local_push` integration — no polling).
 - 🏷️ **All zones auto-created** (discovered from the amp), each its own device — just rename them (e.g. *Kitchen*, *Living room*)
 - 🧩 **Group zones from the player card** (Sonos-style join/unjoin) — linked on the amplifier and kept in sync by the amp
 - ▶️ **Transport + now-playing** on media sources — play/pause/next/previous, shuffle/repeat, and title/artist/album/cover-art/position
-- 🎛️ **Bass, treble and balance** per zone (number entities)
+- 🎛️ Per-zone **bass, treble, balance, max-volume limit, power-on volume, lip-sync delay** (number entities)
 - 🔎 Automatic **model and firmware detection** — no need to pick your amp
 - 🔌 Power on/off per zone (command `0x01`)
 - 🔇 Mute / unmute (command `0x02`)
@@ -215,11 +215,14 @@ play / pause / stop, next / previous, shuffle and repeat, plus track title,
 artist, album, cover art and a progress bar (Media Control `0x3D` / Media Status
 `0x3E`). On other sources (e.g. a CD input) these simply don't appear.
 
-### Tone controls
+### Per-zone controls (number entities)
 
-Each zone gets **Bass**, **Treble** and **Balance** number entities
-(commands `0x05`/`0x06`/`0x07`), shown on the zone's device page — adjust them
-like any Home Assistant number/slider.
+Each zone's device page exposes these sliders:
+
+- **Bass**, **Treble**, **Balance** (`0x05`/`0x06`/`0x07`)
+- **Maximum volume** — a volume limit, e.g. for kids' rooms (`0x0D`)
+- **Power-on volume** — the volume a zone starts at (`0x48`)
+- **Audio delay** — lip-sync delay in 5 ms steps, for TV zones (`0x31`)
 
 ### Amplifier model & firmware
 

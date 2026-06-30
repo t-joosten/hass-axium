@@ -16,9 +16,13 @@ import logging
 
 from . import protocol
 from .const import (
+    AUDIO_DELAY_STEP,
+    CMD_AUDIO_DELAY,
     CMD_BALANCE,
     CMD_BASS,
     CMD_LINK_ZONES,
+    CMD_MAX_VOLUME,
+    CMD_POWER_ON_VOLUME,
     CMD_MEDIA_CONTROL,
     CMD_MEDIA_STATUS,
     CMD_MEDIA_STATUS_REQUEST,
@@ -60,6 +64,7 @@ from .const import (
     RESP_DEVICE_INFO,
     SOURCE_ID_MASK,
     SOURCE_NAME_FLAG_DISABLED,
+    VOLUME_MAX,
     ZONE_ALL,
 )
 
@@ -83,6 +88,9 @@ class ZoneState:
     bass: int | None = None
     treble: int | None = None
     balance: int | None = None
+    max_volume: int | None = None  # percent
+    power_on_volume: int | None = None  # percent
+    audio_delay: int | None = None  # milliseconds
 
 
 @dataclass
@@ -359,6 +367,15 @@ class AxiumController:
             changed = True
         elif command == CMD_BALANCE and data:
             state.balance = protocol.from_signed_byte(data[0])
+            changed = True
+        elif command == CMD_MAX_VOLUME and data:
+            state.max_volume = round(data[0] / VOLUME_MAX * 100)
+            changed = True
+        elif command == CMD_POWER_ON_VOLUME and data:
+            state.power_on_volume = round(data[0] / VOLUME_MAX * 100)
+            changed = True
+        elif command == CMD_AUDIO_DELAY and data:
+            state.audio_delay = data[0] * AUDIO_DELAY_STEP
             changed = True
         elif command == CMD_ZONE_NAME and data:
             state.name = data.decode("utf-8", errors="replace").rstrip("\x00") or None

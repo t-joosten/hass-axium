@@ -108,9 +108,9 @@ class Zone:
         self.muted = False
         self.volume = 80  # v1 (0..160), ~50%
         self.source = 0x05  # Source 1
-        self.bass = 0
-        self.treble = 0
-        self.balance = 0
+        # Single-byte per-zone settings keyed by command byte (raw values):
+        # bass/treble/balance, max volume, audio delay, power-on volume.
+        self.settings = {0x05: 0, 0x06: 0, 0x07: 0, 0x0D: 0xA0, 0x31: 0, 0x48: 0x40}
 
     def describe(self) -> str:
         """Return a one-line human summary of the zone state."""
@@ -300,19 +300,20 @@ class Simulator:
                 writer.write(encode(0x1C, zone_byte, *z.name.encode("utf-8")))
                 await self._safe_drain(writer)
             return
-        if command in (0x05, 0x06, 0x07):  # Bass / Treble / Balance
-            attr = {0x05: "bass", 0x06: "treble", 0x07: "balance"}[command]
+        # Single-byte per-zone settings: bass/treble/balance, max volume,
+        # audio delay, power-on volume.
+        if command in (0x05, 0x06, 0x07, 0x0D, 0x31, 0x48):
             for z in self._resolve_zones(zone_byte):
                 if data:  # set
-                    value = data[0] - 0x100 if data[0] >= 0x80 else data[0]
-                    setattr(z, attr, value)
+                    z.settings[command] = data[0]
                     await self.broadcast(
-                        encode(command, z.number, data[0]), f"{z.name} {attr}={value}"
+                        encode(command, z.number, data[0]),
+                        f"{z.name} {command:02X}={data[0]}",
                     )
                 else:  # request -> reply with current value
-                    reply = encode(command, z.number, getattr(z, attr) & 0xFF)
+                    reply = encode(command, z.number, z.settings.get(command, 0))
                     writer.write(reply)
-                    log("-> reply  ", reply, f"{z.name} {attr}")
+                    log("-> reply  ", reply, f"{z.name} {command:02X}")
             if not data:
                 await self._safe_drain(writer)
             return

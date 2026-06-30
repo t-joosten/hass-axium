@@ -27,6 +27,13 @@ CMD_VOLUME: Final = 0x04
 CMD_BASS: Final = 0x05
 CMD_TREBLE: Final = 0x06
 CMD_BALANCE: Final = 0x07
+CMD_MAX_VOLUME: Final = 0x0D
+CMD_AUDIO_DELAY: Final = 0x31
+CMD_POWER_ON_VOLUME: Final = 0x48
+
+# Audio delay (0x31) is in 5 ms steps, one byte (max 255 -> 1275 ms).
+AUDIO_DELAY_STEP: Final = 5
+AUDIO_DELAY_MAX: Final = 255 * AUDIO_DELAY_STEP
 CMD_REQUEST_PROTOCOL: Final = 0x08
 CMD_VOLUME_UP: Final = 0x11
 CMD_VOLUME_DOWN: Final = 0x12
