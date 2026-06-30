@@ -16,12 +16,18 @@ import logging
 
 from . import protocol
 from .const import (
+    CMD_BALANCE,
+    CMD_BASS,
     CMD_LINK_ZONES,
+    CMD_MEDIA_CONTROL,
+    CMD_MEDIA_STATUS,
+    CMD_MEDIA_STATUS_REQUEST,
     CMD_MUTE,
     CMD_POWER,
     CMD_REQUEST_DEVICE_INFO,
     CMD_SOURCE,
     CMD_SOURCE_NAME,
+    CMD_TREBLE,
     CMD_VOLUME,
     CMD_ZONE_NAME,
     DEVICE_INFO_LIST_ZONES,
@@ -31,8 +37,26 @@ from .const import (
     DEVICE_TYPES,
     LINK_OPTIONS_DEFAULT,
     LINK_REQUEST_GROUPED,
+    MEDIA_REPEAT,
+    MEDIA_SOURCE_BYTES,
+    MS_ALBUM,
+    MS_ART,
+    MS_ARTIST,
+    MS_FLAG_ACTIVE,
+    MS_FLAG_AVAILABLE,
+    MS_FLAG_PAUSED,
+    MS_FLAG_REPEAT_DISC,
+    MS_FLAG_REPEAT_TRACK,
+    MS_FLAG_SHUFFLE,
+    MS_FLAGS,
+    MS_LENGTH,
+    MS_POSITION,
+    MS_TITLE,
     POWER_OFF_VALUES,
     POWER_ON_VALUES,
+    REPEAT_ALL,
+    REPEAT_OFF,
+    REPEAT_TRACK,
     RESP_DEVICE_INFO,
     SOURCE_ID_MASK,
     SOURCE_NAME_FLAG_DISABLED,
@@ -56,6 +80,26 @@ class ZoneState:
     source: int | None = None  # masked source data byte (see SOURCE_BYTE_TO_NAME)
     name: str | None = None
     available: bool = False
+    bass: int | None = None
+    treble: int | None = None
+    balance: int | None = None
+
+
+@dataclass
+class MediaState:
+    """Cached now-playing state for a media source."""
+
+    available: bool = False
+    playing: bool = False
+    paused: bool = False
+    title: str | None = None
+    artist: str | None = None
+    album: str | None = None
+    art: str | None = None
+    position: int | None = None
+    duration: int | None = None
+    shuffle: bool = False
+    repeat: str = "off"  # off | one | all
 
 
 @dataclass
@@ -159,6 +203,8 @@ class AxiumController:
         self._zone_entity_ids: dict[int, str] = {}
         # Cached per-source (device byte, flags) so writes preserve options.
         self._source_meta: dict[int, tuple[int, int]] = {}
+        # Now-playing state keyed by media source data byte.
+        self._media: dict[int, MediaState] = {}
 
     @property
     def host(self) -> str:
@@ -297,9 +343,22 @@ class AxiumController:
             state.volume = protocol.volume_to_level(data[0])
             changed = True
         elif command == CMD_SOURCE and data:
-            state.source = data[0] & SOURCE_ID_MASK
+            new_source = data[0] & SOURCE_ID_MASK
+            if new_source != state.source and new_source in MEDIA_SOURCE_BYTES:
+                # Pull now-playing details when a media source is selected.
+                asyncio.ensure_future(self.async_request_media_status(new_source))
+            state.source = new_source
             if data[0] & 0x80:  # bit 7 set means the zone is turned on
                 state.power = True
+            changed = True
+        elif command == CMD_BASS and data:
+            state.bass = protocol.from_signed_byte(data[0])
+            changed = True
+        elif command == CMD_TREBLE and data:
+            state.treble = protocol.from_signed_byte(data[0])
+            changed = True
+        elif command == CMD_BALANCE and data:
+            state.balance = protocol.from_signed_byte(data[0])
             changed = True
         elif command == CMD_ZONE_NAME and data:
             state.name = data.decode("utf-8", errors="replace").rstrip("\x00") or None
@@ -314,6 +373,9 @@ class AxiumController:
             info = parse_source_name(data)
             if info is not None:
                 self._source_meta[info["id"]] = (info["device"], info["flags"])
+            return
+        elif command == CMD_MEDIA_STATUS and len(data) >= 2:
+            self._handle_media_status(data)
             return
 
         if changed:
@@ -338,6 +400,49 @@ class AxiumController:
         )
         if self._device_info_callback is not None:
             self._device_info_callback(info)
+
+    def _handle_media_status(self, data: bytes) -> None:
+        """Update now-playing state from a Media Status (0x3E) notification."""
+        source = data[0]
+        param = data[1]
+        value = data[2:]
+        media = self._media.setdefault(source, MediaState())
+
+        def _text() -> str | None:
+            return value.decode("utf-8", errors="replace").rstrip("\x00") or None
+
+        if param == MS_FLAGS and value:
+            flags = value[0]
+            media.available = bool(flags & MS_FLAG_AVAILABLE)
+            media.paused = bool(flags & MS_FLAG_PAUSED)
+            media.playing = bool(flags & MS_FLAG_ACTIVE) and not media.paused
+            media.shuffle = bool(flags & MS_FLAG_SHUFFLE)
+            if flags & MS_FLAG_REPEAT_TRACK:
+                media.repeat = "one"
+            elif flags & MS_FLAG_REPEAT_DISC:
+                media.repeat = "all"
+            else:
+                media.repeat = "off"
+        elif param == MS_ARTIST:
+            media.artist = _text()
+        elif param == MS_ALBUM:
+            media.album = _text()
+        elif param == MS_TITLE:
+            media.title = _text()
+        elif param == MS_ART:
+            media.art = _text()
+        elif param == MS_POSITION and len(value) >= 2:
+            media.position = value[0] << 8 | value[1]
+        elif param == MS_LENGTH and len(value) >= 2:
+            media.duration = value[0] << 8 | value[1]
+
+        for zone, state in self._states.items():
+            if state.source == source:
+                self._notify(zone)
+
+    def media_state(self, source: int) -> MediaState:
+        """Return (creating if needed) the cached media state for a source."""
+        return self._media.setdefault(source, MediaState())
 
     def _update_link(self, data: bytes) -> None:
         """Apply a Link zones (0x30) frame to the live link state.
@@ -473,6 +578,25 @@ class AxiumController:
     async def _request_source_names(self) -> None:
         """Ask the amplifier for all source names (command 0x29, no data)."""
         await self.async_send(CMD_SOURCE_NAME, ZONE_ALL)
+
+    async def async_media_control(
+        self, source: int, control: int, *extra: int
+    ) -> None:
+        """Send a Media Control command (0x3D) for a media source."""
+        await self.async_send(CMD_MEDIA_CONTROL, ZONE_ALL, source, control, *extra)
+
+    async def async_set_repeat(self, source: int, repeat: str) -> None:
+        """Set the repeat mode for a media source."""
+        value = {"one": REPEAT_TRACK, "all": REPEAT_ALL}.get(repeat, REPEAT_OFF)
+        await self.async_media_control(source, MEDIA_REPEAT, value)
+
+    async def async_request_media_status(self, source: int) -> None:
+        """Request now-playing details for a media source (0x3F).
+
+        The two-byte parameter bitfield selects play flags (bit 0), artist,
+        album, title, cover art, position and length (bits 5-10) → 0x07E1.
+        """
+        await self.async_send(CMD_MEDIA_STATUS_REQUEST, ZONE_ALL, source, 0x07, 0xE1)
 
     async def async_set_source_name(self, source_id: int, name: str) -> None:
         """Write a source name to the amplifier (command 0x29).

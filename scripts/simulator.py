@@ -108,6 +108,9 @@ class Zone:
         self.muted = False
         self.volume = 80  # v1 (0..160), ~50%
         self.source = 0x05  # Source 1
+        self.bass = 0
+        self.treble = 0
+        self.balance = 0
 
     def describe(self) -> str:
         """Return a one-line human summary of the zone state."""
@@ -140,6 +143,46 @@ class Simulator:
             0x06: "Turntable",
             0x10: "AirPlay",
         }
+        # Now-playing state for media sources (source byte -> dict).
+        self.media: dict[int, dict] = {}
+
+    @staticmethod
+    def _new_media() -> dict:
+        """Return a default now-playing record."""
+        return {
+            "playing": False,
+            "paused": False,
+            "title": "Test Track",
+            "artist": "Test Artist",
+            "album": "Test Album",
+            "position": 0,
+            "duration": 180,
+            "shuffle": False,
+            "repeat": "off",
+        }
+
+    def _media_status_frames(self, source: int) -> list[bytes]:
+        """Build Media Status (0x3E) frames describing a source's now-playing."""
+        m = self.media.setdefault(source, self._new_media())
+        flags = 0x01  # available
+        if m["playing"]:
+            flags |= 0x04
+        if m["paused"]:
+            flags |= 0x04 | 0x08
+        if m["shuffle"]:
+            flags |= 0x80
+        if m["repeat"] == "one":
+            flags |= 0x20
+        elif m["repeat"] == "all":
+            flags |= 0x40
+        return [
+            encode(0x3E, 0xFF, source, 0x00, flags),
+            encode(0x3E, 0xFF, source, 0x05, *m["artist"].encode("utf-8")),
+            encode(0x3E, 0xFF, source, 0x06, *m["album"].encode("utf-8")),
+            encode(0x3E, 0xFF, source, 0x07, *m["title"].encode("utf-8")),
+            encode(0x3E, 0xFF, source, 0x09, (m["position"] >> 8) & 0xFF, m["position"] & 0xFF),
+            encode(0x3E, 0xFF, source, 0x0A, (m["duration"] >> 8) & 0xFF, m["duration"] & 0xFF),
+        ]
 
     # -- frame production -------------------------------------------------
 
@@ -256,6 +299,53 @@ class Simulator:
             if z:
                 writer.write(encode(0x1C, zone_byte, *z.name.encode("utf-8")))
                 await self._safe_drain(writer)
+            return
+        if command in (0x05, 0x06, 0x07):  # Bass / Treble / Balance
+            attr = {0x05: "bass", 0x06: "treble", 0x07: "balance"}[command]
+            for z in self._resolve_zones(zone_byte):
+                if data:  # set
+                    value = data[0] - 0x100 if data[0] >= 0x80 else data[0]
+                    setattr(z, attr, value)
+                    await self.broadcast(
+                        encode(command, z.number, data[0]), f"{z.name} {attr}={value}"
+                    )
+                else:  # request -> reply with current value
+                    reply = encode(command, z.number, getattr(z, attr) & 0xFF)
+                    writer.write(reply)
+                    log("-> reply  ", reply, f"{z.name} {attr}")
+            if not data:
+                await self._safe_drain(writer)
+            return
+        if command == 0x3F and data:  # Media Status request
+            for frame_out in self._media_status_frames(data[0]):
+                writer.write(frame_out)
+                log("-> reply  ", frame_out, "media status")
+            await self._safe_drain(writer)
+            return
+        if command == 0x3D and len(data) >= 2:  # Media Control
+            source, ctrl = data[0], data[1]
+            m = self.media.setdefault(source, self._new_media())
+            if ctrl == 0x01:  # play
+                m["playing"], m["paused"] = True, False
+            elif ctrl == 0x02:  # pause/resume
+                if m["playing"]:
+                    m["playing"], m["paused"] = False, True
+                else:
+                    m["playing"], m["paused"] = True, False
+            elif ctrl == 0x03:  # stop
+                m["playing"], m["paused"], m["position"] = False, False, 0
+            elif ctrl == 0x04:  # previous
+                m["title"], m["position"] = "Previous Track", 0
+            elif ctrl == 0x05:  # next
+                m["title"], m["position"] = "Next Track", 0
+            elif ctrl == 0x06 and len(data) >= 3:  # repeat
+                m["repeat"] = {0: "off", 1: "one", 2: "all"}.get(data[2], "off")
+            elif ctrl == 0x08:  # shuffle
+                m["shuffle"] = (
+                    not m["shuffle"] if len(data) < 3 or data[2] == 2 else bool(data[2])
+                )
+            for frame_out in self._media_status_frames(source):
+                await self.broadcast(frame_out, "media")
             return
         if command == 0x29:  # Source Name and Options (request or set)
             if len(data) <= 1:  # request: all sources, or one if an id is given

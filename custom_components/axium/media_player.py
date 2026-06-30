@@ -10,15 +10,19 @@ from __future__ import annotations
 
 import logging
 
+from datetime import datetime
+
 from homeassistant.components.media_player import (
     MediaPlayerEntity,
     MediaPlayerEntityFeature,
     MediaPlayerState,
+    RepeatMode,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CMD_MUTE,
@@ -29,6 +33,13 @@ from .const import (
     CMD_VOLUME_UP,
     DOMAIN,
     ID_KEY,
+    MEDIA_NEXT,
+    MEDIA_PAUSE,
+    MEDIA_PLAY,
+    MEDIA_PREVIOUS,
+    MEDIA_SHUFFLE,
+    MEDIA_SOURCE_BYTES,
+    MEDIA_STOP,
     MUTE_OFF,
     MUTE_ON,
     NAME_KEY,
@@ -51,6 +62,17 @@ SUPPORT_AXIUM = (
     | MediaPlayerEntityFeature.VOLUME_MUTE
     | MediaPlayerEntityFeature.SELECT_SOURCE
     | MediaPlayerEntityFeature.GROUPING
+)
+
+# Added only while the zone is on a media-player source (AirPlay / Media Player).
+SUPPORT_MEDIA = (
+    MediaPlayerEntityFeature.PLAY
+    | MediaPlayerEntityFeature.PAUSE
+    | MediaPlayerEntityFeature.STOP
+    | MediaPlayerEntityFeature.NEXT_TRACK
+    | MediaPlayerEntityFeature.PREVIOUS_TRACK
+    | MediaPlayerEntityFeature.SHUFFLE_SET
+    | MediaPlayerEntityFeature.REPEAT_SET
 )
 
 
@@ -84,7 +106,6 @@ class AxiumZone(MediaPlayerEntity):
 
     _attr_has_entity_name = True
     _attr_name = None
-    _attr_supported_features = SUPPORT_AXIUM
     _attr_should_poll = False
 
     def __init__(
@@ -103,6 +124,8 @@ class AxiumZone(MediaPlayerEntity):
         self._attr_source_list = source_names
         self._name_by_byte = name_by_byte
         self._byte_by_name = byte_by_name
+        self._media_position: int | None = None
+        self._media_position_updated: datetime | None = None
         self._attr_unique_id = f"{entry.entry_id}_zone_{zone}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"{entry.entry_id}_zone_{zone}")},
@@ -121,8 +144,30 @@ class AxiumZone(MediaPlayerEntity):
 
     @callback
     def _handle_update(self) -> None:
-        """Write state when the zone (or its group) changes."""
+        """Write state when the zone (or its media) changes."""
+        source = self._media_source
+        position = (
+            self._controller.media_state(source).position
+            if source is not None
+            else None
+        )
+        if position != self._media_position:
+            self._media_position = position
+            self._media_position_updated = dt_util.utcnow()
         self.async_write_ha_state()
+
+    @property
+    def _media_source(self) -> int | None:
+        """Return the current source byte if it is a media-player source."""
+        byte = self._controller.zone_state(self._zone).source
+        return byte if byte in MEDIA_SOURCE_BYTES else None
+
+    @property
+    def supported_features(self) -> MediaPlayerEntityFeature:
+        """Add transport features while a media source is selected."""
+        if self._media_source is not None:
+            return SUPPORT_AXIUM | SUPPORT_MEDIA
+        return SUPPORT_AXIUM
 
     @property
     def available(self) -> bool:
@@ -131,7 +176,14 @@ class AxiumZone(MediaPlayerEntity):
 
     @property
     def state(self) -> MediaPlayerState | None:
-        """Return the power state of the zone."""
+        """Return the playback/power state of the zone."""
+        source = self._media_source
+        if source is not None:
+            media = self._controller.media_state(source)
+            if media.playing:
+                return MediaPlayerState.PLAYING
+            if media.paused:
+                return MediaPlayerState.PAUSED
         power = self._controller.zone_state(self._zone).power
         if power is None:
             return None
@@ -212,3 +264,107 @@ class AxiumZone(MediaPlayerEntity):
     async def async_unjoin_player(self) -> None:
         """Remove this zone from its group on the amplifier."""
         await self._controller.async_unjoin(self._zone)
+
+    # -- now playing -----------------------------------------------------
+
+    @property
+    def media_title(self) -> str | None:
+        """Title of the current track."""
+        source = self._media_source
+        return None if source is None else self._controller.media_state(source).title
+
+    @property
+    def media_artist(self) -> str | None:
+        """Artist of the current track."""
+        source = self._media_source
+        return None if source is None else self._controller.media_state(source).artist
+
+    @property
+    def media_album_name(self) -> str | None:
+        """Album of the current track."""
+        source = self._media_source
+        return None if source is None else self._controller.media_state(source).album
+
+    @property
+    def media_image_url(self) -> str | None:
+        """Cover art URL for the current track."""
+        source = self._media_source
+        if source is None:
+            return None
+        art = self._controller.media_state(source).art
+        if not art:
+            return None
+        if art.startswith(("http://", "https://")):
+            return art
+        return f"http://{self._controller.host}/artwork/{art}"
+
+    @property
+    def media_position(self) -> int | None:
+        """Playback position in seconds."""
+        source = self._media_source
+        return None if source is None else self._controller.media_state(source).position
+
+    @property
+    def media_position_updated_at(self) -> datetime | None:
+        """When the playback position was last updated."""
+        return self._media_position_updated if self._media_source is not None else None
+
+    @property
+    def media_duration(self) -> int | None:
+        """Track length in seconds."""
+        source = self._media_source
+        return None if source is None else self._controller.media_state(source).duration
+
+    @property
+    def shuffle(self) -> bool | None:
+        """Whether shuffle is enabled."""
+        source = self._media_source
+        return None if source is None else self._controller.media_state(source).shuffle
+
+    @property
+    def repeat(self) -> RepeatMode | None:
+        """Current repeat mode."""
+        source = self._media_source
+        if source is None:
+            return None
+        mode = self._controller.media_state(source).repeat
+        return {
+            "one": RepeatMode.ONE,
+            "all": RepeatMode.ALL,
+        }.get(mode, RepeatMode.OFF)
+
+    async def async_media_play(self) -> None:
+        """Resume playback."""
+        await self._async_media_control(MEDIA_PLAY)
+
+    async def async_media_pause(self) -> None:
+        """Pause playback."""
+        await self._async_media_control(MEDIA_PAUSE)
+
+    async def async_media_stop(self) -> None:
+        """Stop playback."""
+        await self._async_media_control(MEDIA_STOP)
+
+    async def async_media_next_track(self) -> None:
+        """Skip to the next track."""
+        await self._async_media_control(MEDIA_NEXT)
+
+    async def async_media_previous_track(self) -> None:
+        """Return to the previous track."""
+        await self._async_media_control(MEDIA_PREVIOUS)
+
+    async def async_set_shuffle(self, shuffle: bool) -> None:
+        """Enable or disable shuffle."""
+        await self._async_media_control(MEDIA_SHUFFLE, 1 if shuffle else 0)
+
+    async def async_set_repeat(self, repeat: RepeatMode) -> None:
+        """Set the repeat mode."""
+        source = self._media_source
+        if source is not None:
+            await self._controller.async_set_repeat(source, str(repeat))
+
+    async def _async_media_control(self, control: int, *extra: int) -> None:
+        """Send a media control command for the active media source."""
+        source = self._media_source
+        if source is not None:
+            await self._controller.async_media_control(source, control, *extra)

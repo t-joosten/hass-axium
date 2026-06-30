@@ -20,6 +20,8 @@ from a keypad or the front panel (a `local_push` integration — no polling).
 
 - 🏷️ **All zones auto-created** (discovered from the amp), each its own device — just rename them (e.g. *Kitchen*, *Living room*)
 - 🧩 **Group zones from the player card** (Sonos-style join/unjoin) — linked on the amplifier and kept in sync by the amp
+- ▶️ **Transport + now-playing** on media sources — play/pause/next/previous, shuffle/repeat, and title/artist/album/cover-art/position
+- 🎛️ **Bass, treble and balance** per zone (number entities)
 - 🔎 Automatic **model and firmware detection** — no need to pick your amp
 - 🔌 Power on/off per zone (command `0x01`)
 - 🔇 Mute / unmute (command `0x02`)
@@ -204,6 +206,20 @@ You can **rename sources** in the integration's **Configure** dialog (the
 **Sources** field, `id=Name`). Renamed sources are **written back to the
 amplifier**, so the new names persist there too. Selecting a source also powers
 the zone on.
+
+### Now playing & transport
+
+When a zone is on an internal **media-player** source (AirPlay or *Media Player
+1–8*), the zone's card gains **transport controls and now-playing info**:
+play / pause / stop, next / previous, shuffle and repeat, plus track title,
+artist, album, cover art and a progress bar (Media Control `0x3D` / Media Status
+`0x3E`). On other sources (e.g. a CD input) these simply don't appear.
+
+### Tone controls
+
+Each zone gets **Bass**, **Treble** and **Balance** number entities
+(commands `0x05`/`0x06`/`0x07`), shown on the zone's device page — adjust them
+like any Home Assistant number/slider.
 
 ### Amplifier model & firmware
 

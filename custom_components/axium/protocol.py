@@ -70,6 +70,16 @@ def level_to_volume(level: float) -> int:
     return max(0, min(VOLUME_MAX, round(level * VOLUME_MAX)))
 
 
+def to_signed_byte(value: int) -> int:
+    """Encode a signed integer (-128..127) as an unsigned byte (two's comp)."""
+    return value & 0xFF
+
+
+def from_signed_byte(byte: int) -> int:
+    """Decode an unsigned byte as a signed integer (-128..127)."""
+    return byte - 0x100 if byte >= 0x80 else byte
+
+
 def describe(frame: Iterable[int]) -> str:
     """Return a human-readable hex representation of a frame for logging."""
     return " ".join(f"{b:02X}" for b in frame)

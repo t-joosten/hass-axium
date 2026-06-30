@@ -24,6 +24,9 @@ CMD_POWER: Final = 0x01
 CMD_MUTE: Final = 0x02
 CMD_SOURCE: Final = 0x03
 CMD_VOLUME: Final = 0x04
+CMD_BASS: Final = 0x05
+CMD_TREBLE: Final = 0x06
+CMD_BALANCE: Final = 0x07
 CMD_REQUEST_PROTOCOL: Final = 0x08
 CMD_VOLUME_UP: Final = 0x11
 CMD_VOLUME_DOWN: Final = 0x12
@@ -32,6 +35,54 @@ CMD_ZONE_NAME: Final = 0x1C
 CMD_SOURCE_NAME: Final = 0x29  # Source Name and Options (report/request/set)
 CMD_LINK_ZONES: Final = 0x30
 CMD_ZONE_NAME_REQUEST: Final = 0x38
+CMD_MEDIA_CONTROL: Final = 0x3D
+CMD_MEDIA_STATUS: Final = 0x3E
+CMD_MEDIA_STATUS_REQUEST: Final = 0x3F
+
+# Media Control (0x3D) sub-commands (2nd data byte).
+MEDIA_PLAY: Final = 0x01
+MEDIA_PAUSE: Final = 0x02
+MEDIA_STOP: Final = 0x03
+MEDIA_PREVIOUS: Final = 0x04
+MEDIA_NEXT: Final = 0x05
+MEDIA_REPEAT: Final = 0x06
+MEDIA_SHUFFLE: Final = 0x08
+
+# Media Status (0x3E) parameters (2nd data byte).
+MS_FLAGS: Final = 0x00
+MS_ARTIST: Final = 0x05
+MS_ALBUM: Final = 0x06
+MS_TITLE: Final = 0x07
+MS_ART: Final = 0x08
+MS_POSITION: Final = 0x09
+MS_LENGTH: Final = 0x0A
+
+# Media Status flag bits (parameter 0x00 value).
+MS_FLAG_AVAILABLE: Final = 0x01
+MS_FLAG_ACTIVE: Final = 0x04
+MS_FLAG_PAUSED: Final = 0x08
+MS_FLAG_REPEAT_TRACK: Final = 0x20
+MS_FLAG_REPEAT_DISC: Final = 0x40
+MS_FLAG_SHUFFLE: Final = 0x80
+
+# Repeat sub-command values (Media Control 0x06).
+REPEAT_OFF: Final = 0x00
+REPEAT_TRACK: Final = 0x01
+REPEAT_ALL: Final = 0x02
+
+# Source data bytes that are internal media players (AirPlay + Media Player 1-8)
+# — zones on these sources show transport controls and now-playing metadata.
+MEDIA_SOURCE_BYTES: Final = frozenset(
+    {0x10, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19}
+)
+
+# Tone control ranges (signed), per the protocol.
+BASS_MIN: Final = -12
+BASS_MAX: Final = 12
+TREBLE_MIN: Final = -12
+TREBLE_MAX: Final = 12
+BALANCE_MIN: Final = -20
+BALANCE_MAX: Final = 20
 
 # Source Name and Options (0x29) flag byte (4th data byte) bits.
 SOURCE_NAME_FLAG_DISABLED: Final = 0x04  # source is disabled when set
