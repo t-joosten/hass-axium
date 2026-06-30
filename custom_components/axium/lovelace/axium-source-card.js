@@ -33,17 +33,18 @@ class AxiumSourceCard extends HTMLElement {
   }
 
   setConfig(config) {
-    if (!config || !config.source) {
-      throw new Error("axium-source-card: you must define a 'source'");
-    }
-    this._config = config;
+    this._config = config || {};
     this._built = false;
     this.shadowRoot.innerHTML = "";
   }
 
   set hass(hass) {
     this._hass = hass;
-    if (!hass) return;
+    if (!hass || !this._config) return;
+    if (!this._config.source) {
+      this._renderPlaceholder();
+      return;
+    }
     const zones = this._zones();
     // (Re)build if the structure has not been created or the zone set changed.
     if (!this._built || zones.join() !== this._zoneIds.join()) {
@@ -55,6 +56,30 @@ class AxiumSourceCard extends HTMLElement {
 
   getCardSize() {
     return 3;
+  }
+
+  // Provide a default config so the card picker can render a preview.
+  static getStubConfig(hass) {
+    let source = "Source 1";
+    const states = (hass && hass.states) || {};
+    for (const id of Object.keys(states)) {
+      if (id.startsWith("media_player.")) {
+        const list = states[id].attributes.source_list;
+        if (Array.isArray(list) && list.length) {
+          source = list[0];
+          break;
+        }
+      }
+    }
+    return { source };
+  }
+
+  _renderPlaceholder() {
+    this.shadowRoot.innerHTML =
+      `<style>${AxiumSourceCard.styles}</style>` +
+      `<ha-card><div class="placeholder">` +
+      `Set a <b>source</b> for this Axium Source Card.</div></ha-card>`;
+    this._built = false;
   }
 
   // -- data helpers ----------------------------------------------------
@@ -265,6 +290,7 @@ class AxiumSourceCard extends HTMLElement {
 
 AxiumSourceCard.styles = `
   ha-card { padding: 12px 16px 8px; }
+  .placeholder { padding: 16px; color: var(--secondary-text-color); }
   .header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
   .art {
     width: 44px; height: 44px; border-radius: 8px; flex: 0 0 auto;
