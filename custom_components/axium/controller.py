@@ -40,6 +40,7 @@ from .const import (
     CMD_REQUEST_DEVICE_INFO,
     CMD_REQUEST_EXTENDED_INFO,
     CMD_SOURCE,
+    CMD_SOURCE_NAME,
     CMD_TREBLE,
     CMD_VOLUME,
     CMD_ZONE_NAME,
@@ -220,6 +221,8 @@ class AxiumController:
         self._links: list[tuple[set[int], int]] = []
         # Map of zone number -> media_player entity_id, for group membership.
         self._zone_entity_ids: dict[int, str] = {}
+        # Cached per-source (device byte, flags) so name writes preserve options.
+        self._source_meta: dict[int, tuple[int, int]] = {}
         # Now-playing state keyed by media source data byte.
         self._media: dict[int, MediaState] = {}
         # Diagnostics / amp-wide state.
@@ -324,6 +327,7 @@ class AxiumController:
             self._notify_all()
             await self._request_device_info()
             await self._request_link_groups()
+            await self._request_source_names()
             await self._request_preset_names()
             try:
                 await self._read_loop()
@@ -406,6 +410,11 @@ class AxiumController:
             return
         elif command == CMD_LINK_ZONES:
             self._update_link(data)
+            return
+        elif command == CMD_SOURCE_NAME:
+            info = parse_source_name(data)
+            if info is not None:
+                self._source_meta[info["id"]] = (info["device"], info["flags"])
             return
         elif command == CMD_MEDIA_STATUS and len(data) >= 2:
             self._handle_media_status(data)
@@ -700,6 +709,22 @@ class AxiumController:
     async def _request_link_groups(self) -> None:
         """Ask the amplifier for its current zone groups (command 0x30)."""
         await self.async_send(CMD_LINK_ZONES, ZONE_ALL, LINK_REQUEST_GROUPED)
+
+    async def _request_source_names(self) -> None:
+        """Ask the amplifier for all source names (command 0x29, no data)."""
+        await self.async_send(CMD_SOURCE_NAME, ZONE_ALL)
+
+    async def async_set_source_name(self, source_id: int, name: str) -> None:
+        """Write a source name to the amplifier (command 0x29).
+
+        Preserves the source's device byte and flags from the last report so the
+        write does not change enabled state or other options.
+        """
+        device, flags = self._source_meta.get(source_id, (0x00, 0x00))
+        await self.async_send(
+            CMD_SOURCE_NAME, ZONE_ALL, source_id, 0x00, device, flags,
+            *name.encode("utf-8"),
+        )
 
     # -- presets ---------------------------------------------------------
 

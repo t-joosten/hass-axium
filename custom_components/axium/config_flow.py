@@ -12,8 +12,14 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT
+from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
 
 from . import protocol
@@ -27,11 +33,23 @@ from .const import (
     DEFAULT_ZONE_COUNT,
     DEVICE_INFO_LIST_ZONES,
     DOMAIN,
+    ID_KEY,
+    NAME_KEY,
     RESP_DEVICE_INFO,
     ZONE_ALL,
 )
-from .controller import AxiumDeviceInfo, parse_device_info, parse_source_name
-from .helpers import default_sources, sources_from_detection, zones_from_numbers
+from .controller import (
+    AxiumController,
+    AxiumDeviceInfo,
+    parse_device_info,
+    parse_source_name,
+)
+from .helpers import (
+    default_sources,
+    get_sources,
+    sources_from_detection,
+    zones_from_numbers,
+)
 
 _CONNECT_TIMEOUT = 10.0
 _PROBE_TIMEOUT = 6.0
@@ -160,3 +178,48 @@ class AxiumConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user", data_schema=schema, errors=errors
         )
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> AxiumOptionsFlow:
+        """Return the options flow."""
+        return AxiumOptionsFlow(config_entry)
+
+
+class AxiumOptionsFlow(OptionsFlow):
+    """Rename sources. One field per source; names are written to the amp.
+
+    Zones are renamed from their device pages, so only sources are managed here.
+    """
+
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        """Store the config entry."""
+        self._config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show one name field per source; save and write changes to the amp."""
+        current = get_sources(self._config_entry)
+
+        if user_input is not None:
+            controller: AxiumController | None = self.hass.data.get(DOMAIN, {}).get(
+                self._config_entry.entry_id
+            )
+            new_sources: list[dict[str, Any]] = []
+            for item in current:
+                old_name = item[NAME_KEY]
+                new_name = (user_input.get(old_name) or "").strip() or old_name
+                new_sources.append({ID_KEY: item[ID_KEY], NAME_KEY: new_name})
+                if controller is not None and new_name != old_name:
+                    await controller.async_set_source_name(item[ID_KEY], new_name)
+            return self.async_create_entry(data={CONF_SOURCES: new_sources})
+
+        # Field key = current name (so the label is readable); value = the name.
+        schema = vol.Schema(
+            {
+                vol.Optional(item[NAME_KEY], default=item[NAME_KEY]): cv.string
+                for item in current
+            }
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)
