@@ -27,7 +27,7 @@ from a keypad or the front panel (a `local_push` integration — no polling).
 - 🔌 Power on/off per zone (command `0x01`)
 - 🔇 Mute / unmute (command `0x02`)
 - 🔊 Volume set and step up/down (commands `0x04`, `0x11`, `0x12`)
-- 🎚️ Source selection with **auto-detected source names** (rename in HA, written back to the amp)
+- 🎚️ Source selection with **auto-detected source names** (read from the amplifier)
 - 🎵 Works with **Music Assistant** for streaming via the amplifier's AirPlay input
 - 📡 Live state updates pushed from the amplifier (notifications)
 - ♻️ Automatic reconnection with backoff
@@ -163,18 +163,13 @@ Axium amplifiers can be stacked, sharing one system-wide zone space (e.g. two
 it bridges commands to the rest of the stack — and the integration **discovers
 the whole stack**, creating zones for every unit (16 in that example). Zone
 groups are also system-wide, so a group can span amplifiers, and the group limit
-follows the total zone count (16 zones → up to 8 groups). If a stacked unit is
-not discovered, you can add its zones manually in the options (see below).
+follows the total zone count (16 zones → up to 8 groups).
 
 ### Renaming zones
 
-Each zone is its own device, so the simplest way to rename one is the **pencil
-icon on the zone's device page** (built-in Home Assistant rename — instant, per
-zone).
-
-You can also edit the whole list at once in the integration's **Configure**
-dialog: every zone is pre-filled as `number=Name`; change the names (and add any
-zones the amplifier did not report), e.g. `11=Kitchen, 12=Living room`, and save.
+Each zone is its own device, so rename one with the **pencil icon on the zone's
+device page** (built-in Home Assistant rename — instant, per zone). There is no
+separate settings dialog; everything is discovered from the amplifier.
 
 ### Zone groups
 
@@ -197,16 +192,14 @@ Two protocol rules apply:
 
 ### Sources
 
-Sources are **auto-detected from the amplifier**: on setup the integration asks
-for each input's name and which inputs are enabled (disabled inputs are hidden),
-so your real source names (e.g. *Apple TV*, *Turntable*) appear instead of
-generic labels. If the amplifier reports nothing, it falls back to
-`Source 1`…`Source 8` plus `AirPlay`.
+Sources are **auto-detected from the amplifier**, just like zones: on setup the
+integration asks for each input's name and which inputs are enabled (disabled
+inputs are hidden), so your real source names (e.g. *Apple TV*, *Turntable*)
+appear in each zone's source list instead of generic labels. If the amplifier
+reports nothing, it falls back to `Source 1`…`Source 8` plus `AirPlay`.
 
-You can **rename sources** in the integration's **Configure** dialog (the
-**Sources** field, `id=Name`). Renamed sources are **written back to the
-amplifier**, so the new names persist there too. Selecting a source also powers
-the zone on.
+To change a source name, set it on the amplifier — Home Assistant reads it from
+there. Selecting a source also powers the zone on.
 
 ### Now playing & transport
 

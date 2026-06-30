@@ -83,11 +83,6 @@ def parse_zone_spec(raw: Any) -> list[dict[str, Any]]:
     return sorted(zones, key=lambda item: item[ZONE_KEY])
 
 
-def format_zone_spec(zones: list[dict[str, Any]]) -> str:
-    """Render a list of zone dicts back into the ``number=Name`` UI string."""
-    return ", ".join(f"{item[ZONE_KEY]}={item[NAME_KEY]}" for item in zones)
-
-
 def zones_from_numbers(numbers: list[int]) -> list[dict[str, Any]]:
     """Build default-named zone dicts from a list of zone numbers."""
     unique = sorted({int(n) for n in numbers if ZONE_MIN <= int(n) <= ZONE_MAX})
@@ -166,11 +161,6 @@ def parse_source_spec(raw: Any) -> list[dict[str, Any]]:
         raise ValueError("no sources specified")
 
     return sources
-
-
-def format_source_spec(sources: list[dict[str, Any]]) -> str:
-    """Render a list of source dicts back into the ``id=Name`` UI string."""
-    return ", ".join(f"{item[ID_KEY]}={item[NAME_KEY]}" for item in sources)
 
 
 def sources_from_detection(detected: list[dict[str, Any]]) -> list[dict[str, Any]]:

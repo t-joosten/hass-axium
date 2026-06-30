@@ -1,4 +1,9 @@
-"""Config and options flow for the Axium amplifier integration."""
+"""Config flow for the Axium amplifier integration.
+
+Setup only asks for the connection details. Zones and sources are discovered
+from the amplifier automatically; zones can be renamed from their device pages
+and source names come from the amplifier.
+"""
 
 from __future__ import annotations
 
@@ -7,14 +12,8 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import (
-    ConfigEntry,
-    ConfigFlow,
-    ConfigFlowResult,
-    OptionsFlow,
-)
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT
-from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
 
 from . import protocol
@@ -28,28 +27,11 @@ from .const import (
     DEFAULT_ZONE_COUNT,
     DEVICE_INFO_LIST_ZONES,
     DOMAIN,
-    ID_KEY,
-    NAME_KEY,
     RESP_DEVICE_INFO,
     ZONE_ALL,
 )
-from .controller import (
-    AxiumController,
-    AxiumDeviceInfo,
-    parse_device_info,
-    parse_source_name,
-)
-from .helpers import (
-    default_sources,
-    format_source_spec,
-    format_zone_spec,
-    get_sources,
-    get_zones,
-    parse_source_spec,
-    parse_zone_spec,
-    sources_from_detection,
-    zones_from_numbers,
-)
+from .controller import AxiumDeviceInfo, parse_device_info, parse_source_name
+from .helpers import default_sources, sources_from_detection, zones_from_numbers
 
 _CONNECT_TIMEOUT = 10.0
 _PROBE_TIMEOUT = 6.0
@@ -57,13 +39,13 @@ _STACK_GRACE = 1.5
 
 
 async def _async_probe_amplifier(host: str, port: int) -> AxiumDeviceInfo | None:
-    """Connect, confirm an Axium amplifier is present, and discover its zones.
+    """Connect, confirm an Axium amplifier is present, and discover its layout.
 
-    Sends Request Device information to the whole stack (no "no expansion" bit)
-    so every amplifier replies with its zone list, and aggregates the zones.
-    Returns the parsed device info (with all discovered zones) when an amplifier
-    replies, or ``None`` if nothing answers within the timeout. Raises
-    ``OSError``/``asyncio.TimeoutError`` if the connection cannot open.
+    Requests device info (with the zone list) from the whole stack and all
+    source names. Returns the parsed device info (with discovered zones and
+    sources) when an amplifier replies, or ``None`` if nothing answers within
+    the timeout. Raises ``OSError``/``asyncio.TimeoutError`` if the connection
+    cannot open.
     """
     reader, writer = await asyncio.wait_for(
         asyncio.open_connection(host, port), timeout=_CONNECT_TIMEOUT
@@ -142,12 +124,14 @@ class AxiumConfigFlow(ConfigFlow, domain=DOMAIN):
                 if device_info is None:
                     errors["base"] = "no_amplifier"
             if not errors:
-                # Create every zone the amplifier (stack) reports, or a sensible
-                # default if it does not list them. Names are edited later.
+                # Discover every zone the amplifier (stack) reports — or a
+                # sensible default — and the enabled sources with their names.
                 numbers = device_info.zones or list(
                     range(1, DEFAULT_ZONE_COUNT + 1)
                 )
-                sources = sources_from_detection(device_info.sources) or default_sources()
+                sources = (
+                    sources_from_detection(device_info.sources) or default_sources()
+                )
                 return self.async_create_entry(
                     title=user_input[CONF_NAME],
                     data={
@@ -176,72 +160,3 @@ class AxiumConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user", data_schema=schema, errors=errors
         )
-
-    @staticmethod
-    @callback
-    def async_get_options_flow(config_entry: ConfigEntry) -> AxiumOptionsFlow:
-        """Return the options flow."""
-        return AxiumOptionsFlow(config_entry)
-
-
-class AxiumOptionsFlow(OptionsFlow):
-    """Single-step options flow to edit zone numbers and names.
-
-    Grouping is done from the media player card (native join/unjoin), so it is
-    not managed here.
-    """
-
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        """Store the config entry."""
-        self._config_entry = config_entry
-
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Edit zone and source names; saves immediately."""
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            zones = sources = None
-            try:
-                zones = parse_zone_spec(user_input[CONF_ZONES])
-            except ValueError:
-                errors[CONF_ZONES] = "invalid_zones"
-            try:
-                sources = parse_source_spec(user_input[CONF_SOURCES])
-            except ValueError:
-                errors[CONF_SOURCES] = "invalid_sources"
-            if not errors:
-                await self._async_write_source_names(sources)
-                return self.async_create_entry(
-                    data={CONF_ZONES: zones, CONF_SOURCES: sources}
-                )
-
-        schema = vol.Schema(
-            {
-                vol.Required(
-                    CONF_ZONES,
-                    default=format_zone_spec(get_zones(self._config_entry)),
-                ): cv.string,
-                vol.Required(
-                    CONF_SOURCES,
-                    default=format_source_spec(get_sources(self._config_entry)),
-                ): cv.string,
-            }
-        )
-        return self.async_show_form(
-            step_id="init", data_schema=schema, errors=errors
-        )
-
-    async def _async_write_source_names(
-        self, sources: list[dict[str, Any]]
-    ) -> None:
-        """Write changed source names back to the amplifier, if connected."""
-        controller: AxiumController | None = self.hass.data.get(DOMAIN, {}).get(
-            self._config_entry.entry_id
-        )
-        if controller is None:
-            return
-        previous = {item[ID_KEY]: item[NAME_KEY] for item in get_sources(self._config_entry)}
-        for item in sources:
-            if previous.get(item[ID_KEY]) != item[NAME_KEY]:
-                await controller.async_set_source_name(item[ID_KEY], item[NAME_KEY])
