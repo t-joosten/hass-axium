@@ -63,6 +63,7 @@ class AxiumDeviceInfo:
     firmware_major: int | None = None
     unit_id: int | None = None
     zones: list[int] = field(default_factory=list)
+    link_groups: list[list[int]] = field(default_factory=list)
 
 
 CallbackType = Callable[[], None]
@@ -91,6 +92,21 @@ def parse_device_info(data: bytes) -> AxiumDeviceInfo | None:
         unit_id=(data[3] << 8 | data[4]) if len(data) >= 5 else None,
         zones=zones,
     )
+
+
+def parse_link_group(data: bytes) -> list[int] | None:
+    """Parse a Link zones (0x30) frame into its member zone numbers.
+
+    Layout: an options byte, optionally a 4-byte group identifier (when the
+    options byte has bit 7 set), then the zone numbers (0..95). Returns the
+    members only for real groups (2+ zones), else ``None``.
+    """
+    if not data:
+        return None
+    options = data[0]
+    rest = data[5:] if options & 0x80 else data[1:]
+    zones = sorted({b for b in rest if 0 <= b <= 95})
+    return zones if len(zones) >= 2 else None
 
 
 class AxiumController:

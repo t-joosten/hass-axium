@@ -41,6 +41,9 @@ LINK_OPT_VOLUME: Final = 0x02  # implies mute and volume-offset tracking
 LINK_OPT_STANDBY: Final = 0x04  # power on/off
 # Default: link source, volume and power together.
 LINK_OPTIONS_DEFAULT: Final = LINK_OPT_SOURCE | LINK_OPT_VOLUME | LINK_OPT_STANDBY
+# Request the amplifier's current groups (bit 5 suppresses ungrouped zones):
+# sending `30 FF 20` returns the grouped zones.
+LINK_REQUEST_GROUPED: Final = 0x20
 
 # Power (command 0x01) data bytes.
 POWER_OFF: Final = 0x00

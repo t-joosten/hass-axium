@@ -19,7 +19,7 @@ from a keypad or the front panel (a `local_push` integration — no polling).
 ## Features
 
 - 🏷️ **All zones auto-created** (discovered from the amp), each its own device — just rename them (e.g. *Kitchen*, *Living room*)
-- 🧩 User-defined **zone groups** linked on the amplifier (volume/source/power kept in sync by the amp)
+- 🧩 **Zone groups** linked on the amplifier (volume/source/power kept in sync by the amp) — existing groups are auto-detected
 - 🔎 Automatic **model and firmware detection** — no need to pick your amp
 - 🔌 Power on/off per zone (command `0x01`)
 - 🔇 Mute / unmute (command `0x02`)
@@ -173,10 +173,16 @@ sending commands to each zone separately, and volume changes preserve each
 zone's relative offset. The group `media_player` also exposes its members in the
 standard `group_members` attribute.
 
+**Existing groups are auto-detected.** During setup the integration asks the
+amplifier for its current zone links and imports them as groups named
+`Group 1`, `Group 2`, … (amp links have no names) — rename them afterwards.
+
 In the **Configure** dialog:
 
 - **Add a zone group** – give the group a name (e.g. `Downstairs`) and tick the
   zones it should control.
+- **Rename a zone group** – give an auto-imported or existing group a friendlier
+  name.
 - **Remove a zone group** – delete groups you no longer need.
 
 Then choose **Save and finish** to apply.

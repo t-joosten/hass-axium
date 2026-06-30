@@ -232,8 +232,15 @@ class Simulator:
                 writer.write(encode(0x1C, zone_byte, *z.name.encode("utf-8")))
                 await self._safe_drain(writer)
             return
-        if command == 0x30:  # Link zones
-            self._handle_link(data)
+        if command == 0x30:  # Link zones (command, or request when 0x30 FF 20)
+            if len(data) <= 1:  # request for the current groups
+                for grp, opts in self.links:
+                    reply = encode(0x30, 0xFF, opts, *sorted(grp))
+                    writer.write(reply)
+                    log("-> reply  ", reply, "group")
+                await self._safe_drain(writer)
+            else:
+                self._handle_link(data)
             return
 
         base = self._resolve_zones(zone_byte)

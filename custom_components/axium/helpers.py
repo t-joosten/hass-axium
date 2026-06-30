@@ -88,6 +88,25 @@ def zones_from_numbers(numbers: list[int]) -> list[dict[str, Any]]:
     return [{ZONE_KEY: n, NAME_KEY: default_zone_name(n)} for n in unique]
 
 
+def groups_from_memberships(
+    memberships: list[list[int]], valid_zones: set[int]
+) -> list[dict[str, Any]]:
+    """Build default-named groups from detected zone memberships.
+
+    Members are restricted to ``valid_zones``; a zone is placed in at most one
+    group (the amplifier enforces the same), and only groups of 2+ zones are
+    kept. Groups are named ``Group 1``, ``Group 2`` … for later renaming.
+    """
+    groups: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for members in memberships:
+        zones = sorted({z for z in members if z in valid_zones and z not in seen})
+        if len(zones) >= 2:
+            seen.update(zones)
+            groups.append({NAME_KEY: f"Group {len(groups) + 1}", ZONES_KEY: zones})
+    return groups
+
+
 def normalise_groups(raw: Any) -> list[dict[str, Any]]:
     """Normalise stored group definitions, dropping malformed entries."""
     if not isinstance(raw, list):

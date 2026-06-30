@@ -19,6 +19,7 @@ from homeassistant.helpers import config_validation as cv
 
 from . import protocol
 from .const import (
+    CMD_LINK_ZONES,
     CMD_REQUEST_DEVICE_INFO,
     CONF_GROUP_NAME,
     CONF_GROUP_ZONES,
@@ -31,32 +32,36 @@ from .const import (
     DEVICE_INFO_NO_EXPANSION_REPLY,
     DEVICE_INFO_REPLY_ON_PORT_ONLY,
     DOMAIN,
+    LINK_REQUEST_GROUPED,
     NAME_KEY,
     RESP_DEVICE_INFO,
     ZONE_ALL,
     ZONE_KEY,
     ZONES_KEY,
 )
-from .controller import AxiumDeviceInfo, parse_device_info
+from .controller import AxiumDeviceInfo, parse_device_info, parse_link_group
 from .helpers import (
     format_zone_spec,
     get_groups,
     get_zones,
+    groups_from_memberships,
     parse_zone_spec,
     zones_from_numbers,
 )
 
 _CONNECT_TIMEOUT = 10.0
 _PROBE_TIMEOUT = 6.0
+_GROUP_GRACE = 1.5
 
 
 async def _async_probe_amplifier(host: str, port: int) -> AxiumDeviceInfo | None:
-    """Connect and confirm an Axium amplifier is present.
+    """Connect, confirm an Axium amplifier is present, and discover its layout.
 
-    Sends a Request Device information command and waits for the matching
-    response. Returns the parsed device info (possibly empty but non-None) when
-    an amplifier replies, or ``None`` if nothing answers within the timeout.
-    Raises ``OSError``/``asyncio.TimeoutError`` if the connection cannot open.
+    Sends Request Device information (with the zone list) and a request for the
+    amplifier's current zone groups. Returns the parsed device info — including
+    discovered zones and link groups — when an amplifier replies, or ``None`` if
+    nothing answers within the timeout. Raises ``OSError``/``asyncio.TimeoutError``
+    if the connection cannot open.
     """
     reader, writer = await asyncio.wait_for(
         asyncio.open_connection(host, port), timeout=_CONNECT_TIMEOUT
@@ -72,22 +77,38 @@ async def _async_probe_amplifier(host: str, port: int) -> AxiumDeviceInfo | None
                 | DEVICE_INFO_LIST_ZONES,
             )
         )
+        writer.write(protocol.encode(CMD_LINK_ZONES, ZONE_ALL, LINK_REQUEST_GROUPED))
         await writer.drain()
 
-        deadline = loop.time() + _PROBE_TIMEOUT
+        device_info: AxiumDeviceInfo | None = None
+        groups: list[list[int]] = []
+        end = loop.time() + _PROBE_TIMEOUT
         while True:
-            remaining = deadline - loop.time()
+            remaining = end - loop.time()
             if remaining <= 0:
-                return None
+                break
             try:
                 line = await asyncio.wait_for(reader.readline(), timeout=remaining)
             except asyncio.TimeoutError:
-                return None
+                break
             if not line:  # connection closed by peer
-                return None
+                break
             frame = protocol.decode(line)
-            if frame is not None and len(frame) >= 2 and frame[0] == RESP_DEVICE_INFO:
-                return parse_device_info(frame[2:]) or AxiumDeviceInfo()
+            if frame is None or len(frame) < 2:
+                continue
+            if frame[0] == RESP_DEVICE_INFO:
+                device_info = parse_device_info(frame[2:]) or AxiumDeviceInfo()
+                # Once identified, wait only a short grace for group replies.
+                end = min(end, loop.time() + _GROUP_GRACE)
+            elif frame[0] == CMD_LINK_ZONES:
+                members = parse_link_group(frame[2:])
+                if members:
+                    groups.append(members)
+
+        if device_info is None:
+            return None
+        device_info.link_groups = groups
+        return device_info
     finally:
         writer.close()
         try:
@@ -124,14 +145,17 @@ class AxiumConfigFlow(ConfigFlow, domain=DOMAIN):
                 numbers = device_info.zones or list(
                     range(1, DEFAULT_ZONE_COUNT + 1)
                 )
+                zones = zones_from_numbers(numbers)
+                valid = {item[ZONE_KEY] for item in zones}
+                groups = groups_from_memberships(device_info.link_groups, valid)
                 return self.async_create_entry(
                     title=user_input[CONF_NAME],
                     data={
                         CONF_HOST: host,
                         CONF_PORT: port,
                         CONF_NAME: user_input[CONF_NAME],
-                        CONF_ZONES: zones_from_numbers(numbers),
-                        CONF_GROUPS: [],
+                        CONF_ZONES: zones,
+                        CONF_GROUPS: groups,
                     },
                 )
 
@@ -175,7 +199,7 @@ class AxiumOptionsFlow(OptionsFlow):
         """Show the main options menu."""
         menu_options = ["zones", "add_group"]
         if self._groups:
-            menu_options.append("remove_group")
+            menu_options.extend(["rename_group", "remove_group"])
         menu_options.append("save")
         return self.async_show_menu(step_id="init", menu_options=menu_options)
 
@@ -244,6 +268,41 @@ class AxiumOptionsFlow(OptionsFlow):
         )
         return self.async_show_form(
             step_id="add_group", data_schema=schema, errors=errors
+        )
+
+    async def async_step_rename_group(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Rename an existing zone group."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            target = user_input[CONF_GROUPS]
+            new_name = user_input[CONF_GROUP_NAME].strip()
+            others = {
+                group[NAME_KEY].casefold()
+                for group in self._groups
+                if group[NAME_KEY] != target
+            }
+            if not new_name:
+                errors[CONF_GROUP_NAME] = "invalid_group_name"
+            elif new_name.casefold() in others:
+                errors[CONF_GROUP_NAME] = "duplicate_group"
+            else:
+                for group in self._groups:
+                    if group[NAME_KEY] == target:
+                        group[NAME_KEY] = new_name
+                        break
+                return await self.async_step_init()
+
+        group_options = {group[NAME_KEY]: group[NAME_KEY] for group in self._groups}
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_GROUPS): vol.In(group_options),
+                vol.Required(CONF_GROUP_NAME): cv.string,
+            }
+        )
+        return self.async_show_form(
+            step_id="rename_group", data_schema=schema, errors=errors
         )
 
     async def async_step_remove_group(

@@ -27,6 +27,7 @@
         "menu_options": {
           "zones": "Edit zones and names",
           "add_group": "Add a zone group",
+          "rename_group": "Rename a zone group",
           "remove_group": "Remove a zone group",
           "save": "Save and finish"
         }
@@ -47,6 +48,14 @@
         "data": {
           "name": "Group name",
           "group_zones": "Zones in this group"
+        }
+      },
+      "rename_group": {
+        "title": "Rename zone group",
+        "description": "Pick a group and give it a new name.",
+        "data": {
+          "groups": "Group",
+          "name": "New name"
         }
       },
       "remove_group": {
