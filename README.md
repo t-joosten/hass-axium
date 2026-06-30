@@ -18,6 +18,8 @@ from a keypad or the front panel (a `local_push` integration — no polling).
 
 ## Features
 
+- 🏷️ Named zones (e.g. *Kitchen*, *Living room*), each its own device
+- 🧩 User-defined **zone groups** to control several zones as one
 - 🔌 Power on/off per zone (command `0x01`)
 - 🔇 Mute / unmute (command `0x02`)
 - 🔊 Volume set and step up/down (commands `0x04`, `0x11`, `0x12`)
@@ -58,11 +60,37 @@ amplifier on port 17037 (the protocol explicitly supports this for testing).
    - **Host** – the amplifier's IP address or hostname.
    - **Port** – defaults to `17037`.
    - **Name** – a friendly name for the amplifier.
-   - **Zones** – a comma-separated list of zone numbers to control, e.g.
-     `1,2,3,4`.
+   - **Zones** – a comma-separated list of zones as `number=Name`, for example
+     `1=Kitchen, 2=Living room, 3=Bedroom`. The name is optional (defaults to
+     `Zone N`), and zone numbers may be any value the amplifier uses (0–95).
 
-To change the controlled zones later, use the integration's **Configure**
-(options) dialog.
+Each zone becomes its own `media_player` device named after the room, nested
+under the amplifier device. Zones are always created, so they are available as
+soon as the amplifier connects.
+
+### Naming and editing zones
+
+Use the integration's **Configure** dialog → **Edit zones and names** to rename
+zones or change which zones exist at any time.
+
+### Zone groups
+
+A zone group is a single `media_player` that controls several zones together —
+power, volume, mute and source are applied to every member zone. You can create
+as many groups as you like.
+
+In the **Configure** dialog:
+
+- **Add a zone group** – give the group a name (e.g. `Downstairs`) and tick the
+  zones it should control.
+- **Remove a zone group** – delete groups you no longer need.
+
+A group reports an aggregated state: it is *on* if any member is on, shows the
+average member volume, is *muted* only when every member is muted, and shows a
+source only when all members agree. The member zone numbers are exposed in the
+`zones` attribute.
+
+Remember to choose **Save and finish** in the menu to apply your changes.
 
 ### Sources
 

@@ -11,13 +11,13 @@
           "zones": "Zones"
         },
         "data_description": {
-          "zones": "Comma-separated list of zone numbers to control (e.g. 1,2,3,4)."
+          "zones": "Comma-separated list of zones as number=Name, e.g. 1=Kitchen, 2=Living room, 3=Bedroom. The name is optional."
         }
       }
     },
     "error": {
       "cannot_connect": "Failed to connect to the amplifier. Check the host and port.",
-      "invalid_zones": "Enter a comma-separated list of zone numbers between 0 and 95."
+      "invalid_zones": "Use a comma-separated list like 1=Kitchen, 2=Living room. Zone numbers must be unique and between 0 and 95."
     },
     "abort": {
       "already_configured": "This amplifier is already configured."
@@ -27,17 +27,45 @@
     "step": {
       "init": {
         "title": "Axium Amplifier",
-        "description": "Update the list of controlled zones.",
+        "description": "Manage zone names and zone groups.",
+        "menu_options": {
+          "zones": "Edit zones and names",
+          "add_group": "Add a zone group",
+          "remove_group": "Remove a zone group",
+          "save": "Save and finish"
+        }
+      },
+      "zones": {
+        "title": "Zones",
+        "description": "Edit the zones and their names.",
         "data": {
           "zones": "Zones"
         },
         "data_description": {
-          "zones": "Comma-separated list of zone numbers to control (e.g. 1,2,3,4)."
+          "zones": "Comma-separated list of zones as number=Name, e.g. 1=Kitchen, 2=Living room, 3=Bedroom."
+        }
+      },
+      "add_group": {
+        "title": "Add zone group",
+        "description": "Create a group that controls several zones together.",
+        "data": {
+          "name": "Group name",
+          "group_zones": "Zones in this group"
+        }
+      },
+      "remove_group": {
+        "title": "Remove zone group",
+        "description": "Select the groups to remove.",
+        "data": {
+          "groups": "Groups"
         }
       }
     },
     "error": {
-      "invalid_zones": "Enter a comma-separated list of zone numbers between 0 and 95."
+      "invalid_zones": "Use a comma-separated list like 1=Kitchen, 2=Living room. Zone numbers must be unique and between 0 and 95.",
+      "invalid_group_name": "Enter a name for the group.",
+      "duplicate_group": "A group with that name already exists.",
+      "no_group_zones": "Select at least one zone for the group."
     }
   }
 }
