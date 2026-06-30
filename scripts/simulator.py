@@ -259,6 +259,8 @@ class Simulator:
                 await self._safe_drain(writer)
             else:
                 self._handle_link(data)
+                # Notify all clients of the change so they refresh grouping.
+                await self.broadcast(encode(0x30, 0xFF, *data), "link update")
             return
 
         base = self._resolve_zones(zone_byte)

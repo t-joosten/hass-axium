@@ -10,15 +10,8 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
-from .const import (
-    DEFAULT_PORT,
-    DOMAIN,
-    LINK_OPTIONS_DEFAULT,
-    ZONE_KEY,
-    ZONES_KEY,
-)
+from .const import DEFAULT_PORT, DOMAIN
 from .controller import AxiumController, AxiumDeviceInfo
-from .helpers import get_groups, get_zones
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -68,33 +61,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = controller
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    await _async_apply_group_links(entry, controller)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
-
-
-async def _async_apply_group_links(
-    entry: ConfigEntry, controller: AxiumController
-) -> None:
-    """Make the amplifier's zone links match the configured groups.
-
-    Each group (2+ zones) is linked on the amplifier so it keeps the zones in
-    sync. Zones that are not in any group are sent as a single-zone link to
-    clear any stale grouping. This converges the amp's link state to the
-    integration's configuration on every (re)load.
-    """
-    groups = get_groups(entry)
-    grouped: set[int] = set()
-    for group in groups:
-        members = sorted(set(group[ZONES_KEY]))
-        if len(members) >= 2:
-            grouped.update(members)
-            await controller.async_link_zones(members, LINK_OPTIONS_DEFAULT)
-
-    for item in get_zones(entry):
-        zone = item[ZONE_KEY]
-        if zone not in grouped:
-            await controller.async_link_zones([zone], LINK_OPTIONS_DEFAULT)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

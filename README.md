@@ -19,7 +19,7 @@ from a keypad or the front panel (a `local_push` integration — no polling).
 ## Features
 
 - 🏷️ **All zones auto-created** (discovered from the amp), each its own device — just rename them (e.g. *Kitchen*, *Living room*)
-- 🧩 **Zone groups** linked on the amplifier (volume/source/power kept in sync by the amp) — existing groups are auto-detected
+- 🧩 **Group zones from the player card** (Sonos-style join/unjoin) — linked on the amplifier and kept in sync by the amp
 - 🔎 Automatic **model and firmware detection** — no need to pick your amp
 - 🔌 Power on/off per zone (command `0x01`)
 - 🔇 Mute / unmute (command `0x02`)
@@ -161,56 +161,36 @@ it bridges commands to the rest of the stack — and the integration **discovers
 the whole stack**, creating zones for every unit (16 in that example). Zone
 groups are also system-wide, so a group can span amplifiers, and the group limit
 follows the total zone count (16 zones → up to 8 groups). If a stacked unit is
-not discovered, you can add its zones manually in **Edit zones and names**.
+not discovered, you can add its zones manually in the options (see below).
 
 ### Renaming zones
 
-Open the integration's **Configure** dialog → **Edit zones and names**. You will
-see every zone pre-filled as `number=Name`; just change the names, for example:
+Each zone is its own device, so the simplest way to rename one is the **pencil
+icon on the zone's device page** (built-in Home Assistant rename — instant, per
+zone).
 
-```
-11=Kitchen, 12=Living room, 13=Bedroom
-```
-
-Then choose **Save and finish**. (You can also adjust the zone list here if the
-amplifier did not report its zones correctly.)
+You can also edit the whole list at once in the integration's **Configure**
+dialog: every zone is pre-filled as `number=Name`; change the names (and add any
+zones the amplifier did not report), e.g. `11=Kitchen, 12=Living room`, and save.
 
 ### Zone groups
 
-A zone group bundles several zones and controls them together. Grouping is
-performed **on the amplifier** using the protocol's *Link zones* command
-(`0x30`): the integration links the member zones, and the **amplifier itself
-keeps them in sync** for **volume, source and power**. This is more robust than
-sending commands to each zone separately, and volume changes preserve each
-zone's relative offset. The group `media_player` also exposes its members in the
-standard `group_members` attribute.
+Group zones **directly from the media player card** — open a zone, use the
+grouping control, and pick the other zones to join (the same UI you'd use to
+group Sonos/Chromecast speakers). No settings dialog, no separate save: each
+join/unjoin is applied to the amplifier immediately.
 
-**Existing groups are auto-detected.** During setup the integration asks the
-amplifier for its current zone links and imports them as groups named
-`Group 1`, `Group 2`, … (amp links have no names) — rename them afterwards.
+Grouping uses the amplifier's own *Link zones* command (`0x30`), so the **amp
+keeps the joined zones in sync** for volume, source and power (volume changes
+preserve each zone's relative offset). Groups are read live from the amplifier,
+so links that already exist on the amp show up automatically as grouped — and a
+group can span multiple amplifiers in a stack.
 
-In the **Configure** dialog:
+Two protocol rules apply:
 
-- **Add a zone group** – give the group a name (e.g. `Downstairs`) and tick the
-  zones it should control.
-- **Rename a zone group** – give an auto-imported or existing group a friendlier
-  name.
-- **Remove a zone group** – delete groups you no longer need.
-
-Then choose **Save and finish** to apply.
-
-Because grouping is done on the amplifier, two protocol rules apply:
-
-- **A zone can be in only one group** (the picker only offers ungrouped zones).
-- **Linked zones are coupled:** controlling an individual member zone also
-  affects the rest of its group — that is how the amplifier's linking works.
-
-The integration asserts the configured links on the amplifier each time it
-loads, so links created outside Home Assistant may be overwritten.
-
-A group reports an aggregated state: it is *on* if any member is on, shows the
-average member volume, is *muted* only when every member is muted, and shows a
-source only when all members agree.
+- **A zone can be in only one group.**
+- **Linked zones are coupled:** controlling any member also controls the rest of
+  the group — that is how the amplifier's linking works.
 
 ### Sources
 

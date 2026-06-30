@@ -12,14 +12,10 @@ DEFAULT_NAME: Final = "Axium"
 
 # Configuration / option keys.
 CONF_ZONES: Final = "zones"
-CONF_GROUPS: Final = "groups"
-CONF_GROUP_NAME: Final = "name"
-CONF_GROUP_ZONES: Final = "group_zones"
 
-# Keys within a stored zone/group definition.
+# Keys within a stored zone definition.
 ZONE_KEY: Final = "zone"
 NAME_KEY: Final = "name"
-ZONES_KEY: Final = "zones"
 
 # Axium command bytes (see AxiumCommsProtocol.pdf, section 2).
 CMD_POWER: Final = 0x01

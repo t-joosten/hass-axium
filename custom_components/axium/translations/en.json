@@ -23,54 +23,17 @@
     "step": {
       "init": {
         "title": "Axium Amplifier",
-        "description": "Manage zone names and zone groups.",
-        "menu_options": {
-          "zones": "Edit zones and names",
-          "add_group": "Add a zone group",
-          "rename_group": "Rename a zone group",
-          "remove_group": "Remove a zone group",
-          "save": "Save and finish"
-        }
-      },
-      "zones": {
-        "title": "Zones",
-        "description": "Edit the zones and their names.",
+        "description": "Edit the zones and their names. To group zones, use the grouping control on each player's card.",
         "data": {
           "zones": "Zones"
         },
         "data_description": {
           "zones": "Comma-separated list of zones as number=Name, e.g. 1=Kitchen, 2=Living room, 3=Bedroom."
         }
-      },
-      "add_group": {
-        "title": "Add zone group",
-        "description": "Create a group that controls several zones together.",
-        "data": {
-          "name": "Group name",
-          "group_zones": "Zones in this group"
-        }
-      },
-      "rename_group": {
-        "title": "Rename zone group",
-        "description": "Pick a group and give it a new name.",
-        "data": {
-          "groups": "Group",
-          "name": "New name"
-        }
-      },
-      "remove_group": {
-        "title": "Remove zone group",
-        "description": "Select the groups to remove.",
-        "data": {
-          "groups": "Groups"
-        }
       }
     },
     "error": {
-      "invalid_zones": "Use a comma-separated list like 1=Kitchen, 2=Living room. Zone numbers must be unique and between 0 and 95.",
-      "invalid_group_name": "Enter a name for the group.",
-      "duplicate_group": "A group with that name already exists.",
-      "min_group_zones": "Select at least two zones for the group."
+      "invalid_zones": "Use a comma-separated list like 1=Kitchen, 2=Living room. Zone numbers must be unique and between 0 and 95."
     }
   }
 }

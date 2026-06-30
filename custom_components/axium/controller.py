@@ -16,6 +16,7 @@ import logging
 
 from . import protocol
 from .const import (
+    CMD_LINK_ZONES,
     CMD_MUTE,
     CMD_POWER,
     CMD_REQUEST_DEVICE_INFO,
@@ -27,6 +28,8 @@ from .const import (
     DEVICE_INFO_REPLY_ON_PORT_ONLY,
     DEVICE_MODELS,
     DEVICE_TYPES,
+    LINK_OPTIONS_DEFAULT,
+    LINK_REQUEST_GROUPED,
     POWER_OFF_VALUES,
     POWER_ON_VALUES,
     RESP_DEVICE_INFO,
@@ -126,6 +129,11 @@ class AxiumController:
         self._listeners: dict[int, list[CallbackType]] = {}
         self._device_info: AxiumDeviceInfo | None = None
         self._device_info_callback: DeviceInfoCallback | None = None
+        # Live zone-link state: list of (member zones, options). Mirrors the
+        # amplifier's groups, populated on connect and kept up to date.
+        self._links: list[tuple[set[int], int]] = []
+        # Map of zone number -> media_player entity_id, for group membership.
+        self._zone_entity_ids: dict[int, str] = {}
 
     @property
     def host(self) -> str:
@@ -212,8 +220,10 @@ class AxiumController:
             _LOGGER.info("Connected to Axium amplifier at %s:%s", self._host, self._port)
             delay = _RECONNECT_DELAY
             self._connected.set()
+            self._links = []
             self._notify_all()
             await self._request_device_info()
+            await self._request_link_groups()
             try:
                 await self._read_loop()
             except asyncio.CancelledError:
@@ -271,6 +281,9 @@ class AxiumController:
         elif command == RESP_DEVICE_INFO:
             self._handle_device_info(data)
             return
+        elif command == CMD_LINK_ZONES:
+            self._update_link(data)
+            return
 
         if changed:
             state.available = True
@@ -294,6 +307,71 @@ class AxiumController:
         )
         if self._device_info_callback is not None:
             self._device_info_callback(info)
+
+    def _update_link(self, data: bytes) -> None:
+        """Apply a Link zones (0x30) frame to the live link state.
+
+        ``data`` is the frame payload: an options byte, an optional 4-byte group
+        identifier (when bit 7 of options is set), then the member zones. A list
+        of 2+ zones forms/replaces a group; a single zone is removed from any
+        group. Affected zones are notified so their group membership refreshes.
+        """
+        if not data:
+            return
+        options = data[0]
+        rest = data[5:] if options & 0x80 else data[1:]
+        zones = sorted({b for b in rest if 0 <= b <= 95})
+        zoneset = set(zones)
+        if not zoneset:
+            return
+        affected = set(zoneset)
+        new_links: list[tuple[set[int], int]] = []
+        for members, opts in self._links:
+            if members & zoneset:
+                affected |= members
+            remaining = members - zoneset
+            if len(remaining) >= 2:
+                new_links.append((remaining, opts))
+        if len(zones) >= 2:
+            new_links.append((zoneset, options))
+        self._links = new_links
+        for zone in affected:
+            self._notify(zone)
+
+    def group_members(self, zone: int) -> list[int]:
+        """Return the sorted member zones of ``zone``'s group, else empty."""
+        for members, _ in self._links:
+            if zone in members and len(members) >= 2:
+                return sorted(members)
+        return []
+
+    def register_zone_entity(self, zone: int, entity_id: str) -> None:
+        """Record the entity_id for a zone (used to report group members)."""
+        self._zone_entity_ids[zone] = entity_id
+
+    def zone_entity_id(self, zone: int) -> str | None:
+        """Return the entity_id for a zone, if known."""
+        return self._zone_entity_ids.get(zone)
+
+    def zone_for_entity_id(self, entity_id: str) -> int | None:
+        """Return the zone number for an entity_id, if known."""
+        for zone, eid in self._zone_entity_ids.items():
+            if eid == entity_id:
+                return zone
+        return None
+
+    async def async_join(self, zones: set[int] | list[int]) -> None:
+        """Link the given zones into one group on the amplifier."""
+        members = sorted(set(zones))
+        if len(members) < 2:
+            return
+        self._update_link(bytes([LINK_OPTIONS_DEFAULT, *members]))
+        await self.async_link_zones(members, LINK_OPTIONS_DEFAULT)
+
+    async def async_unjoin(self, zone: int) -> None:
+        """Remove a zone from its group on the amplifier."""
+        self._update_link(bytes([LINK_OPTIONS_DEFAULT, zone]))
+        await self.async_link_zones([zone], LINK_OPTIONS_DEFAULT)
 
     def _notify(self, zone: int) -> None:
         """Invoke listeners registered for ``zone``."""
@@ -355,9 +433,11 @@ class AxiumController:
         leaves that zone ungrouped. The amplifier then keeps the linked zones
         in sync for the enabled options.
         """
-        from .const import CMD_LINK_ZONES, ZONE_ALL
-
         await self.async_send(CMD_LINK_ZONES, ZONE_ALL, options, *zones)
+
+    async def _request_link_groups(self) -> None:
+        """Ask the amplifier for its current zone groups (command 0x30)."""
+        await self.async_send(CMD_LINK_ZONES, ZONE_ALL, LINK_REQUEST_GROUPED)
 
     async def _request_device_info(self) -> None:
         """Ask the directly-connected amplifier to identify itself (0x14)."""

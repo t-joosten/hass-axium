@@ -1,9 +1,9 @@
-"""Parsing and accessor helpers for Axium zone and group configuration.
+"""Parsing and accessor helpers for Axium zone configuration.
 
-Zones are stored as a list of ``{"zone": int, "name": str}`` dictionaries and
-groups as a list of ``{"name": str, "zones": [int, ...]}`` dictionaries. The UI
-accepts zones as a comma-separated ``number=Name`` string (the name is
-optional), e.g. ``11=Kitchen, 12=Living room, 13``.
+Zones are stored as a list of ``{"zone": int, "name": str}`` dictionaries. The
+UI accepts zones as a comma-separated ``number=Name`` string (the name is
+optional), e.g. ``11=Kitchen, 12=Living room, 13``. Grouping is handled live on
+the amplifier (native media-player grouping), not in configuration.
 """
 
 from __future__ import annotations
@@ -12,13 +12,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 
-from .const import (
-    CONF_GROUPS,
-    CONF_ZONES,
-    NAME_KEY,
-    ZONE_KEY,
-    ZONES_KEY,
-)
+from .const import CONF_ZONES, NAME_KEY, ZONE_KEY
 
 ZONE_MIN = 0
 ZONE_MAX = 95
@@ -88,43 +82,6 @@ def zones_from_numbers(numbers: list[int]) -> list[dict[str, Any]]:
     return [{ZONE_KEY: n, NAME_KEY: default_zone_name(n)} for n in unique]
 
 
-def groups_from_memberships(
-    memberships: list[list[int]], valid_zones: set[int]
-) -> list[dict[str, Any]]:
-    """Build default-named groups from detected zone memberships.
-
-    Members are restricted to ``valid_zones``; a zone is placed in at most one
-    group (the amplifier enforces the same), and only groups of 2+ zones are
-    kept. Groups are named ``Group 1``, ``Group 2`` … for later renaming.
-    """
-    groups: list[dict[str, Any]] = []
-    seen: set[int] = set()
-    for members in memberships:
-        zones = sorted({z for z in members if z in valid_zones and z not in seen})
-        if len(zones) >= 2:
-            seen.update(zones)
-            groups.append({NAME_KEY: f"Group {len(groups) + 1}", ZONES_KEY: zones})
-    return groups
-
-
-def normalise_groups(raw: Any) -> list[dict[str, Any]]:
-    """Normalise stored group definitions, dropping malformed entries."""
-    if not isinstance(raw, list):
-        return []
-    groups: list[dict[str, Any]] = []
-    for item in raw:
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get(NAME_KEY, "")).strip()
-        zones = item.get(ZONES_KEY, [])
-        if not name or not isinstance(zones, list) or not zones:
-            continue
-        groups.append(
-            {NAME_KEY: name, ZONES_KEY: sorted({int(zone) for zone in zones})}
-        )
-    return groups
-
-
 def get_zones(entry: ConfigEntry) -> list[dict[str, Any]]:
     """Return the effective zone list for a config entry (options win)."""
     raw = entry.options.get(CONF_ZONES, entry.data.get(CONF_ZONES))
@@ -134,9 +91,3 @@ def get_zones(entry: ConfigEntry) -> list[dict[str, Any]]:
         return parse_zone_spec(raw)
     except ValueError:
         return []
-
-
-def get_groups(entry: ConfigEntry) -> list[dict[str, Any]]:
-    """Return the effective group list for a config entry (options win)."""
-    raw = entry.options.get(CONF_GROUPS, entry.data.get(CONF_GROUPS, []))
-    return normalise_groups(raw)
