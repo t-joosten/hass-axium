@@ -38,9 +38,42 @@ from a keypad or the front panel (a `local_push` integration — no polling).
 
 You can verify connectivity before installing by opening a telnet session to the
 amplifier on port 17037 (the protocol explicitly supports this for testing), or
-by running the bundled [probe script](#testing-with-the-probe-script).
+by running the bundled [probe script](#probe-script).
 
-## Testing with the probe script
+## Testing without hardware
+
+You can develop and test the integration with no amplifier present.
+
+### Simulator
+
+[`scripts/simulator.py`](scripts/simulator.py) emulates an **AX-800DAV**. It
+listens on TCP 17037, identifies itself as an AX-800DAV, tracks per-zone state,
+and pushes notifications back — so you can point the Home Assistant integration
+at it exactly as you would a real amplifier.
+
+Run it on any PC on your network (stdlib only, Python 3.9+):
+
+```bash
+python scripts/simulator.py
+python scripts/simulator.py --zones "1=Kitchen, 2=Living room, 3=Bedroom"
+```
+
+Then add the integration in Home Assistant using that PC's IP address and port
+`17037`. The amplifier device will show up as an **AX-800DAV**.
+
+It logs all traffic and gives you an interactive console to simulate
+front-panel/keypad changes (so you can verify Home Assistant updates live):
+
+```
+power 1 on            # turn zone 1 on
+vol 2 40              # set zone 2 to 40%
+source 1 airplay      # switch zone 1 to AirPlay
+mute 3 on             # mute zone 3
+status                # show all zones
+quit                  # stop
+```
+
+### Probe script
 
 [`scripts/probe.py`](scripts/probe.py) is a standalone, dependency-free tool
 (Python 3.9+ stdlib only) you can run from any PC on the same network to confirm

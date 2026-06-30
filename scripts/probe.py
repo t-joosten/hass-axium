@@ -73,11 +73,14 @@ COMMAND_NAMES = {
     0xB9: "Response: extended device information",
 }
 
-# Source data-byte (lower 6 bits) -> physical source number (S1..S16).
-BYTE_TO_SOURCE = {
+# Source data-byte (lower 6 bits) -> friendly name.
+_SOURCE_NUMBER = {
     0x05: 1, 0x06: 2, 0x07: 3, 0x03: 4, 0x00: 5, 0x01: 6, 0x02: 7, 0x04: 8,
     0x08: 9, 0x09: 10, 0x0A: 11, 0x0B: 12, 0x0C: 13, 0x0D: 14, 0x0E: 15, 0x0F: 16,
 }
+SOURCE_BYTE_TO_NAME = {byte: f"Source {n}" for byte, n in _SOURCE_NUMBER.items()}
+SOURCE_BYTE_TO_NAME[0x10] = "AirPlay"
+SOURCE_BYTE_TO_NAME[0x12] = "Media Player"
 
 POWER_TEXT = {
     0x00: "A Standby (off)", 0x01: "A Power On", 0x02: "B Standby",
@@ -135,14 +138,15 @@ def describe(frame: bytes) -> str:
     if command == 0x04 and data:
         return f"{head}  ->  {round(data[0] / 160 * 100)}% (v1=0x{data[0]:02X})"
     if command == 0x03 and data:
-        src = BYTE_TO_SOURCE.get(data[0] & 0x3F, "?")
+        masked = data[0] & 0x3F
+        src = SOURCE_BYTE_TO_NAME.get(masked, f"source 0x{masked:02X}")
         flags = []
         if data[0] & 0x80:
             flags.append("turn-on")
         if data[0] & 0x40:
             flags.append("audio-only")
         suffix = f" [{', '.join(flags)}]" if flags else ""
-        return f"{head}  ->  Source {src}{suffix}"
+        return f"{head}  ->  {src}{suffix}"
     if command == 0x1C and data:
         return f"{head}  ->  '{data.decode('utf-8', errors='replace').rstrip(chr(0))}'"
     if data:
