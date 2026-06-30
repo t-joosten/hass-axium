@@ -121,26 +121,35 @@ class Zone:
 class Simulator:
     """Holds zone state and the set of connected clients."""
 
-    def __init__(self, zones: dict[int, str]) -> None:
-        self.zones = {n: Zone(n, name) for n, name in zones.items()}
+    def __init__(
+        self, zones: dict[int, str], peer_zones: dict[int, str] | None = None
+    ) -> None:
+        peer_zones = peer_zones or {}
+        merged = {**zones, **peer_zones}
+        self.zones = {n: Zone(n, name) for n, name in merged.items()}
+        # Own zones vs a simulated second amp's zones (for stack discovery).
+        self.own_zone_numbers = sorted(zones)
+        self.peer_zone_numbers = sorted(peer_zones)
         self.clients: set[asyncio.StreamWriter] = set()
         # Active zone links: list of (set of zone numbers, options byte).
         self.links: list[tuple[set[int], int]] = []
 
     # -- frame production -------------------------------------------------
 
-    def device_info_frame(self, include_zones: bool = False) -> bytes:
-        """Build the Request Device information response (0x94).
+    def device_info_frame(
+        self, zone_list: list[int] | None = None, unit_id: int = UNIT_ID
+    ) -> bytes:
+        """Build a Request Device information response (0x94) for one unit.
 
-        When ``include_zones`` is set (request option bit 2), the unit's zone
-        numbers are appended after the unit ID.
+        ``zone_list`` (when given, i.e. request option bit 2 was set) is appended
+        after the unit ID.
         """
         payload = [
             0x94, 0x00, DEVICE_TYPE, FIRMWARE_MAJOR, MODEL_CODE,
-            (UNIT_ID >> 8) & 0xFF, UNIT_ID & 0xFF,
+            (unit_id >> 8) & 0xFF, unit_id & 0xFF,
         ]
-        if include_zones:
-            payload.extend(self.zones)
+        if zone_list:
+            payload.extend(zone_list)
         return encode(*payload)
 
     def snapshot_frames(self) -> list[bytes]:
@@ -212,11 +221,20 @@ class Simulator:
 
         if command == 0x14:  # Request Device information
             include_zones = bool(data and data[0] & 0x04)
-            reply = self.device_info_frame(include_zones=include_zones)
+            suffix = " + zones" if include_zones else ""
+            reply = self.device_info_frame(
+                self.own_zone_numbers if include_zones else None, UNIT_ID
+            )
             writer.write(reply)
             await self._safe_drain(writer)
-            note = "AX-800DAV" + (" + zones" if include_zones else "")
-            log("-> reply  ", reply, note)
+            log("-> reply  ", reply, "AX-800DAV" + suffix)
+            if self.peer_zone_numbers:  # emulate a second amp in the stack
+                reply2 = self.device_info_frame(
+                    self.peer_zone_numbers if include_zones else None, UNIT_ID + 1
+                )
+                writer.write(reply2)
+                await self._safe_drain(writer)
+                log("-> reply  ", reply2, "AX-800DAV (peer)" + suffix)
             return
         if command == 0x08:  # Request Protocol Version
             writer.write(encode(0x88, zone_byte, 0x01))
@@ -453,7 +471,8 @@ def parse_zones(spec: str) -> dict[int, str]:
 
 async def main_async(args: argparse.Namespace) -> int:
     """Start the server and the console, run until stopped."""
-    sim = Simulator(parse_zones(args.zones))
+    peer = parse_zones(args.peer_zones) if args.peer_zones else {}
+    sim = Simulator(parse_zones(args.zones), peer)
     stop = asyncio.Event()
     server = await asyncio.start_server(sim.handle_client, args.host, args.port)
     addrs = ", ".join(str(s.getsockname()) for s in server.sockets)
@@ -480,6 +499,11 @@ def main() -> int:
         default="1=Kitchen, 2=Living room, 3=Bedroom, 4=Office, "
         "5=Bathroom, 6=Patio, 7=Garage, 8=Kids room",
         help="Zones as 'number=Name, ...'",
+    )
+    parser.add_argument(
+        "--peer-zones",
+        default="",
+        help="Second amp's zones (e.g. '9=Den, 10=Loft') to emulate a 2-amp stack",
     )
     args = parser.parse_args()
     try:

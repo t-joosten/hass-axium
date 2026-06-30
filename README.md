@@ -56,6 +56,8 @@ Run it on any PC on your network (stdlib only, Python 3.9+):
 ```bash
 python scripts/simulator.py
 python scripts/simulator.py --zones "1=Kitchen, 2=Living room, 3=Bedroom"
+# emulate a two-amp stack (16 zones):
+python scripts/simulator.py --zones "1=A,...,8=H" --peer-zones "9=I,...,16=P"
 ```
 
 Then add the integration in Home Assistant using that PC's IP address and port
@@ -150,6 +152,16 @@ waits for the reply), so you get a clear error instead of a silent failure:
   not an Axium amplifier (or it did not reply in time).
 
 Each zone becomes its own device, nested under the amplifier device.
+
+#### Multi-amplifier stacks
+
+Axium amplifiers can be stacked, sharing one system-wide zone space (e.g. two
+8-zone **AX-800DAV**s give zones 1–16). You only connect to **one** amplifier —
+it bridges commands to the rest of the stack — and the integration **discovers
+the whole stack**, creating zones for every unit (16 in that example). Zone
+groups are also system-wide, so a group can span amplifiers, and the group limit
+follows the total zone count (16 zones → up to 8 groups). If a stacked unit is
+not discovered, you can add its zones manually in **Edit zones and names**.
 
 ### Renaming zones
 

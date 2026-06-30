@@ -29,8 +29,6 @@ from .const import (
     DEFAULT_PORT,
     DEFAULT_ZONE_COUNT,
     DEVICE_INFO_LIST_ZONES,
-    DEVICE_INFO_NO_EXPANSION_REPLY,
-    DEVICE_INFO_REPLY_ON_PORT_ONLY,
     DOMAIN,
     LINK_REQUEST_GROUPED,
     NAME_KEY,
@@ -68,19 +66,16 @@ async def _async_probe_amplifier(host: str, port: int) -> AxiumDeviceInfo | None
     )
     loop = asyncio.get_running_loop()
     try:
+        # Ask the whole amplifier stack (no "no expansion" bit) for device info
+        # plus each unit's zone list, and for the current zone groups.
         writer.write(
-            protocol.encode(
-                CMD_REQUEST_DEVICE_INFO,
-                ZONE_ALL,
-                DEVICE_INFO_NO_EXPANSION_REPLY
-                | DEVICE_INFO_REPLY_ON_PORT_ONLY
-                | DEVICE_INFO_LIST_ZONES,
-            )
+            protocol.encode(CMD_REQUEST_DEVICE_INFO, ZONE_ALL, DEVICE_INFO_LIST_ZONES)
         )
         writer.write(protocol.encode(CMD_LINK_ZONES, ZONE_ALL, LINK_REQUEST_GROUPED))
         await writer.drain()
 
         device_info: AxiumDeviceInfo | None = None
+        all_zones: set[int] = set()
         groups: list[list[int]] = []
         end = loop.time() + _PROBE_TIMEOUT
         while True:
@@ -97,9 +92,13 @@ async def _async_probe_amplifier(host: str, port: int) -> AxiumDeviceInfo | None
             if frame is None or len(frame) < 2:
                 continue
             if frame[0] == RESP_DEVICE_INFO:
-                device_info = parse_device_info(frame[2:]) or AxiumDeviceInfo()
-                # Once identified, wait only a short grace for group replies.
-                end = min(end, loop.time() + _GROUP_GRACE)
+                info = parse_device_info(frame[2:]) or AxiumDeviceInfo()
+                all_zones.update(info.zones)
+                if device_info is None:
+                    # First reply (the directly-connected amp) labels the hub;
+                    # wait a short grace for other stack members and groups.
+                    device_info = info
+                    end = min(end, loop.time() + _GROUP_GRACE)
             elif frame[0] == CMD_LINK_ZONES:
                 members = parse_link_group(frame[2:])
                 if members:
@@ -107,6 +106,7 @@ async def _async_probe_amplifier(host: str, port: int) -> AxiumDeviceInfo | None
 
         if device_info is None:
             return None
+        device_info.zones = sorted(all_zones)
         device_info.link_groups = groups
         return device_info
     finally:
@@ -241,8 +241,8 @@ class AxiumOptionsFlow(OptionsFlow):
                 errors[CONF_GROUP_NAME] = "invalid_group_name"
             elif name.casefold() in existing:
                 errors[CONF_GROUP_NAME] = "duplicate_group"
-            elif not selected:
-                errors[CONF_GROUP_ZONES] = "no_group_zones"
+            elif len(selected) < 2:
+                errors[CONF_GROUP_ZONES] = "min_group_zones"
             else:
                 self._groups.append(
                     {

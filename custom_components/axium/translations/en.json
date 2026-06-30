@@ -70,7 +70,7 @@
       "invalid_zones": "Use a comma-separated list like 1=Kitchen, 2=Living room. Zone numbers must be unique and between 0 and 95.",
       "invalid_group_name": "Enter a name for the group.",
       "duplicate_group": "A group with that name already exists.",
-      "no_group_zones": "Select at least one zone for the group."
+      "min_group_zones": "Select at least two zones for the group."
     }
   }
 }
