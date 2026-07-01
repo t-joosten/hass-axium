@@ -37,6 +37,14 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     Served via a view with an explicit ``application/javascript`` content type
     so it always loads as an ES module — some platforms (notably Windows) would
     otherwise serve ``.js`` as ``text/plain``, which browsers refuse to run.
+
+    The frontend imports the card from a **version-stamped path**
+    (``/axium/axium-source-card-<version>.js``) rather than a ``?v=`` query. A
+    brand-new path is one no browser HTTP cache or service worker has seen
+    before, so every release is guaranteed to load fresh — a plain query string
+    can be ignored by a service worker's cache key and serve a stale/broken copy.
+    The unversioned ``/axium/axium-source-card.js`` stays valid for anyone who
+    added it as a manual dashboard resource.
     """
     if hass.data.get(f"{DOMAIN}_card_registered"):
         return
@@ -47,6 +55,9 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         from homeassistant.components.http import HomeAssistantView
         from homeassistant.loader import async_get_integration
 
+        integration = await async_get_integration(hass, DOMAIN)
+        version = str(integration.version)
+
         card_path = Path(__file__).parent / _CARD_PATH
         card_bytes = await hass.async_add_executor_job(card_path.read_bytes)
 
@@ -54,25 +65,37 @@ async def _async_register_card(hass: HomeAssistant) -> None:
             """Serve the Axium dashboard card with a correct JS content type."""
 
             url = _CARD_URL
+            extra_urls = ["/axium/axium-source-card-{version}.js"]
             name = "axium:card"
             requires_auth = False
 
-            async def get(self, request: web.Request) -> web.Response:
-                """Return the card JavaScript."""
+            async def get(
+                self, request: web.Request, version: str | None = None
+            ) -> web.Response:
+                """Return the card JavaScript.
+
+                A version-stamped path is content-addressed, so it may be cached
+                forever; the unversioned path uses a short max-age.
+                """
+                cache = (
+                    "public, max-age=31536000, immutable"
+                    if version is not None
+                    else "public, max-age=300"
+                )
                 return web.Response(
                     body=card_bytes,
                     content_type="application/javascript",
                     charset="utf-8",
-                    headers={"Cache-Control": "public, max-age=86400"},
+                    headers={"Cache-Control": cache},
                 )
 
         hass.http.register_view(AxiumCardView())
-        # Version the URL so browsers re-fetch the card after an update.
-        integration = await async_get_integration(hass, DOMAIN)
-        add_extra_js_url(hass, f"{_CARD_URL}?v={integration.version}")
+        add_extra_js_url(hass, f"/axium/axium-source-card-{version}.js")
         hass.data[f"{DOMAIN}_card_registered"] = True
     except Exception as err:  # noqa: BLE001 - card is optional, never block setup
-        _LOGGER.debug("Could not auto-register the Axium dashboard card: %s", err)
+        # Surfaced at warning level: without the card the dashboard still works,
+        # but a silent failure here is exactly what makes it hard to diagnose.
+        _LOGGER.warning("Could not auto-register the Axium dashboard card: %s", err)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
