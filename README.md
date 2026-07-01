@@ -394,10 +394,13 @@ source: Apple TV
 ```
 
 Zones are auto-detected (any Axium zone whose source list includes the source).
-The visual editor lets you pick the **amplifier** first, then one of that hub's
-sources — only Axium sources are listed, never those of other media players. If
-you run more than one Axium amp, set `hub:` to its config-entry id to scope the
-card to a single amplifier (the editor fills this in for you). You can also
+The visual editor's **Source** dropdown lists every source across all your Axium
+amplifiers — only Axium sources, never those of other media players. Sources
+without a name on the amplifier show up by their id (e.g. `Source 5`). When you
+have more than one amplifier, each entry is prefixed with the amp name
+(`[amp] [source]`) so they stay distinct, and the card header is prefixed the
+same way; a single (even multi-amp) system just shows the source. Selecting a
+source records the owning amplifier in `hub:` automatically. You can also
 override the zones with explicit `entities:` and set a custom `name:`.
 
 ## How it works

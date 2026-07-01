@@ -10,9 +10,13 @@
  * Config:
  *   type: custom:axium-source-card
  *   source: Apple TV          # required — the source this card controls
- *   hub: <config_entry_id>    # optional — restrict to one amplifier; defaults
- *                             #            to the only Axium hub when there's one
- *   name: Apple TV            # optional — header text (defaults to source)
+ *   hub: <config_entry_id>    # optional — the amplifier this source belongs to,
+ *                             #            set automatically by the visual editor
+ *                             #            and only needed to disambiguate a
+ *                             #            source shared across multiple hubs
+ *   name: Apple TV            # optional — header text; defaults to the source,
+ *                             #            prefixed with the amp name when there
+ *                             #            is more than one Axium hub
  *   entities:                 # optional — zone media_players; auto-detected
  *     - media_player.kitchen  #            from the source list when omitted
  *     - media_player.living_room
@@ -81,6 +85,46 @@ function axiumHubs(hass) {
       return { id: cid, name };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// Separator embedded in a picker token. A hub id (a hex config-entry id) never
+// contains it, so splitting on the FIRST occurrence recovers the hub id even if
+// a source name happens to include the character.
+const TOKEN_SEP = "|";
+
+/**
+ * Every (hub, source) pair across all Axium amplifiers, as pickable choices.
+ * Each choice carries a stable `token` ("<hub id>|<source>") and a `label`.
+ * The label is prefixed with the amplifier name only when more than one hub is
+ * present, so a single (possibly multi-amp) system stays uncluttered while
+ * multiple hubs are disambiguated as "[hub] [source]".
+ */
+function axiumSourceChoices(hass) {
+  const hubs = axiumHubs(hass);
+  const multi = hubs.length > 1;
+  const states = (hass && hass.states) || {};
+  const out = [];
+  const seen = new Set();
+  for (const hub of hubs) {
+    const sources = new Set();
+    for (const id of axiumMediaPlayers(hass, hub.id)) {
+      const list = states[id].attributes.source_list;
+      if (Array.isArray(list)) list.forEach((s) => sources.add(s));
+    }
+    [...sources].sort().forEach((source) => {
+      const token = `${hub.id}${TOKEN_SEP}${source}`;
+      if (seen.has(token)) return;
+      seen.add(token);
+      out.push({
+        hub: hub.id,
+        hubName: hub.name,
+        source,
+        token,
+        label: multi ? `${hub.name} ${source}` : source,
+      });
+    });
+  }
+  return out;
 }
 
 class AxiumSourceCard extends HTMLElement {
@@ -186,6 +230,22 @@ class AxiumSourceCard extends HTMLElement {
     return n ? n : id.split(".")[1].replace(/_/g, " ");
   }
 
+  /**
+   * Header text: an explicit `name`, else the source — prefixed with the
+   * amplifier name when more than one Axium hub exists, so cards from different
+   * amps stay distinguishable ("[hub] [source]").
+   */
+  _title() {
+    if (this._config.name) return this._config.name;
+    const src = this._config.source || "";
+    const hubs = axiumHubs(this._hass);
+    if (this._config.hub && hubs.length > 1) {
+      const hub = hubs.find((h) => h.id === this._config.hub);
+      if (hub) return `${hub.name} ${src}`;
+    }
+    return src;
+  }
+
   // -- services --------------------------------------------------------
 
   _call(service, data) {
@@ -282,8 +342,7 @@ class AxiumSourceCard extends HTMLElement {
 
   _update() {
     const root = this.shadowRoot;
-    root.getElementById("title").textContent =
-      this._config.name || this._config.source;
+    root.getElementById("title").textContent = this._title();
 
     const leader = this._leader();
     const active = this._activeIds();
@@ -417,21 +476,17 @@ class AxiumSourceCardEditor extends HTMLElement {
     this._render();
   }
 
-  /** The hub whose sources the editor should offer (explicit or the only one). */
-  _effectiveHub() {
-    if (this._config && this._config.hub) return this._config.hub;
-    const hubs = axiumHubs(this._hass);
-    return hubs.length === 1 ? hubs[0].id : undefined;
-  }
-
-  _sourceOptions(hubId) {
-    const set = new Set();
-    const states = (this._hass && this._hass.states) || {};
-    for (const id of axiumMediaPlayers(this._hass, hubId)) {
-      const list = states[id].attributes.source_list;
-      if (Array.isArray(list)) list.forEach((s) => set.add(s));
+  /** The picker token for the currently configured (hub, source), if any. */
+  _currentToken(choices) {
+    const { hub, source } = this._config;
+    if (!source) return undefined;
+    if (hub) {
+      const exact = choices.find((c) => c.hub === hub && c.source === source);
+      if (exact) return exact.token;
     }
-    return [...set].sort();
+    // Legacy cards (source only, no hub): match the first choice by source name.
+    const bySource = choices.find((c) => c.source === source);
+    return bySource ? bySource.token : undefined;
   }
 
   async _ensureHaForm() {
@@ -456,51 +511,48 @@ class AxiumSourceCardEditor extends HTMLElement {
       this.appendChild(this._form);
       this._ensureHaForm();
     }
-    const hub = this._effectiveHub();
-    const hubs = axiumHubs(this._hass);
-    const hubOptions = hubs.map((h) => ({ value: h.id, label: h.name }));
-    const options = this._sourceOptions(hub).map((s) => ({ value: s, label: s }));
+    this._choices = axiumSourceChoices(this._hass);
+    const options = this._choices.map((c) => ({ value: c.token, label: c.label }));
 
-    // Reflect the resolved hub (e.g. the sole amplifier) back into the form data
-    // so picking a source persists the hub alongside it.
-    const data = { ...this._config };
-    if (!data.hub && hub) data.hub = hub;
+    // A single "Source" dropdown listing every amplifier's sources. The chosen
+    // token encodes both the hub and the source; `name` overrides the header.
+    // With no choices (registry unavailable) fall back to a raw source field.
+    const data = {
+      ...this._config,
+      source: options.length
+        ? this._currentToken(this._choices)
+        : this._config.source,
+    };
 
     this._form.hass = this._hass;
     this._form.data = data;
     this._form.schema = [
       {
-        name: "hub",
-        required: true,
-        selector: hubOptions.length
-          ? { select: { mode: "dropdown", options: hubOptions } }
-          : { text: {} },
-      },
-      {
         name: "source",
         required: true,
         selector: options.length
-          ? { select: { mode: "dropdown", custom_value: true, options } }
+          ? { select: { mode: "dropdown", options } }
           : { text: {} },
       },
       { name: "name", selector: { text: {} } },
     ];
     this._form.computeLabel = (s) =>
-      ({
-        hub: "Amplifier",
-        source: "Source",
-        name: "Card name (optional)",
-      }[s.name] || s.name);
+      ({ source: "Source", name: "Card name (optional)" }[s.name] || s.name);
   }
 
   _changed(ev) {
     ev.stopPropagation();
     const value = { ...ev.detail.value };
-    // Switching amplifiers invalidates a source that the new hub doesn't offer.
-    if (value.hub !== this._config.hub && value.source) {
-      if (!this._sourceOptions(value.hub).includes(value.source)) {
-        delete value.source;
-      }
+    // Decode the picked token back into an explicit hub + source pair.
+    const token = value.source;
+    const choice = (this._choices || []).find((c) => c.token === token);
+    if (choice) {
+      value.hub = choice.hub;
+      value.source = choice.source;
+    } else if (typeof token === "string" && token.includes(TOKEN_SEP)) {
+      const sep = token.indexOf(TOKEN_SEP);
+      value.hub = token.slice(0, sep);
+      value.source = token.slice(sep + 1);
     }
     this._config = value;
     this.dispatchEvent(
