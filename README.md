@@ -393,8 +393,12 @@ type: custom:axium-source-card
 source: Apple TV
 ```
 
-Zones are auto-detected (any zone whose source list includes the source). You
-can override with explicit `entities:` and a custom `name:`.
+Zones are auto-detected (any Axium zone whose source list includes the source).
+The visual editor lets you pick the **amplifier** first, then one of that hub's
+sources — only Axium sources are listed, never those of other media players. If
+you run more than one Axium amp, set `hub:` to its config-entry id to scope the
+card to a single amplifier (the editor fills this in for you). You can also
+override the zones with explicit `entities:` and set a custom `name:`.
 
 ## How it works
 

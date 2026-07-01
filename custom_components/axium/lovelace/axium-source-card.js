@@ -10,6 +10,8 @@
  * Config:
  *   type: custom:axium-source-card
  *   source: Apple TV          # required — the source this card controls
+ *   hub: <config_entry_id>    # optional — restrict to one amplifier; defaults
+ *                             #            to the only Axium hub when there's one
  *   name: Apple TV            # optional — header text (defaults to source)
  *   entities:                 # optional — zone media_players; auto-detected
  *     - media_player.kitchen  #            from the source list when omitted
@@ -27,17 +29,58 @@ const OFF_STATES = ["off", "unavailable", "unknown", "standby"];
 /**
  * Return the media_player entity_ids that belong to the Axium integration.
  * Uses the entity registry (`hass.entities[id].platform`); if the registry is
- * unavailable it falls back to every media player.
+ * unavailable it falls back to every media player. When `hubId` (a config
+ * entry id) is given, only zones belonging to that specific amplifier are
+ * returned.
  */
-function axiumMediaPlayers(hass) {
+function axiumMediaPlayers(hass, hubId) {
   const states = (hass && hass.states) || {};
   const registry = hass && hass.entities;
   return Object.keys(states).filter((id) => {
     if (!id.startsWith("media_player.")) return false;
     const entry = registry && registry[id];
-    if (entry) return entry.platform === "axium";
-    return !registry; // no registry at all -> include (best effort)
+    if (entry) {
+      if (entry.platform !== "axium") return false;
+      if (hubId && entry.config_entry_id !== hubId) return false;
+      return true;
+    }
+    // No registry: can't confirm the hub, so only fall back when unfiltered.
+    return !registry && !hubId;
   });
+}
+
+/**
+ * Enumerate the Axium amplifiers (config entries) that have media_player
+ * entities, returning `{ id, name }` for each. The name is taken from the hub
+ * device (identifiers include `["axium", <config_entry_id>]`).
+ */
+function axiumHubs(hass) {
+  const states = (hass && hass.states) || {};
+  const registry = (hass && hass.entities) || {};
+  const devices = (hass && hass.devices) || {};
+  const ids = new Set();
+  for (const id of Object.keys(states)) {
+    if (!id.startsWith("media_player.")) continue;
+    const entry = registry[id];
+    if (entry && entry.platform === "axium" && entry.config_entry_id) {
+      ids.add(entry.config_entry_id);
+    }
+  }
+  return [...ids]
+    .map((cid) => {
+      let name = cid;
+      for (const dev of Object.values(devices)) {
+        const match = (dev.identifiers || []).some(
+          (t) => t[0] === "axium" && t[1] === cid
+        );
+        if (match) {
+          name = dev.name_by_user || dev.name || cid;
+          break;
+        }
+      }
+      return { id: cid, name };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 class AxiumSourceCard extends HTMLElement {
@@ -108,7 +151,7 @@ class AxiumSourceCard extends HTMLElement {
   _zones() {
     if (Array.isArray(this._config.entities)) return this._config.entities;
     const src = this._config.source;
-    return axiumMediaPlayers(this._hass)
+    return axiumMediaPlayers(this._hass, this._config.hub)
       .filter((id) => {
         const list = this._hass.states[id].attributes.source_list;
         return Array.isArray(list) && list.includes(src);
@@ -362,7 +405,7 @@ AxiumSourceCard.styles = `
   .ctrl.play ha-icon { --mdc-icon-size: 32px; }
 `;
 
-/** Visual (UI) editor — a Source dropdown plus an optional card name. */
+/** Visual (UI) editor — pick an amplifier, then a source, plus an optional name. */
 class AxiumSourceCardEditor extends HTMLElement {
   setConfig(config) {
     this._config = { ...config };
@@ -374,10 +417,17 @@ class AxiumSourceCardEditor extends HTMLElement {
     this._render();
   }
 
-  _sourceOptions() {
+  /** The hub whose sources the editor should offer (explicit or the only one). */
+  _effectiveHub() {
+    if (this._config && this._config.hub) return this._config.hub;
+    const hubs = axiumHubs(this._hass);
+    return hubs.length === 1 ? hubs[0].id : undefined;
+  }
+
+  _sourceOptions(hubId) {
     const set = new Set();
     const states = (this._hass && this._hass.states) || {};
-    for (const id of axiumMediaPlayers(this._hass)) {
+    for (const id of axiumMediaPlayers(this._hass, hubId)) {
       const list = states[id].attributes.source_list;
       if (Array.isArray(list)) list.forEach((s) => set.add(s));
     }
@@ -406,10 +456,26 @@ class AxiumSourceCardEditor extends HTMLElement {
       this.appendChild(this._form);
       this._ensureHaForm();
     }
-    const options = this._sourceOptions().map((s) => ({ value: s, label: s }));
+    const hub = this._effectiveHub();
+    const hubs = axiumHubs(this._hass);
+    const hubOptions = hubs.map((h) => ({ value: h.id, label: h.name }));
+    const options = this._sourceOptions(hub).map((s) => ({ value: s, label: s }));
+
+    // Reflect the resolved hub (e.g. the sole amplifier) back into the form data
+    // so picking a source persists the hub alongside it.
+    const data = { ...this._config };
+    if (!data.hub && hub) data.hub = hub;
+
     this._form.hass = this._hass;
-    this._form.data = this._config;
+    this._form.data = data;
     this._form.schema = [
+      {
+        name: "hub",
+        required: true,
+        selector: hubOptions.length
+          ? { select: { mode: "dropdown", options: hubOptions } }
+          : { text: {} },
+      },
       {
         name: "source",
         required: true,
@@ -420,18 +486,31 @@ class AxiumSourceCardEditor extends HTMLElement {
       { name: "name", selector: { text: {} } },
     ];
     this._form.computeLabel = (s) =>
-      ({ source: "Source", name: "Card name (optional)" }[s.name] || s.name);
+      ({
+        hub: "Amplifier",
+        source: "Source",
+        name: "Card name (optional)",
+      }[s.name] || s.name);
   }
 
   _changed(ev) {
     ev.stopPropagation();
+    const value = { ...ev.detail.value };
+    // Switching amplifiers invalidates a source that the new hub doesn't offer.
+    if (value.hub !== this._config.hub && value.source) {
+      if (!this._sourceOptions(value.hub).includes(value.source)) {
+        delete value.source;
+      }
+    }
+    this._config = value;
     this.dispatchEvent(
       new CustomEvent("config-changed", {
-        detail: { config: ev.detail.value },
+        detail: { config: value },
         bubbles: true,
         composed: true,
       })
     );
+    this._render();
   }
 }
 
