@@ -461,6 +461,21 @@ class Simulator:
         if not base:
             return
         primary = base[0]
+        # No-data power/mute/volume/source is a request: reply with current state.
+        if command in (0x01, 0x02, 0x03, 0x04) and not data:
+            for z in base:
+                if command == 0x01:
+                    reply = encode(0x01, z.number, 0x01 if z.power else 0x00)
+                elif command == 0x02:
+                    reply = encode(0x02, z.number, 0x00 if z.muted else 0x01)
+                elif command == 0x04:
+                    reply = encode(0x04, z.number, z.volume)
+                else:
+                    reply = encode(0x03, z.number, z.source)
+                writer.write(reply)
+                log("-> reply  ", reply, f"{z.name} state")
+            await self._safe_drain(writer)
+            return
         if command == 0x01 and data:  # Power
             on = self._power_target(data[0], primary)
             for z in self._expand(base, LINK_OPT_STANDBY):

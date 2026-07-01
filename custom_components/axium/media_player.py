@@ -126,11 +126,12 @@ class AxiumZone(MediaPlayerEntity):
         )
 
     async def async_added_to_hass(self) -> None:
-        """Register for updates and expose this zone's entity_id."""
+        """Register for updates, expose the entity_id, and read current state."""
         self._controller.register_zone_entity(self._zone, self.entity_id)
         self.async_on_remove(
             self._controller.register_listener(self._zone, self._handle_update)
         )
+        await self._controller.async_request_zone_state(self._zone)
 
     @callback
     def _handle_update(self) -> None:

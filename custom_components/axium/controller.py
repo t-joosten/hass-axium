@@ -354,6 +354,10 @@ class AxiumController:
             await self._request_link_groups()
             await self._request_source_names()
             await self._request_preset_names()
+            # Re-read known zones' state (covers reconnects; on first connect
+            # entities request it themselves as they are added).
+            for zone in list(self._zone_entity_ids):
+                await self.async_request_zone_state(zone)
             try:
                 await self._read_loop()
             except asyncio.CancelledError:
@@ -888,6 +892,11 @@ class AxiumController:
         unit = self._unit_bytes()
         if unit is not None:
             await self.async_send(CMD_REQUEST_EXTENDED_INFO, ZONE_ALL, unit[0], unit[1])
+
+    async def async_request_zone_state(self, zone: int) -> None:
+        """Read a zone's power, mute, volume and source (no data = request)."""
+        for command in (CMD_POWER, CMD_MUTE, CMD_VOLUME, CMD_SOURCE):
+            await self.async_send(command, zone)
 
     async def async_media_control(
         self, source: int, control: int, *extra: int
