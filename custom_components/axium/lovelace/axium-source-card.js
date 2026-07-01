@@ -24,6 +24,22 @@ const SUPPORT_VOLUME_STEP = 1024;
 const SUPPORT_PLAY = 16384;
 const OFF_STATES = ["off", "unavailable", "unknown", "standby"];
 
+/**
+ * Return the media_player entity_ids that belong to the Axium integration.
+ * Uses the entity registry (`hass.entities[id].platform`); if the registry is
+ * unavailable it falls back to every media player.
+ */
+function axiumMediaPlayers(hass) {
+  const states = (hass && hass.states) || {};
+  const registry = hass && hass.entities;
+  return Object.keys(states).filter((id) => {
+    if (!id.startsWith("media_player.")) return false;
+    const entry = registry && registry[id];
+    if (entry) return entry.platform === "axium";
+    return !registry; // no registry at all -> include (best effort)
+  });
+}
+
 class AxiumSourceCard extends HTMLElement {
   constructor() {
     super();
@@ -92,13 +108,11 @@ class AxiumSourceCard extends HTMLElement {
   _zones() {
     if (Array.isArray(this._config.entities)) return this._config.entities;
     const src = this._config.source;
-    return Object.keys(this._hass.states)
-      .filter(
-        (id) =>
-          id.startsWith("media_player.") &&
-          Array.isArray(this._hass.states[id].attributes.source_list) &&
-          this._hass.states[id].attributes.source_list.includes(src)
-      )
+    return axiumMediaPlayers(this._hass)
+      .filter((id) => {
+        const list = this._hass.states[id].attributes.source_list;
+        return Array.isArray(list) && list.includes(src);
+      })
       .sort();
   }
 
@@ -363,11 +377,9 @@ class AxiumSourceCardEditor extends HTMLElement {
   _sourceOptions() {
     const set = new Set();
     const states = (this._hass && this._hass.states) || {};
-    for (const id of Object.keys(states)) {
-      if (id.startsWith("media_player.")) {
-        const list = states[id].attributes.source_list;
-        if (Array.isArray(list)) list.forEach((s) => set.add(s));
-      }
+    for (const id of axiumMediaPlayers(this._hass)) {
+      const list = states[id].attributes.source_list;
+      if (Array.isArray(list)) list.forEach((s) => set.add(s));
     }
     return [...set].sort();
   }
