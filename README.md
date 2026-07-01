@@ -393,15 +393,20 @@ type: custom:axium-source-card
 source: Apple TV
 ```
 
-Zones are auto-detected (any Axium zone whose source list includes the source).
-The visual editor's **Source** dropdown lists every source across all your Axium
+Zones are auto-detected (any Axium zone that offers the chosen source). The
+visual editor's **Source** dropdown lists every source across all your Axium
 amplifiers — only Axium sources, never those of other media players. Sources
 without a name on the amplifier show up by their id (e.g. `Source 5`). When you
 have more than one amplifier, each entry is prefixed with the amp name
 (`[amp] [source]`) so they stay distinct, and the card header is prefixed the
-same way; a single (even multi-amp) system just shows the source. Selecting a
-source records the owning amplifier in `hub:` automatically. You can also
-override the zones with explicit `entities:` and set a custom `name:`.
+same way; a single (even multi-amp) system just shows the source.
+
+The card stores the source's **stable id** (its protocol byte), not the name —
+so **renaming a source on the amp doesn't break the card**; it just follows the
+new name. Selecting a source also records the owning amplifier in `hub:`
+automatically. You can override the zones with explicit `entities:` and set a
+custom `name:`. (Cards that stored a source *name* from older versions keep
+working, and migrate to the id when you re-open and save them in the editor.)
 
 ## How it works
 

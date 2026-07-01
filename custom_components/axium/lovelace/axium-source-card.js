@@ -9,7 +9,12 @@
  *
  * Config:
  *   type: custom:axium-source-card
- *   source: Apple TV          # required — the source this card controls
+ *   source: 20                # required — the source id (protocol byte) this
+ *                             #            card controls. Stored as the stable
+ *                             #            id, not the name, so renaming the
+ *                             #            source on the amp doesn't break the
+ *                             #            card. (A legacy name string still
+ *                             #            works.) The visual editor sets this.
  *   hub: <config_entry_id>    # optional — the amplifier this source belongs to,
  *                             #            set automatically by the visual editor
  *                             #            and only needed to disambiguate a
@@ -94,35 +99,43 @@ const TOKEN_SEP = "|";
 
 /**
  * Every (hub, source) pair across all Axium amplifiers, as pickable choices.
- * Each choice carries a stable `token` ("<hub id>|<source>") and a `label`.
- * The label is prefixed with the amplifier name only when more than one hub is
- * present, so a single (possibly multi-amp) system stays uncluttered while
- * multiple hubs are disambiguated as "[hub] [source]".
+ *
+ * The card stores the amplifier's stable **source id** (the protocol byte),
+ * never the display name — so renaming a source on the amp doesn't break a
+ * card. Each choice's `token` is "<hub id>|<source id>"; the `label` shows the
+ * current name, prefixed with the amplifier name only when more than one hub is
+ * present ("[hub] [name]"). Source ids come from each media_player's
+ * `source_ids` attribute (parallel to `source_list`).
  */
 function axiumSourceChoices(hass) {
   const hubs = axiumHubs(hass);
   const multi = hubs.length > 1;
   const states = (hass && hass.states) || {};
   const out = [];
-  const seen = new Set();
   for (const hub of hubs) {
-    const sources = new Set();
-    for (const id of axiumMediaPlayers(hass, hub.id)) {
-      const list = states[id].attributes.source_list;
-      if (Array.isArray(list)) list.forEach((s) => sources.add(s));
+    const byId = new Map(); // source id -> current name
+    for (const entity of axiumMediaPlayers(hass, hub.id)) {
+      const attrs = states[entity].attributes;
+      const ids = attrs.source_ids;
+      const names = attrs.source_list;
+      if (Array.isArray(ids) && Array.isArray(names)) {
+        ids.forEach((sid, i) => {
+          if (!byId.has(sid)) byId.set(sid, names[i]);
+        });
+      }
     }
-    [...sources].sort().forEach((source) => {
-      const token = `${hub.id}${TOKEN_SEP}${source}`;
-      if (seen.has(token)) return;
-      seen.add(token);
-      out.push({
-        hub: hub.id,
-        hubName: hub.name,
-        source,
-        token,
-        label: multi ? `${hub.name} ${source}` : source,
+    [...byId.entries()]
+      .sort((a, b) => String(a[1]).localeCompare(String(b[1])))
+      .forEach(([sid, name]) => {
+        out.push({
+          hub: hub.id,
+          hubName: hub.name,
+          id: sid,
+          name,
+          token: `${hub.id}${TOKEN_SEP}${sid}`,
+          label: multi ? `${hub.name} ${name}` : name,
+        });
       });
-    });
   }
   return out;
 }
@@ -144,7 +157,8 @@ class AxiumSourceCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (!hass || !this._config) return;
-    if (!this._config.source) {
+    const src = this._config.source;
+    if (src === undefined || src === null || src === "") {
       this._renderPlaceholder();
       return;
     }
@@ -168,18 +182,9 @@ class AxiumSourceCard extends HTMLElement {
 
   // Provide a default config so the card picker can render a preview.
   static getStubConfig(hass) {
-    let source = "Source 1";
-    const states = (hass && hass.states) || {};
-    for (const id of Object.keys(states)) {
-      if (id.startsWith("media_player.")) {
-        const list = states[id].attributes.source_list;
-        if (Array.isArray(list) && list.length) {
-          source = list[0];
-          break;
-        }
-      }
-    }
-    return { source };
+    const choices = axiumSourceChoices(hass);
+    if (choices.length) return { hub: choices[0].hub, source: choices[0].id };
+    return { source: 0 };
   }
 
   _renderPlaceholder() {
@@ -192,14 +197,42 @@ class AxiumSourceCard extends HTMLElement {
 
   // -- data helpers ----------------------------------------------------
 
+  /**
+   * Resolve the configured source to its CURRENT display name for one zone's
+   * state. The config stores the stable source id (a protocol byte); a legacy
+   * card may still store the name. Returns null if the zone doesn't offer it.
+   */
+  _sourceNameFor(st) {
+    if (!st) return null;
+    const cfg = this._config.source;
+    const attrs = st.attributes || {};
+    const ids = attrs.source_ids;
+    const names = attrs.source_list;
+    if (typeof cfg === "number" && Array.isArray(ids) && Array.isArray(names)) {
+      const i = ids.indexOf(cfg);
+      return i >= 0 ? names[i] : null;
+    }
+    // Legacy: config.source is a name string.
+    if (typeof cfg === "string" && Array.isArray(names) && names.includes(cfg)) {
+      return cfg;
+    }
+    return null;
+  }
+
+  /** The source's current name, resolved from any zone that carries it. */
+  _sourceName() {
+    const ids = this._zoneIds.length ? this._zoneIds : this._zones();
+    for (const id of ids) {
+      const name = this._sourceNameFor(this._state(id));
+      if (name != null) return name;
+    }
+    return typeof this._config.source === "string" ? this._config.source : "";
+  }
+
   _zones() {
     if (Array.isArray(this._config.entities)) return this._config.entities;
-    const src = this._config.source;
     return axiumMediaPlayers(this._hass, this._config.hub)
-      .filter((id) => {
-        const list = this._hass.states[id].attributes.source_list;
-        return Array.isArray(list) && list.includes(src);
-      })
+      .filter((id) => this._sourceNameFor(this._state(id)) != null)
       .sort();
   }
 
@@ -208,9 +241,11 @@ class AxiumSourceCard extends HTMLElement {
   }
 
   _isActive(st) {
+    const name = this._sourceNameFor(st);
     return (
       st &&
-      st.attributes.source === this._config.source &&
+      name != null &&
+      st.attributes.source === name &&
       !OFF_STATES.includes(st.state)
     );
   }
@@ -237,13 +272,13 @@ class AxiumSourceCard extends HTMLElement {
    */
   _title() {
     if (this._config.name) return this._config.name;
-    const src = this._config.source || "";
+    const name = this._sourceName();
     const hubs = axiumHubs(this._hass);
     if (this._config.hub && hubs.length > 1) {
       const hub = hubs.find((h) => h.id === this._config.hub);
-      if (hub) return `${hub.name} ${src}`;
+      if (hub) return `${hub.name} ${name}`;
     }
-    return src;
+    return name;
   }
 
   // -- services --------------------------------------------------------
@@ -253,12 +288,16 @@ class AxiumSourceCard extends HTMLElement {
   }
 
   _toggleZone(id) {
-    if (this._isActive(this._state(id))) {
+    const st = this._state(id);
+    if (this._isActive(st)) {
       this._call("turn_off", { entity_id: id });
-    } else {
-      // select_source moves the zone onto this source, leaving its old one.
-      this._call("select_source", { entity_id: id, source: this._config.source });
+      return;
     }
+    // select_source moves the zone onto this source, leaving its old one. HA's
+    // media_player API takes the source *name*, so resolve the id to its
+    // current name for this zone.
+    const name = this._sourceNameFor(st);
+    if (name != null) this._call("select_source", { entity_id: id, source: name });
   }
 
   _transport(service) {
@@ -476,17 +515,25 @@ class AxiumSourceCardEditor extends HTMLElement {
     this._render();
   }
 
-  /** The picker token for the currently configured (hub, source), if any. */
+  /** The picker token for the currently configured (hub, source id), if any. */
   _currentToken(choices) {
     const { hub, source } = this._config;
-    if (!source) return undefined;
-    if (hub) {
-      const exact = choices.find((c) => c.hub === hub && c.source === source);
-      if (exact) return exact.token;
+    if (source === undefined || source === null || source === "") return undefined;
+    if (typeof source === "number") {
+      // New id-based config: match by source id (prefer the same hub).
+      return (
+        (hub && choices.find((c) => c.hub === hub && c.id === source)) ||
+        choices.find((c) => c.id === source) ||
+        {}
+      ).token;
     }
-    // Legacy cards (source only, no hub): match the first choice by source name.
-    const bySource = choices.find((c) => c.source === source);
-    return bySource ? bySource.token : undefined;
+    // Legacy cards stored the source *name* — match by name so opening + saving
+    // the editor migrates them to the id.
+    return (
+      (hub && choices.find((c) => c.hub === hub && c.name === source)) ||
+      choices.find((c) => c.name === source) ||
+      {}
+    ).token;
   }
 
   async _ensureHaForm() {
@@ -543,16 +590,19 @@ class AxiumSourceCardEditor extends HTMLElement {
   _changed(ev) {
     ev.stopPropagation();
     const value = { ...ev.detail.value };
-    // Decode the picked token back into an explicit hub + source pair.
+    // Decode the picked token back into an explicit hub + source id. The card
+    // stores the stable id (a number), never the display name.
     const token = value.source;
     const choice = (this._choices || []).find((c) => c.token === token);
     if (choice) {
       value.hub = choice.hub;
-      value.source = choice.source;
+      value.source = choice.id;
     } else if (typeof token === "string" && token.includes(TOKEN_SEP)) {
       const sep = token.indexOf(TOKEN_SEP);
       value.hub = token.slice(0, sep);
-      value.source = token.slice(sep + 1);
+      const idStr = token.slice(sep + 1);
+      const n = Number(idStr);
+      value.source = Number.isNaN(n) ? idStr : n;
     }
     this._config = value;
     this.dispatchEvent(

@@ -211,6 +211,16 @@ class AxiumZone(MediaPlayerEntity):
         return None if byte is None else self._source_display(byte)
 
     @property
+    def extra_state_attributes(self) -> dict[str, list[int]]:
+        """Expose the stable source id bytes, parallel to ``source_list``.
+
+        These bytes are the amplifier's own source identifiers. The dashboard
+        card stores the id (not the display name) so renaming a source on the
+        amp doesn't break a card. ``source_ids[i]`` matches ``source_list[i]``.
+        """
+        return {"source_ids": list(self._source_ids)}
+
+    @property
     def group_members(self) -> list[str]:
         """Return the entity_ids of the zones linked with this one."""
         return [

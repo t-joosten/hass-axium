@@ -66,6 +66,12 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   YAML-dashboard mode. (`lovelace` is in `after_dependencies`.)
 - Only ever list **Axium-owned** entities: filter media players by
   `hass.entities[id].platform === "axium"` (helper `axiumMediaPlayers`).
+- The card stores the **stable source id** (protocol byte), not the display name,
+  so renaming a source on the amp doesn't break a card. The media_player exposes a
+  `source_ids` attribute parallel to `source_list`; the card resolves id→current
+  name per zone (`_sourceNameFor`). Editor dropdown value = `"<hub id>|<source id>"`
+  token, label = current name. Legacy name-based configs still resolve and migrate
+  to the id on re-save.
 
 ## Deploying to / debugging the user's live HA
 
