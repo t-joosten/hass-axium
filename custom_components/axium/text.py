@@ -34,7 +34,10 @@ class AxiumSourceName(TextEntity):
     _attr_should_poll = False
     _attr_entity_category = EntityCategory.CONFIG
     _attr_mode = TextMode.TEXT
-    _attr_native_max = 32
+    # Axium firmware historically limited zone/source names to ~15 characters
+    # (15 UTF-8 bytes); firmware 3.0.0 on AX-Mini4/AX-1250 extended this. 15 is
+    # the safe cross-model default. See Axium's Software/Firmware Notes.
+    _attr_native_max = 15
     _attr_icon = "mdi:import"
 
     def __init__(
