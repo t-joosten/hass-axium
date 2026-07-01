@@ -58,6 +58,11 @@ class AxiumSourceCard extends HTMLElement {
     return 3;
   }
 
+  // Enable the visual (UI) editor.
+  static getConfigElement() {
+    return document.createElement("axium-source-card-editor");
+  }
+
   // Provide a default config so the card picker can render a preview.
   static getStubConfig(hass) {
     let source = "Source 1";
@@ -343,16 +348,93 @@ AxiumSourceCard.styles = `
   .ctrl.play ha-icon { --mdc-icon-size: 32px; }
 `;
 
+/** Visual (UI) editor — a Source dropdown plus an optional card name. */
+class AxiumSourceCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = { ...config };
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+
+  _sourceOptions() {
+    const set = new Set();
+    const states = (this._hass && this._hass.states) || {};
+    for (const id of Object.keys(states)) {
+      if (id.startsWith("media_player.")) {
+        const list = states[id].attributes.source_list;
+        if (Array.isArray(list)) list.forEach((s) => set.add(s));
+      }
+    }
+    return [...set].sort();
+  }
+
+  async _ensureHaForm() {
+    if (customElements.get("ha-form")) return;
+    try {
+      const helpers = await window.loadCardHelpers();
+      const card = await helpers.createCardElement({
+        type: "entities",
+        entities: [],
+      });
+      await card.constructor.getConfigElement();
+    } catch (err) {
+      /* ha-form will still upgrade once available */
+    }
+  }
+
+  _render() {
+    if (!this._hass || !this._config) return;
+    if (!this._form) {
+      this._form = document.createElement("ha-form");
+      this._form.addEventListener("value-changed", (ev) => this._changed(ev));
+      this.appendChild(this._form);
+      this._ensureHaForm();
+    }
+    const options = this._sourceOptions().map((s) => ({ value: s, label: s }));
+    this._form.hass = this._hass;
+    this._form.data = this._config;
+    this._form.schema = [
+      {
+        name: "source",
+        required: true,
+        selector: options.length
+          ? { select: { mode: "dropdown", custom_value: true, options } }
+          : { text: {} },
+      },
+      { name: "name", selector: { text: {} } },
+    ];
+    this._form.computeLabel = (s) =>
+      ({ source: "Source", name: "Card name (optional)" }[s.name] || s.name);
+  }
+
+  _changed(ev) {
+    ev.stopPropagation();
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail: { config: ev.detail.value },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+}
+
 // Guard against the module being loaded twice (e.g. a manually-added resource
 // plus the integration's auto-registration), which would otherwise throw.
 if (!customElements.get("axium-source-card")) {
   customElements.define("axium-source-card", AxiumSourceCard);
+  customElements.define("axium-source-card-editor", AxiumSourceCardEditor);
 
   window.customCards = window.customCards || [];
   window.customCards.push({
     type: "axium-source-card",
     name: "Axium Source Card",
     description: "Assign zones to a source and control playback (hass-axium).",
+    documentationURL: "https://github.com/t-joosten/hass-axium",
   });
 
   // eslint-disable-next-line no-console
