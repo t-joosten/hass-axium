@@ -32,22 +32,45 @@ _CARD_PATH = "lovelace/axium-source-card.js"
 
 
 async def _async_register_card(hass: HomeAssistant) -> None:
-    """Serve and register the bundled Lovelace card (best effort, once)."""
+    """Serve and register the bundled Lovelace card (best effort, once).
+
+    Served via a view with an explicit ``application/javascript`` content type
+    so it always loads as an ES module — some platforms (notably Windows) would
+    otherwise serve ``.js`` as ``text/plain``, which browsers refuse to run.
+    """
     if hass.data.get(f"{DOMAIN}_card_registered"):
         return
-    hass.data[f"{DOMAIN}_card_registered"] = True
     try:
+        from aiohttp import web
+
         from homeassistant.components.frontend import add_extra_js_url
-        from homeassistant.components.http import StaticPathConfig
+        from homeassistant.components.http import HomeAssistantView
         from homeassistant.loader import async_get_integration
 
-        path = Path(__file__).parent / _CARD_PATH
-        await hass.http.async_register_static_paths(
-            [StaticPathConfig(_CARD_URL, str(path), True)]
-        )
+        card_path = Path(__file__).parent / _CARD_PATH
+        card_bytes = await hass.async_add_executor_job(card_path.read_bytes)
+
+        class AxiumCardView(HomeAssistantView):
+            """Serve the Axium dashboard card with a correct JS content type."""
+
+            url = _CARD_URL
+            name = "axium:card"
+            requires_auth = False
+
+            async def get(self, request: web.Request) -> web.Response:
+                """Return the card JavaScript."""
+                return web.Response(
+                    body=card_bytes,
+                    content_type="application/javascript",
+                    charset="utf-8",
+                    headers={"Cache-Control": "public, max-age=86400"},
+                )
+
+        hass.http.register_view(AxiumCardView())
         # Version the URL so browsers re-fetch the card after an update.
         integration = await async_get_integration(hass, DOMAIN)
         add_extra_js_url(hass, f"{_CARD_URL}?v={integration.version}")
+        hass.data[f"{DOMAIN}_card_registered"] = True
     except Exception as err:  # noqa: BLE001 - card is optional, never block setup
         _LOGGER.debug("Could not auto-register the Axium dashboard card: %s", err)
 
