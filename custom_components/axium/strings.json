@@ -22,12 +22,41 @@
   "options": {
     "step": {
       "init": {
+        "title": "Axium options",
+        "menu_options": {
+          "settings": "Advanced settings",
+          "add_preset": "Add a zone preset",
+          "remove_preset": "Remove zone presets"
+        }
+      },
+      "settings": {
         "title": "Advanced settings",
         "description": "Advanced settings add level/gain controls that can drive the amplifier hard. Enable only if you understand the risks:\n\n- **Source gain** (0–18 dB): can clip the analogue input on AX‑400/800 amplifiers (including the AX‑800DAV), which may stress the amplifier and speakers.\n- **Zone gain** (−12…+12 dB): boosts a zone's level; high values can be very loud.\n- **Power‑on volume**: sets how loud a zone starts — a high value is a loud surprise on power‑up.\n\nRaise these gradually and watch the Clipping sensor. Turning this off removes the controls again.",
         "data": {
           "advanced": "Enable advanced settings"
         }
+      },
+      "add_preset": {
+        "title": "Add a zone preset",
+        "description": "A preset is a named set of zones. On a source card you can pick a preset to start that source playing in exactly those zones. Adding a preset with an existing name replaces it.",
+        "data": {
+          "name": "Preset name",
+          "zones": "Zones"
+        }
+      },
+      "remove_preset": {
+        "title": "Remove zone presets",
+        "data": {
+          "remove": "Presets to remove"
+        }
       }
+    },
+    "error": {
+      "preset_name_required": "Enter a name for the preset.",
+      "preset_zones_required": "Select at least one zone for the preset."
+    },
+    "abort": {
+      "no_presets": "There are no presets to remove yet."
     }
   }
 }

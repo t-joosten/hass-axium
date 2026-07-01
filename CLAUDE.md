@@ -78,6 +78,14 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   name per zone (`_sourceNameFor`). Editor dropdown value = `"<hub id>|<source id>"`
   token, label = current name. Legacy name-based configs still resolve and migrate
   to the id on re-save.
+- **Zone presets** (shared): named zone sets stored in entry options
+  (`CONF_PRESETS = [{name, zones:[entity_id,...]}]`, helper `get_presets`), managed via
+  the options flow menu (`init` menu → `settings` / `add_preset` / `remove_preset`;
+  zones via `EntitySelector(integration=DOMAIN, domain=media_player, multiple)`).
+  media_player exposes them as the `axium_presets` attribute (hub-wide, in
+  `_unrecorded_attributes`). The card shows a top-corner dropdown (`_presets()`,
+  `_applyPreset`) that applies **set-exactly**: preset zones → this source,
+  other zones on this source → off. Changing presets reloads the entry (update listener).
 
 ## Deploying to / debugging the user's live HA
 

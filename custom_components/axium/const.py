@@ -31,6 +31,7 @@ DEFAULT_NAME: Final = "Axium"
 CONF_ZONES: Final = "zones"
 CONF_SOURCES: Final = "sources"
 CONF_ADVANCED: Final = "advanced"  # expose risky level/gain controls
+CONF_PRESETS: Final = "presets"  # named zone sets a source card can activate
 
 # Keys within a stored zone / source definition.
 ZONE_KEY: Final = "zone"

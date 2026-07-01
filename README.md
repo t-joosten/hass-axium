@@ -408,6 +408,17 @@ automatically. You can override the zones with explicit `entities:` and set a
 custom `name:`. (Cards that stored a source *name* from older versions keep
 working, and migrate to the id when you re-open and save them in the editor.)
 
+### Zone presets
+
+A **preset** is a named set of zones (e.g. *Downstairs* = Kitchen + Den).
+Manage presets under **Settings → Devices & services → Axium → Configure →
+Add a zone preset**. Every source card then shows a preset dropdown in its top
+corner: picking one starts that card's source playing in **exactly** the
+preset's zones — the preset's zones are switched to this source and any zone
+currently on this source but not in the preset is turned off. Presets are
+shared, so the same *Downstairs* preset works on your CD card, your Apple TV
+card, and so on.
+
 ## How it works
 
 Commands use the frame format `<command><zone>[<data>...]`. Every byte is sent

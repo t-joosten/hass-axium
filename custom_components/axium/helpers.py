@@ -14,6 +14,7 @@ from homeassistant.config_entries import ConfigEntry
 
 from .const import (
     CONF_ADVANCED,
+    CONF_PRESETS,
     CONF_SOURCES,
     CONF_ZONES,
     DEFAULT_SOURCE_COUNT,
@@ -181,6 +182,27 @@ def sources_from_detection(detected: list[dict[str, Any]]) -> list[dict[str, Any
 def get_advanced(entry: ConfigEntry) -> bool:
     """Return whether advanced (risky level/gain) controls are enabled."""
     return bool(entry.options.get(CONF_ADVANCED, False))
+
+
+def get_presets(entry: ConfigEntry) -> list[dict[str, Any]]:
+    """Return the configured zone presets as ``[{"name", "zones": [...]}]``.
+
+    Each preset names a set of zone media_player entity_ids that a source card
+    can activate at once. Malformed entries are dropped.
+    """
+    raw = entry.options.get(CONF_PRESETS, [])
+    if not isinstance(raw, list):
+        return []
+    presets: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        zones = item.get("zones")
+        if not name or not isinstance(zones, list):
+            continue
+        presets.append({"name": name, "zones": [str(z) for z in zones]})
+    return presets
 
 
 def get_sources(entry: ConfigEntry) -> list[dict[str, Any]]:

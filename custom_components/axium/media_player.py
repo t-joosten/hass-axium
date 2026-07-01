@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 
 from datetime import datetime
+from typing import Any
 
 from homeassistant.components.media_player import (
     MediaPlayerEntity,
@@ -50,7 +51,7 @@ from .const import (
     ZONE_KEY,
 )
 from .controller import AxiumController
-from .helpers import get_sources, get_zones
+from .helpers import get_presets, get_sources, get_zones
 from .protocol import level_to_volume
 
 _LOGGER = logging.getLogger(__name__)
@@ -87,8 +88,17 @@ async def async_setup_entry(
     sources = get_sources(entry)
     source_ids = [item[ID_KEY] for item in sources]
     seed_names = {item[ID_KEY]: item[NAME_KEY] for item in sources}
+    presets = get_presets(entry)
     async_add_entities(
-        AxiumZone(controller, entry, item[ZONE_KEY], item[NAME_KEY], source_ids, seed_names)
+        AxiumZone(
+            controller,
+            entry,
+            item[ZONE_KEY],
+            item[NAME_KEY],
+            source_ids,
+            seed_names,
+            presets,
+        )
         for item in get_zones(entry)
     )
 
@@ -99,6 +109,8 @@ class AxiumZone(MediaPlayerEntity):
     _attr_has_entity_name = True
     _attr_name = None
     _attr_should_poll = False
+    # These list attributes are static config, not history worth recording.
+    _unrecorded_attributes = frozenset({"source_ids", "axium_presets"})
 
     def __init__(
         self,
@@ -108,12 +120,14 @@ class AxiumZone(MediaPlayerEntity):
         name: str,
         source_ids: list[int],
         seed_names: dict[int, str],
+        presets: list[dict] | None = None,
     ) -> None:
         """Initialise the zone entity."""
         self._controller = controller
         self._zone = zone
         self._source_ids = source_ids
         self._seed_names = seed_names
+        self._presets = presets or []
         self._media_position: int | None = None
         self._media_position_updated: datetime | None = None
         self._attr_unique_id = f"{entry.entry_id}_zone_{zone}"
@@ -211,14 +225,19 @@ class AxiumZone(MediaPlayerEntity):
         return None if byte is None else self._source_display(byte)
 
     @property
-    def extra_state_attributes(self) -> dict[str, list[int]]:
-        """Expose the stable source id bytes, parallel to ``source_list``.
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose the stable source ids and the hub's zone presets.
 
-        These bytes are the amplifier's own source identifiers. The dashboard
-        card stores the id (not the display name) so renaming a source on the
-        amp doesn't break a card. ``source_ids[i]`` matches ``source_list[i]``.
+        ``source_ids`` are the amplifier's own source identifiers, parallel to
+        ``source_list`` (``source_ids[i]`` matches ``source_list[i]``) — the
+        dashboard card stores the id, not the display name, so renaming a source
+        on the amp doesn't break a card. ``axium_presets`` are the hub-wide zone
+        presets a source card can activate.
         """
-        return {"source_ids": list(self._source_ids)}
+        return {
+            "source_ids": list(self._source_ids),
+            "axium_presets": self._presets,
+        }
 
     @property
     def group_members(self) -> list[str]:

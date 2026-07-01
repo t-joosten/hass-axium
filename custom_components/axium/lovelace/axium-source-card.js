@@ -319,6 +319,39 @@ class AxiumSourceCard extends HTMLElement {
     if (name != null) this._call("select_source", { entity_id: id, source: name });
   }
 
+  // -- presets ---------------------------------------------------------
+
+  /** The hub's zone presets (read from any hub zone's attribute). */
+  _presets() {
+    for (const id of axiumMediaPlayers(this._hass, this._config.hub)) {
+      const st = this._state(id);
+      const p = st && st.attributes.axium_presets;
+      if (Array.isArray(p)) return p;
+    }
+    return [];
+  }
+
+  /**
+   * Apply a preset "set exactly": its zones (that offer this source) start
+   * playing this source, and any zone currently on this source but not in the
+   * preset is turned off — so the active set becomes exactly the preset.
+   */
+  _applyPreset(index) {
+    const preset = this._presets()[Number(index)];
+    if (!preset) return;
+    // Only zones this card knows about (its hub, offering this source).
+    const known = new Set(this._zones());
+    const target = (preset.zones || []).filter((z) => known.has(z));
+    const targetSet = new Set(target);
+    for (const z of target) {
+      const name = this._sourceNameFor(this._state(z));
+      if (name != null) this._call("select_source", { entity_id: z, source: name });
+    }
+    for (const z of this._activeIds()) {
+      if (!targetSet.has(z)) this._call("turn_off", { entity_id: z });
+    }
+  }
+
   _transport(service) {
     const leader = this._leader();
     if (leader) this._call(service, { entity_id: leader.entity_id });
@@ -348,6 +381,8 @@ class AxiumSourceCard extends HTMLElement {
             <div class="title" id="title"></div>
             <div class="subtitle" id="subtitle"></div>
           </div>
+          <select class="presets" id="presets" title="Apply a zone preset"
+                  aria-label="Apply a zone preset" hidden></select>
         </div>
         <div class="chips" id="chips" role="group" aria-label="Zones"></div>
         <div class="controls" id="controls">
@@ -395,12 +430,47 @@ class AxiumSourceCard extends HTMLElement {
       else if (act === "volup") this._volume("volume_up");
     });
 
+    const presetSel = this.shadowRoot.getElementById("presets");
+    presetSel.addEventListener("change", (ev) => {
+      const idx = ev.target.value;
+      ev.target.value = ""; // it's an action trigger, not persistent state
+      if (idx !== "") this._applyPreset(idx);
+    });
+
     this._built = true;
+  }
+
+  _updatePresets() {
+    const sel = this.shadowRoot.getElementById("presets");
+    if (!sel) return;
+    const presets = this._presets();
+    if (!presets.length) {
+      sel.hidden = true;
+      return;
+    }
+    sel.hidden = false;
+    const sig = presets.map((p) => p.name).join(" ");
+    if (sel._sig !== sig) {
+      sel._sig = sig;
+      sel.textContent = "";
+      const ph = document.createElement("option");
+      ph.value = "";
+      ph.textContent = "Preset…";
+      sel.appendChild(ph);
+      presets.forEach((p, i) => {
+        const o = document.createElement("option");
+        o.value = String(i);
+        o.textContent = p.name; // textContent — safe against HTML in names
+        sel.appendChild(o);
+      });
+    }
+    sel.value = "";
   }
 
   _update() {
     const root = this.shadowRoot;
     root.getElementById("title").textContent = this._title();
+    this._updatePresets();
 
     const leader = this._leader();
     const active = this._activeIds();
@@ -476,7 +546,16 @@ AxiumSourceCard.styles = `
     background: var(--secondary-background-color) center/cover no-repeat;
   }
   .art:not(.has-art) { display: none; }
-  .titles { min-width: 0; }
+  .titles { min-width: 0; flex: 1 1 auto; }
+  .presets {
+    flex: 0 0 auto; max-width: 45%;
+    padding: 6px 8px; border-radius: 8px;
+    border: 1px solid var(--divider-color);
+    background: var(--card-background-color, var(--ha-card-background));
+    color: var(--primary-text-color);
+    font: inherit; font-size: 0.85rem; cursor: pointer;
+  }
+  .presets[hidden] { display: none; }
   .title { font-size: 1.1rem; font-weight: 600; color: var(--primary-text-color); }
   .subtitle {
     font-size: 0.85rem; color: var(--secondary-text-color);

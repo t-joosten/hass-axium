@@ -20,13 +20,14 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT
 from homeassistant.core import callback
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, selector
 
 from . import protocol
 from .const import (
     CMD_REQUEST_DEVICE_INFO,
     CMD_SOURCE_NAME,
     CONF_ADVANCED,
+    CONF_PRESETS,
     CONF_SOURCES,
     CONF_ZONES,
     DEFAULT_NAME,
@@ -41,6 +42,7 @@ from .controller import AxiumDeviceInfo, parse_device_info, parse_source_name
 from .helpers import (
     default_sources,
     get_advanced,
+    get_presets,
     sources_from_detection,
     zones_from_numbers,
 )
@@ -181,20 +183,29 @@ class AxiumConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class AxiumOptionsFlow(OptionsFlow):
-    """Opt in to advanced (risky level/gain) controls."""
+    """Advanced-controls toggle and zone-preset management."""
 
     def __init__(self, config_entry: ConfigEntry) -> None:
-        """Store the config entry."""
+        """Store the config entry and a working copy of its options."""
         self._config_entry = config_entry
+        self._options: dict[str, Any] = dict(config_entry.options)
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        """Choose what to configure."""
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["settings", "add_preset", "remove_preset"],
+        )
+
+    async def async_step_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Toggle the advanced settings; reloads to add/remove the entities."""
         if user_input is not None:
-            return self.async_create_entry(
-                data={CONF_ADVANCED: user_input[CONF_ADVANCED]}
-            )
+            self._options[CONF_ADVANCED] = user_input[CONF_ADVANCED]
+            return self.async_create_entry(data=self._options)
 
         schema = vol.Schema(
             {
@@ -203,4 +214,64 @@ class AxiumOptionsFlow(OptionsFlow):
                 ): cv.boolean,
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="settings", data_schema=schema)
+
+    async def async_step_add_preset(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Add (or replace by name) a zone preset."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            name = user_input[CONF_NAME].strip()
+            zones = user_input["zones"]
+            if not name:
+                errors["base"] = "preset_name_required"
+            elif not zones:
+                errors["base"] = "preset_zones_required"
+            else:
+                presets = [
+                    p
+                    for p in get_presets(self._config_entry)
+                    if p["name"] != name
+                ]
+                presets.append({"name": name, "zones": zones})
+                self._options[CONF_PRESETS] = presets
+                return self.async_create_entry(data=self._options)
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_NAME): cv.string,
+                vol.Required("zones"): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        integration=DOMAIN, domain="media_player", multiple=True
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(
+            step_id="add_preset", data_schema=schema, errors=errors
+        )
+
+    async def async_step_remove_preset(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Remove one or more zone presets."""
+        presets = get_presets(self._config_entry)
+        names = [p["name"] for p in presets]
+        if not names:
+            return self.async_abort(reason="no_presets")
+        if user_input is not None:
+            remove = set(user_input.get("remove", []))
+            self._options[CONF_PRESETS] = [
+                p for p in presets if p["name"] not in remove
+            ]
+            return self.async_create_entry(data=self._options)
+
+        schema = vol.Schema(
+            {
+                vol.Optional("remove", default=[]): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=names, multiple=True)
+                ),
+            }
+        )
+        return self.async_show_form(step_id="remove_preset", data_schema=schema)
