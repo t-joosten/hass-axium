@@ -90,12 +90,71 @@ async def _async_register_card(hass: HomeAssistant) -> None:
                 )
 
         hass.http.register_view(AxiumCardView())
-        add_extra_js_url(hass, f"/axium/axium-source-card-{version}.js")
+
+        card_url = f"/axium/axium-source-card-{version}.js"
+        # Prefer a managed Lovelace resource: the card picker *waits* for
+        # resources, so the card renders in the "Add card" gallery. A
+        # fire-and-forget add_extra_js_url import races the picker (it isn't
+        # awaited) and shows a perpetual spinner. Fall back to add_extra_js_url
+        # only when resources aren't writable (YAML-mode dashboards).
+        if not await _async_register_card_resource(hass, card_url):
+            add_extra_js_url(hass, card_url)
         hass.data[f"{DOMAIN}_card_registered"] = True
     except Exception as err:  # noqa: BLE001 - card is optional, never block setup
         # Surfaced at warning level: without the card the dashboard still works,
         # but a silent failure here is exactly what makes it hard to diagnose.
         _LOGGER.warning("Could not auto-register the Axium dashboard card: %s", err)
+
+
+async def _async_register_card_resource(hass: HomeAssistant, url: str) -> bool:
+    """Register/refresh a managed Lovelace *module* resource for the card.
+
+    Returns ``True`` when a storage-mode resource was created/updated (the card
+    then loads as a resource the card picker awaits), ``False`` when resources
+    are read-only (YAML-mode dashboards) so the caller falls back to
+    ``add_extra_js_url``.
+
+    Exactly one axium resource is kept, pointed at the current version-stamped
+    URL; any stale/duplicate axium resources are updated or removed so old
+    version paths don't linger.
+    """
+    try:
+        from homeassistant.components.lovelace.resources import (
+            ResourceStorageCollection,
+        )
+    except ImportError:
+        return False
+
+    lovelace = hass.data.get("lovelace")
+    resources = getattr(lovelace, "resources", None)
+    if not isinstance(resources, ResourceStorageCollection):
+        return False
+
+    if not resources.loaded:
+        await resources.async_load()
+
+    ours = [
+        item
+        for item in resources.async_items()
+        if "/axium/axium-source-card" in item.get("url", "")
+    ]
+
+    if any(item.get("url") == url for item in ours):
+        # Already correct — drop any duplicates pointing at the same/old card.
+        keep = next(item for item in ours if item.get("url") == url)
+        stale = [item for item in ours if item.get("id") != keep.get("id")]
+    elif ours:
+        await resources.async_update_item(
+            ours[0]["id"], {"res_type": "module", "url": url}
+        )
+        stale = ours[1:]
+    else:
+        await resources.async_create_item({"res_type": "module", "url": url})
+        stale = []
+
+    for item in stale:
+        await resources.async_delete_item(item["id"])
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

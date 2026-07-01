@@ -58,6 +58,12 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   (`/axium/axium-source-card-<version>.js`) via `AxiumCardView.extra_urls`, not a `?v=`
   query — a new path defeats stale browser/service-worker caches on every release.
   The unversioned path stays for manual dashboard resources.
+- It's registered as a **managed Lovelace module resource** (storage mode:
+  `ResourceStorageCollection`; one resource kept, repointed to the current versioned
+  URL each release), NOT `add_extra_js_url`. The card picker *awaits* resources but not
+  `add_extra_js_url` imports — the latter races the gallery and shows a perpetual
+  spinner / "Custom element not found". Falls back to `add_extra_js_url` only in
+  YAML-dashboard mode. (`lovelace` is in `after_dependencies`.)
 - Only ever list **Axium-owned** entities: filter media players by
   `hass.entities[id].platform === "axium"` (helper `axiumMediaPlayers`).
 
