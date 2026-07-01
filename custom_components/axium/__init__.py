@@ -39,12 +39,15 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     try:
         from homeassistant.components.frontend import add_extra_js_url
         from homeassistant.components.http import StaticPathConfig
+        from homeassistant.loader import async_get_integration
 
         path = Path(__file__).parent / _CARD_PATH
         await hass.http.async_register_static_paths(
             [StaticPathConfig(_CARD_URL, str(path), True)]
         )
-        add_extra_js_url(hass, _CARD_URL)
+        # Version the URL so browsers re-fetch the card after an update.
+        integration = await async_get_integration(hass, DOMAIN)
+        add_extra_js_url(hass, f"{_CARD_URL}?v={integration.version}")
     except Exception as err:  # noqa: BLE001 - card is optional, never block setup
         _LOGGER.debug("Could not auto-register the Axium dashboard card: %s", err)
 

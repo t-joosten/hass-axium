@@ -343,14 +343,21 @@ AxiumSourceCard.styles = `
   .ctrl.play ha-icon { --mdc-icon-size: 32px; }
 `;
 
-customElements.define("axium-source-card", AxiumSourceCard);
+// Guard against the module being loaded twice (e.g. a manually-added resource
+// plus the integration's auto-registration), which would otherwise throw.
+if (!customElements.get("axium-source-card")) {
+  customElements.define("axium-source-card", AxiumSourceCard);
 
-window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "axium-source-card",
-  name: "Axium Source Card",
-  description: "Assign zones to a source and control playback (hass-axium).",
-});
+  window.customCards = window.customCards || [];
+  window.customCards.push({
+    type: "axium-source-card",
+    name: "Axium Source Card",
+    description: "Assign zones to a source and control playback (hass-axium).",
+  });
 
-// eslint-disable-next-line no-console
-console.info("%c AXIUM-SOURCE-CARD ", "background:#3949ab;color:#fff;border-radius:3px");
+  // eslint-disable-next-line no-console
+  console.info(
+    "%c AXIUM-SOURCE-CARD ",
+    "background:#3949ab;color:#fff;border-radius:3px"
+  );
+}

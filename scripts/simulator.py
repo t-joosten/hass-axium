@@ -140,11 +140,19 @@ class Simulator:
         # Active zone links: list of (set of zone numbers, options byte).
         self.links: list[tuple[set[int], int]] = []
         # Enabled sources reported by this amp: source data byte -> name.
+        # Physical inputs S1..S8 (per the protocol's Source Selection encoding)
+        # plus AirPlay and the internal Media Player.
         self.source_names: dict[int, str] = {
-            0x00: "CD player",
-            0x05: "Apple TV",
-            0x06: "Turntable",
+            0x05: "SAT",       # S1
+            0x06: "DVD",       # S2
+            0x07: "Video",     # S3
+            0x03: "Aux",       # S4
+            0x00: "CD",        # S5
+            0x01: "Tape",      # S6
+            0x02: "Tuner",     # S7
+            0x04: "Utility",   # S8
             0x10: "AirPlay",
+            0x12: "Media Player",
         }
         # Now-playing state for media sources (source byte -> dict).
         self.media: dict[int, dict] = {}
