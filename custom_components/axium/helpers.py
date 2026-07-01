@@ -13,6 +13,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 
 from .const import (
+    CONF_ADVANCED,
     CONF_SOURCES,
     CONF_ZONES,
     DEFAULT_SOURCE_COUNT,
@@ -175,6 +176,11 @@ def sources_from_detection(detected: list[dict[str, Any]]) -> list[dict[str, Any
         name = str(item.get(NAME_KEY) or "").strip() or default_source_name(source_id)
         sources.append({ID_KEY: source_id, NAME_KEY: name})
     return sources
+
+
+def get_advanced(entry: ConfigEntry) -> bool:
+    """Return whether advanced (risky level/gain) controls are enabled."""
+    return bool(entry.options.get(CONF_ADVANCED, False))
 
 
 def get_sources(entry: ConfigEntry) -> list[dict[str, Any]]:

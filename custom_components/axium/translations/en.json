@@ -18,5 +18,16 @@
     "abort": {
       "already_configured": "This amplifier is already configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Advanced settings",
+        "description": "Advanced settings add level/gain controls that can drive the amplifier hard. Enable only if you understand the risks:\n\n- **Source gain** (0–18 dB): can clip the analogue input on AX‑400/800 amplifiers (including the AX‑800DAV), which may stress the amplifier and speakers.\n- **Zone gain** (−12…+12 dB): boosts a zone's level; high values can be very loud.\n- **Power‑on volume**: sets how loud a zone starts — a high value is a loud surprise on power‑up.\n\nRaise these gradually and watch the Clipping sensor. Turning this off removes the controls again.",
+        "data": {
+          "advanced": "Enable advanced settings"
+        }
+      }
+    }
   }
 }

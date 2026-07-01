@@ -237,6 +237,9 @@ class AxiumController:
         self._source_meta: dict[int, tuple[int, int]] = {}
         # Per-source gain (id -> dB).
         self._source_gain: dict[int, int] = {}
+        # Zones for which the amp's special-features bytes (0x0C) are known, so
+        # a loudness/mono toggle never clobbers other bits it hasn't read yet.
+        self._special_known: set[int] = set()
         # Extended device info (firmware string, MAC) callback + cache.
         self._extended_info_callback: Callable[[str | None, str | None], None] | None = (
             None
@@ -432,6 +435,7 @@ class AxiumController:
             state.special = (data[0], byte2)
             state.loudness = bool(data[0] & SPECIAL_LOUDNESS_BIT)
             state.mono = bool(byte2 & SPECIAL_MONO_BIT)
+            self._special_known.add(zone)
             changed = True
         elif command == CMD_SOURCE_GAIN and len(data) >= 2:
             self._source_gain[data[0]] = data[1]
@@ -713,7 +717,19 @@ class AxiumController:
     async def async_set_special_bit(
         self, zone: int, byte_index: int, bit: int, enabled: bool
     ) -> None:
-        """Set a bit in a zone's special-features bytes (0x0C), preserving rest."""
+        """Set a bit in a zone's special-features bytes (0x0C), preserving rest.
+
+        Refuses to write until the amplifier's current special-features bytes
+        have been read, so a toggle never clobbers other bits (e.g. a low-pass
+        filter) that we haven't seen yet.
+        """
+        if zone not in self._special_known:
+            _LOGGER.warning(
+                "Ignoring special-features change for zone %s: current value "
+                "not yet read from the amplifier",
+                zone,
+            )
+            return
         current = list(self.zone_state(zone).special)
         if enabled:
             current[byte_index] |= bit

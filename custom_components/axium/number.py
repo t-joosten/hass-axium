@@ -45,7 +45,7 @@ from .const import (
 )
 from .controller import AxiumController, ZoneState
 from .protocol import to_signed_byte
-from .helpers import get_sources, get_zones
+from .helpers import get_advanced, get_sources, get_zones
 
 
 def _signed_byte(value: float) -> int:
@@ -76,6 +76,7 @@ class AxiumNumberDescription:
     unit: str | None
     getter: Callable[[ZoneState], int | None]
     to_byte: Callable[[float], int]
+    advanced: bool = False
 
 
 NUMBERS: tuple[AxiumNumberDescription, ...] = (
@@ -103,6 +104,7 @@ NUMBERS: tuple[AxiumNumberDescription, ...] = (
         key="power_on_volume", name="Power-on volume", command=CMD_POWER_ON_VOLUME,
         min_value=0, max_value=100, step=1, unit="%",
         getter=lambda s: s.power_on_volume, to_byte=_percent_to_volume,
+        advanced=True,
     ),
     AxiumNumberDescription(
         key="audio_delay", name="Audio delay", command=CMD_AUDIO_DELAY,
@@ -112,7 +114,7 @@ NUMBERS: tuple[AxiumNumberDescription, ...] = (
     AxiumNumberDescription(
         key="zone_gain", name="Zone gain", command=CMD_ZONE_GAIN,
         min_value=ZONE_GAIN_MIN, max_value=ZONE_GAIN_MAX, step=1, unit="dB",
-        getter=lambda s: s.zone_gain, to_byte=_signed_byte,
+        getter=lambda s: s.zone_gain, to_byte=_signed_byte, advanced=True,
     ),
 )
 
@@ -122,16 +124,23 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the per-zone number controls, source gains and standby timer."""
+    """Set up the per-zone number controls, source gains and standby timer.
+
+    Risky level/gain controls are only created when advanced settings are on.
+    """
     controller: AxiumController = hass.data[DOMAIN][entry.entry_id]
+    advanced = get_advanced(entry)
     entities: list[NumberEntity] = [
         AxiumNumber(controller, entry, item[ZONE_KEY], desc)
         for item in get_zones(entry)
         for desc in NUMBERS
+        if advanced or not desc.advanced
     ]
-    entities.extend(
-        AxiumSourceGain(controller, entry, item[ID_KEY]) for item in get_sources(entry)
-    )
+    if advanced:
+        entities.extend(
+            AxiumSourceGain(controller, entry, item[ID_KEY])
+            for item in get_sources(entry)
+        )
     entities.append(AxiumStandbyTime(controller, entry))
     async_add_entities(entities)
 

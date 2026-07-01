@@ -12,14 +12,21 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT
+from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
 
 from . import protocol
 from .const import (
     CMD_REQUEST_DEVICE_INFO,
     CMD_SOURCE_NAME,
+    CONF_ADVANCED,
     CONF_SOURCES,
     CONF_ZONES,
     DEFAULT_NAME,
@@ -31,7 +38,12 @@ from .const import (
     ZONE_ALL,
 )
 from .controller import AxiumDeviceInfo, parse_device_info, parse_source_name
-from .helpers import default_sources, sources_from_detection, zones_from_numbers
+from .helpers import (
+    default_sources,
+    get_advanced,
+    sources_from_detection,
+    zones_from_numbers,
+)
 
 _CONNECT_TIMEOUT = 10.0
 _PROBE_TIMEOUT = 6.0
@@ -160,3 +172,35 @@ class AxiumConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user", data_schema=schema, errors=errors
         )
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> AxiumOptionsFlow:
+        """Return the options flow."""
+        return AxiumOptionsFlow(config_entry)
+
+
+class AxiumOptionsFlow(OptionsFlow):
+    """Opt in to advanced (risky level/gain) controls."""
+
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        """Store the config entry."""
+        self._config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Toggle the advanced settings; reloads to add/remove the entities."""
+        if user_input is not None:
+            return self.async_create_entry(
+                data={CONF_ADVANCED: user_input[CONF_ADVANCED]}
+            )
+
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_ADVANCED, default=get_advanced(self._config_entry)
+                ): cv.boolean,
+            }
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)

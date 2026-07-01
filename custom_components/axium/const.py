@@ -30,6 +30,7 @@ DEFAULT_NAME: Final = "Axium"
 # Configuration / option keys.
 CONF_ZONES: Final = "zones"
 CONF_SOURCES: Final = "sources"
+CONF_ADVANCED: Final = "advanced"  # expose risky level/gain controls
 
 # Keys within a stored zone / source definition.
 ZONE_KEY: Final = "zone"

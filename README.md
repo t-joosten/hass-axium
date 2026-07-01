@@ -219,12 +219,26 @@ artist, album, cover art and a progress bar (Media Control `0x3D` / Media Status
 Each zone's device page exposes these sliders:
 
 - **Bass**, **Treble**, **Balance** (`0x05`/`0x06`/`0x07`)
-- **Zone gain** — a per-zone level trim, −12…+12 dB (`0x44`)
 - **Maximum volume** — a volume limit, e.g. for kids' rooms (`0x0D`)
-- **Power-on volume** — the volume a zone starts at (`0x48`)
 - **Audio delay** — lip-sync delay in 5 ms steps, for TV zones (`0x31`)
 - **Loudness** and **Mono** toggles (`0x0C`)
-- **Source gain** — per-source input trim, 0…+18 dB, on the amplifier device (`0x32`)
+
+**Advanced (opt-in) controls** — hidden until you enable them (see below):
+- **Zone gain** — a per-zone level trim, −12…+12 dB (`0x44`)
+- **Power-on volume** — the volume a zone starts at (`0x48`)
+- **Source gain** — per-source input trim, 0…+18 dB (`0x32`)
+
+### Advanced settings (risky level/gain controls)
+
+The gain and power-on-volume controls can drive the amplifier hard, so they are
+**off by default**. Enable them in the integration's **Configure** dialog, which
+lists the risk of each before you turn it on:
+
+> ⚠️ On AX‑400/AX‑800‑generation amplifiers (including the AX‑800DAV), high
+> **source gain** can clip the analogue input (per Axium's protocol notes),
+> which may stress the amplifier and speakers. All values stay within the
+> amplifier's documented ranges — but raise gains and power‑on volume
+> gradually, and watch the **Clipping** diagnostic sensor.
 
 ### Presets / scenes
 
