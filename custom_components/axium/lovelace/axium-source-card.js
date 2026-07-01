@@ -36,6 +36,24 @@ const SUPPORT_PLAY = 16384;
 const OFF_STATES = ["off", "unavailable", "unknown", "standby"];
 
 /**
+ * The config-entry id (hub) an entity belongs to. The frontend's lightweight
+ * entity registry (`hass.entities`) often omits `config_entry_id`, so fall back
+ * to the entity's device (`device_id → device.config_entries`), which the
+ * frontend *does* carry. Returns undefined if it can't be determined.
+ */
+function entityHub(hass, id) {
+  const entry = hass && hass.entities && hass.entities[id];
+  if (!entry) return undefined;
+  if (entry.config_entry_id) return entry.config_entry_id;
+  const device =
+    entry.device_id && hass.devices && hass.devices[entry.device_id];
+  if (device && Array.isArray(device.config_entries) && device.config_entries.length) {
+    return device.config_entries[0];
+  }
+  return undefined;
+}
+
+/**
  * Return the media_player entity_ids that belong to the Axium integration.
  * Uses the entity registry (`hass.entities[id].platform`); if the registry is
  * unavailable it falls back to every media player. When `hubId` (a config
@@ -50,7 +68,7 @@ function axiumMediaPlayers(hass, hubId) {
     const entry = registry && registry[id];
     if (entry) {
       if (entry.platform !== "axium") return false;
-      if (hubId && entry.config_entry_id !== hubId) return false;
+      if (hubId && entityHub(hass, id) !== hubId) return false;
       return true;
     }
     // No registry: can't confirm the hub, so only fall back when unfiltered.
@@ -71,8 +89,9 @@ function axiumHubs(hass) {
   for (const id of Object.keys(states)) {
     if (!id.startsWith("media_player.")) continue;
     const entry = registry[id];
-    if (entry && entry.platform === "axium" && entry.config_entry_id) {
-      ids.add(entry.config_entry_id);
+    if (entry && entry.platform === "axium") {
+      const hub = entityHub(hass, id);
+      if (hub) ids.add(hub);
     }
   }
   return [...ids]

@@ -66,6 +66,12 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   YAML-dashboard mode. (`lovelace` is in `after_dependencies`.)
 - Only ever list **Axium-owned** entities: filter media players by
   `hass.entities[id].platform === "axium"` (helper `axiumMediaPlayers`).
+- The frontend's `hass.entities` is a *lightweight* display registry: it has
+  `platform` and `device_id` but **NOT `config_entry_id`**. To find an entity's hub
+  (config entry), go via the device: `hass.entities[id].device_id` →
+  `hass.devices[device_id].config_entries[0]` (helper `entityHub`). Relying on
+  `entity.config_entry_id` silently returns nothing in the frontend (that's what made
+  the source dropdown fall back to a plain text field).
 - The card stores the **stable source id** (protocol byte), not the display name,
   so renaming a source on the amp doesn't break a card. The media_player exposes a
   `source_ids` attribute parallel to `source_list`; the card resolves id→current
