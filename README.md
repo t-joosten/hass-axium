@@ -21,8 +21,8 @@ from a keypad or the front panel (a `local_push` integration — no polling).
 - 🏷️ **All zones auto-created** (discovered from the amp), each its own device — just rename them (e.g. *Kitchen*, *Living room*)
 - 🧩 **Group zones from the player card** (Sonos-style join/unjoin) — linked on the amplifier and kept in sync by the amp
 - ▶️ **Transport + now-playing** on media sources — play/pause/next/previous, shuffle/repeat, and title/artist/album/cover-art/position
-- 🎛️ Per-zone **bass, treble, balance, max-volume limit, power-on volume, lip-sync delay** (number entities)
-- 🌙 **Auto power-on / auto-standby**, **preset/scene recall**, and **temperature + clipping diagnostics**
+- 🎛️ Per-zone **bass, treble, balance, gain, max-volume limit, power-on volume, lip-sync delay**, **loudness** and **mono** toggles; per-source **gain**
+- 🌙 **Auto power-on / auto-standby**, **preset/scene recall**, and **temperature + firmware + MAC + clipping diagnostics**
 - 🃏 **Source-centric dashboard card** — tap zone chips to assign them to a source, with transport/volume/mute
 - 🔎 Automatic **model and firmware detection** — no need to pick your amp
 - 🔌 Power on/off per zone (command `0x01`)
@@ -164,7 +164,9 @@ Axium amplifiers can be stacked, sharing one system-wide zone space (e.g. two
 it bridges commands to the rest of the stack — and the integration **discovers
 the whole stack**, creating zones for every unit (16 in that example). Zone
 groups are also system-wide, so a group can span amplifiers, and the group limit
-follows the total zone count (16 zones → up to 8 groups).
+follows the total zone count (16 zones → up to 8 groups). Zones across the full
+0–95 range are supported (the higher zone numbers use the protocol's extended
+zone-byte encoding).
 
 ### Renaming zones
 
@@ -217,9 +219,12 @@ artist, album, cover art and a progress bar (Media Control `0x3D` / Media Status
 Each zone's device page exposes these sliders:
 
 - **Bass**, **Treble**, **Balance** (`0x05`/`0x06`/`0x07`)
+- **Zone gain** — a per-zone level trim, −12…+12 dB (`0x44`)
 - **Maximum volume** — a volume limit, e.g. for kids' rooms (`0x0D`)
 - **Power-on volume** — the volume a zone starts at (`0x48`)
 - **Audio delay** — lip-sync delay in 5 ms steps, for TV zones (`0x31`)
+- **Loudness** and **Mono** toggles (`0x0C`)
+- **Source gain** — per-source input trim, 0…+18 dB, on the amplifier device (`0x32`)
 
 ### Presets / scenes
 
@@ -241,6 +246,9 @@ The amplifier device's **Diagnostics** section (settings page) shows:
 - **Temperature** and **Peak temperature** sensors (`0x39`)
 - a **Clipping** problem sensor that turns on when an analogue input overloads,
   with the offending source in its attributes (`0x34`)
+
+The device page also shows the full **firmware version** (`x.y.z`) and the
+amplifier's **MAC address**, read from extended device info (`0x39`).
 
 These are normal entities, so you can also add them to dashboard cards, graph
 their history, or alert on them.

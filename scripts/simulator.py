@@ -109,8 +109,11 @@ class Zone:
         self.volume = 80  # v1 (0..160), ~50%
         self.source = 0x05  # Source 1
         # Single-byte per-zone settings keyed by command byte (raw values):
-        # bass/treble/balance, max volume, audio delay, power-on volume.
-        self.settings = {0x05: 0, 0x06: 0, 0x07: 0, 0x0D: 0xA0, 0x31: 0, 0x48: 0x40}
+        # bass/treble/balance, max volume, audio delay, power-on volume, gain.
+        self.settings = {
+            0x05: 0, 0x06: 0, 0x07: 0, 0x0D: 0xA0, 0x31: 0, 0x48: 0x40, 0x44: 0,
+        }
+        self.special = [0, 0]  # 0x0C special-feature bytes (loudness, mono, ...)
 
     def describe(self) -> str:
         """Return a one-line human summary of the zone state."""
@@ -145,6 +148,8 @@ class Simulator:
         }
         # Now-playing state for media sources (source byte -> dict).
         self.media: dict[int, dict] = {}
+        # Per-source gain (source byte -> dB).
+        self.source_gain: dict[int, int] = {}
         # Auto power/standby (0x16), presets (0x1E/0x2A), diagnostics (0x39/0x34).
         self.auto_power_options = 0
         self.auto_power_standby_n = 8  # 2^8 = 256 s
@@ -307,9 +312,38 @@ class Simulator:
                 writer.write(encode(0x1C, zone_byte, *z.name.encode("utf-8")))
                 await self._safe_drain(writer)
             return
+        if command == 0x0C:  # Amplifier special features (loudness/mono)
+            for z in self._resolve_zones(zone_byte):
+                if data:
+                    z.special[0] = data[0]
+                    if len(data) >= 2:
+                        z.special[1] = data[1]
+                    await self.broadcast(
+                        encode(0x0C, z.number, z.special[0], z.special[1]),
+                        f"{z.name} special",
+                    )
+                else:
+                    reply = encode(0x0C, z.number, z.special[0], z.special[1])
+                    writer.write(reply)
+                    log("-> reply  ", reply, f"{z.name} special")
+            if not data:
+                await self._safe_drain(writer)
+            return
+        if command == 0x32:  # Source gain (set: id+gain, request: id)
+            if len(data) >= 2:
+                self.source_gain[data[0]] = data[1]
+                await self.broadcast(
+                    encode(0x32, 0xFF, data[0], data[1]), f"source {data[0]} gain"
+                )
+            elif data:
+                reply = encode(0x32, 0xFF, data[0], self.source_gain.get(data[0], 0))
+                writer.write(reply)
+                log("-> reply  ", reply, f"source {data[0]} gain")
+                await self._safe_drain(writer)
+            return
         # Single-byte per-zone settings: bass/treble/balance, max volume,
-        # audio delay, power-on volume.
-        if command in (0x05, 0x06, 0x07, 0x0D, 0x31, 0x48):
+        # audio delay, power-on volume, zone gain.
+        if command in (0x05, 0x06, 0x07, 0x0D, 0x31, 0x48, 0x44):
             for z in self._resolve_zones(zone_byte):
                 if data:  # set
                     z.settings[command] = data[0]

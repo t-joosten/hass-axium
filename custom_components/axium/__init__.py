@@ -84,6 +84,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     controller.set_device_info_callback(_update_hub_device)
 
+    @callback
+    def _update_hub_extended(firmware: str | None, mac: str | None) -> None:
+        """Enrich the hub with the full firmware version and MAC address."""
+        kwargs: dict = {}
+        if firmware:
+            kwargs["sw_version"] = firmware
+        if mac:
+            kwargs["merge_connections"] = {
+                (dr.CONNECTION_NETWORK_MAC, dr.format_mac(mac))
+            }
+        if kwargs:
+            device_registry.async_update_device(hub.id, **kwargs)
+
+    controller.set_extended_info_callback(_update_hub_extended)
+
     try:
         await controller.async_start()
     except (ConnectionError, OSError) as err:

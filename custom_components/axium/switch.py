@@ -13,8 +13,17 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import AUTO_POWER_ON_BIT, AUTO_STANDBY_BIT, DOMAIN
+from .const import (
+    AUTO_POWER_ON_BIT,
+    AUTO_STANDBY_BIT,
+    DOMAIN,
+    NAME_KEY,
+    SPECIAL_LOUDNESS_BIT,
+    SPECIAL_MONO_BIT,
+    ZONE_KEY,
+)
 from .controller import AxiumController
+from .helpers import get_zones
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -48,9 +57,85 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the auto-power switches on the amplifier device."""
+    """Set up the auto-power switches and the per-zone loudness/mono switches."""
     controller: AxiumController = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(AxiumSwitch(controller, entry, desc) for desc in SWITCHES)
+    entities: list[SwitchEntity] = [
+        AxiumSwitch(controller, entry, desc) for desc in SWITCHES
+    ]
+    for item in get_zones(entry):
+        entities.append(
+            AxiumZoneSwitch(controller, entry, item[ZONE_KEY], "loudness", "Loudness", 0, SPECIAL_LOUDNESS_BIT)
+        )
+        entities.append(
+            AxiumZoneSwitch(controller, entry, item[ZONE_KEY], "mono", "Mono", 1, SPECIAL_MONO_BIT)
+        )
+    async_add_entities(entities)
+
+
+class AxiumZoneSwitch(SwitchEntity):
+    """A per-zone special-features toggle (loudness or mono) via command 0x0C."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(
+        self,
+        controller: AxiumController,
+        entry: ConfigEntry,
+        zone: int,
+        key: str,
+        label: str,
+        byte_index: int,
+        bit: int,
+    ) -> None:
+        """Initialise the per-zone switch."""
+        self._controller = controller
+        self._zone = zone
+        self._byte_index = byte_index
+        self._bit = bit
+        self._attr_name = label
+        self._attr_unique_id = f"{entry.entry_id}_zone_{zone}_{key}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_zone_{zone}")}
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to updates and request the current special features."""
+        from .const import CMD_SPECIAL_FEATURES
+
+        self.async_on_remove(
+            self._controller.register_listener(self._zone, self._handle_update)
+        )
+        await self._controller.async_send(CMD_SPECIAL_FEATURES, self._zone)
+
+    @callback
+    def _handle_update(self) -> None:
+        """Write state on change."""
+        self.async_write_ha_state()
+
+    @property
+    def available(self) -> bool:
+        """Return whether the amplifier connection is up."""
+        return self._controller.available
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return whether the feature is enabled."""
+        state = self._controller.zone_state(self._zone)
+        return state.loudness if self._byte_index == 0 else state.mono
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable the feature."""
+        await self._controller.async_set_special_bit(
+            self._zone, self._byte_index, self._bit, True
+        )
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disable the feature."""
+        await self._controller.async_set_special_bit(
+            self._zone, self._byte_index, self._bit, False
+        )
 
 
 class AxiumSwitch(SwitchEntity):

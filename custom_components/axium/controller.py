@@ -33,6 +33,7 @@ from .const import (
     CMD_MEDIA_STATUS,
     CMD_MEDIA_STATUS_REQUEST,
     CMD_MUTE,
+    CMD_NO_OP,
     CMD_POWER,
     CMD_PRESET,
     CMD_PRESET_NAME,
@@ -40,9 +41,12 @@ from .const import (
     CMD_REQUEST_DEVICE_INFO,
     CMD_REQUEST_EXTENDED_INFO,
     CMD_SOURCE,
+    CMD_SOURCE_GAIN,
     CMD_SOURCE_NAME,
+    CMD_SPECIAL_FEATURES,
     CMD_TREBLE,
     CMD_VOLUME,
+    CMD_ZONE_GAIN,
     CMD_ZONE_NAME,
     DEVICE_INFO_LIST_ZONES,
     DEVICE_INFO_NO_EXPANSION_REPLY,
@@ -76,6 +80,8 @@ from .const import (
     RESP_EXTENDED_DEVICE_INFO,
     SOURCE_ID_MASK,
     SOURCE_NAME_FLAG_DISABLED,
+    SPECIAL_LOUDNESS_BIT,
+    SPECIAL_MONO_BIT,
     VOLUME_MAX,
     ZONE_ALL,
 )
@@ -103,6 +109,10 @@ class ZoneState:
     max_volume: int | None = None  # percent
     power_on_volume: int | None = None  # percent
     audio_delay: int | None = None  # milliseconds
+    zone_gain: int | None = None  # dB
+    loudness: bool | None = None
+    mono: bool | None = None
+    special: tuple[int, int] = (0, 0)  # cached 0x0C bytes (byte1, byte2)
 
 
 @dataclass
@@ -225,6 +235,14 @@ class AxiumController:
         # writes preserve options.
         self._source_names: dict[int, str] = {}
         self._source_meta: dict[int, tuple[int, int]] = {}
+        # Per-source gain (id -> dB).
+        self._source_gain: dict[int, int] = {}
+        # Extended device info (firmware string, MAC) callback + cache.
+        self._extended_info_callback: Callable[[str | None, str | None], None] | None = (
+            None
+        )
+        self._firmware: str | None = None
+        self._mac: str | None = None
         # Now-playing state keyed by media source data byte.
         self._media: dict[int, MediaState] = {}
         # Diagnostics / amp-wide state.
@@ -327,6 +345,8 @@ class AxiumController:
             self._connected.set()
             self._links = []
             self._notify_all()
+            # Reset the amplifier's receive parser in case of stray bytes.
+            await self.async_send(CMD_NO_OP, 0x00, 0x00)
             await self._request_device_info()
             await self._request_link_groups()
             await self._request_source_names()
@@ -360,7 +380,7 @@ class AxiumController:
     def _handle_frame(self, frame: bytes) -> None:
         """Update the state cache from an incoming command/notification."""
         command = frame[0]
-        zone = frame[1]
+        zone = protocol.decode_zone(frame[1])
         data = frame[2:]
         state = self.zone_state(zone)
         changed = False
@@ -404,6 +424,19 @@ class AxiumController:
         elif command == CMD_AUDIO_DELAY and data:
             state.audio_delay = data[0] * AUDIO_DELAY_STEP
             changed = True
+        elif command == CMD_ZONE_GAIN and data:
+            state.zone_gain = protocol.from_signed_byte(data[0])
+            changed = True
+        elif command == CMD_SPECIAL_FEATURES and data:
+            byte2 = data[1] if len(data) >= 2 else state.special[1]
+            state.special = (data[0], byte2)
+            state.loudness = bool(data[0] & SPECIAL_LOUDNESS_BIT)
+            state.mono = bool(byte2 & SPECIAL_MONO_BIT)
+            changed = True
+        elif command == CMD_SOURCE_GAIN and len(data) >= 2:
+            self._source_gain[data[0]] = data[1]
+            self._notify_diagnostics()
+            return
         elif command == CMD_ZONE_NAME and data:
             state.name = data.decode("utf-8", errors="replace").rstrip("\x00") or None
             changed = True
@@ -448,6 +481,11 @@ class AxiumController:
         elif command == RESP_EXTENDED_DEVICE_INFO and len(data) >= 9:
             self._temperature = protocol.from_signed_byte(data[7])
             self._peak_temperature = protocol.from_signed_byte(data[8])
+            self._firmware = f"{data[4]}.{data[5]}.{data[6]}"
+            if len(data) >= 19:
+                self._mac = ":".join(f"{b:02X}" for b in data[13:19])
+            if self._extended_info_callback is not None:
+                self._extended_info_callback(self._firmware, self._mac)
             self._notify_diagnostics()
             return
 
@@ -654,6 +692,35 @@ class AxiumController:
         """Return the amplifier-reported name for a source, if known."""
         return self._source_names.get(source_id)
 
+    def source_gain(self, source_id: int) -> int | None:
+        """Return the gain (dB) for a source, if known."""
+        return self._source_gain.get(source_id)
+
+    def set_extended_info_callback(
+        self, callback: Callable[[str | None, str | None], None]
+    ) -> None:
+        """Register a callback invoked with (firmware, mac) from ext info."""
+        self._extended_info_callback = callback
+
+    async def async_set_source_gain(self, source_id: int, gain: int) -> None:
+        """Set a source's gain in dB (0..18)."""
+        await self.async_send(CMD_SOURCE_GAIN, ZONE_ALL, source_id, gain)
+
+    async def async_set_zone_gain(self, zone: int, gain: int) -> None:
+        """Set a zone's gain in dB (-12..12)."""
+        await self.async_send(CMD_ZONE_GAIN, zone, protocol.to_signed_byte(gain))
+
+    async def async_set_special_bit(
+        self, zone: int, byte_index: int, bit: int, enabled: bool
+    ) -> None:
+        """Set a bit in a zone's special-features bytes (0x0C), preserving rest."""
+        current = list(self.zone_state(zone).special)
+        if enabled:
+            current[byte_index] |= bit
+        else:
+            current[byte_index] &= ~bit
+        await self.async_send(CMD_SPECIAL_FEATURES, zone, current[0], current[1])
+
     @property
     def preset_names(self) -> dict[int, str]:
         """Map of preset index (1..15) -> name."""
@@ -689,7 +756,7 @@ class AxiumController:
                 zone,
             )
             return
-        frame = protocol.encode(command, zone, *data)
+        frame = protocol.encode(command, protocol.encode_zone(zone), *data)
         async with self._write_lock:
             try:
                 self._writer.write(frame)
@@ -731,9 +798,17 @@ class AxiumController:
         write does not change enabled state or other options.
         """
         device, flags = self._source_meta.get(source_id, (0x00, 0x00))
+        # Older Axium firmware limits names to ~15 UTF-8 bytes; truncate on a
+        # character boundary so multi-byte names are not split.
+        encoded = name.encode("utf-8")[:15]
+        while encoded:
+            try:
+                encoded.decode("utf-8")
+                break
+            except UnicodeDecodeError:
+                encoded = encoded[:-1]
         await self.async_send(
-            CMD_SOURCE_NAME, ZONE_ALL, source_id, 0x00, device, flags,
-            *name.encode("utf-8"),
+            CMD_SOURCE_NAME, ZONE_ALL, source_id, 0x00, device, flags, *encoded
         )
 
     # -- presets ---------------------------------------------------------

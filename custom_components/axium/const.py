@@ -6,6 +6,23 @@ from typing import Final
 
 DOMAIN: Final = "axium"
 
+# No operation — resets the amplifier's receive parser (see protocol notes).
+CMD_NO_OP: Final = 0x00
+CMD_SPECIAL_FEATURES: Final = 0x0C  # loudness / mono / low-pass options
+CMD_SOURCE_GAIN: Final = 0x32
+CMD_ZONE_GAIN: Final = 0x44
+
+# Amplifier special features (0x0C): loudness is bit 0 of byte 1, mono is bit 0
+# of byte 2.
+SPECIAL_LOUDNESS_BIT: Final = 0x01
+SPECIAL_MONO_BIT: Final = 0x01
+
+# Zone gain (0x44) is signed -12..+12 dB; source gain (0x32) is 0..+18 dB.
+ZONE_GAIN_MIN: Final = -12
+ZONE_GAIN_MAX: Final = 12
+SOURCE_GAIN_MIN: Final = 0
+SOURCE_GAIN_MAX: Final = 18
+
 # Default TCP port for the Axium Communications Protocol over Ethernet.
 DEFAULT_PORT: Final = 17037
 DEFAULT_NAME: Final = "Axium"
