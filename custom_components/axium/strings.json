@@ -18,13 +18,5 @@
     "abort": {
       "already_configured": "This amplifier is already configured."
     }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Source names",
-        "description": "Rename the amplifier's sources. Changes are written back to the amplifier. (Rename zones from their device pages.)"
-      }
-    }
   }
 }

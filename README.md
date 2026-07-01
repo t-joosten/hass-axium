@@ -28,7 +28,7 @@ from a keypad or the front panel (a `local_push` integration — no polling).
 - 🔌 Power on/off per zone (command `0x01`)
 - 🔇 Mute / unmute (command `0x02`)
 - 🔊 Volume set and step up/down (commands `0x04`, `0x11`, `0x12`)
-- 🎚️ Source selection with **auto-detected source names** (rename them in HA; written back to the amp)
+- 🎚️ Source selection with **auto-detected source names** (rename inline in HA; written back to the amp)
 - 🎵 Works with **Music Assistant** for streaming via the amplifier's AirPlay input
 - 📡 Live state updates pushed from the amplifier (notifications)
 - ♻️ Automatic reconnection with backoff
@@ -199,9 +199,10 @@ inputs are hidden), so your real source names (e.g. *Apple TV*, *Turntable*)
 appear in each zone's source list instead of generic labels. If the amplifier
 reports nothing, it falls back to `Source 1`…`Source 8` plus `AirPlay`.
 
-To rename a source, open the integration's **Configure** dialog: it lists each
-source with a name field. Changes are **written back to the amplifier**, so the
-new names persist there too. Selecting a source also powers the zone on.
+Each source is also an **editable text field** on the amplifier device (in its
+*Configuration* section) — just type a new name inline and it's **written back
+to the amplifier**, updating the source dropdowns everywhere. No dialog needed.
+Selecting a source also powers the zone on.
 
 ### Now playing & transport
 

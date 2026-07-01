@@ -45,6 +45,7 @@ from .const import (
     NAME_KEY,
     POWER_OFF,
     POWER_ON,
+    SOURCE_BYTE_TO_NAME,
     SOURCE_FLAG_TURN_ON,
     ZONE_KEY,
 )
@@ -84,19 +85,10 @@ async def async_setup_entry(
     """Set up the Axium zone media players from a config entry."""
     controller: AxiumController = hass.data[DOMAIN][entry.entry_id]
     sources = get_sources(entry)
-    source_names = [item[NAME_KEY] for item in sources]
-    name_by_byte = {item[ID_KEY]: item[NAME_KEY] for item in sources}
-    byte_by_name = {item[NAME_KEY]: item[ID_KEY] for item in sources}
+    source_ids = [item[ID_KEY] for item in sources]
+    seed_names = {item[ID_KEY]: item[NAME_KEY] for item in sources}
     async_add_entities(
-        AxiumZone(
-            controller,
-            entry,
-            item[ZONE_KEY],
-            item[NAME_KEY],
-            source_names,
-            name_by_byte,
-            byte_by_name,
-        )
+        AxiumZone(controller, entry, item[ZONE_KEY], item[NAME_KEY], source_ids, seed_names)
         for item in get_zones(entry)
     )
 
@@ -114,16 +106,14 @@ class AxiumZone(MediaPlayerEntity):
         entry: ConfigEntry,
         zone: int,
         name: str,
-        source_names: list[str],
-        name_by_byte: dict[int, str],
-        byte_by_name: dict[str, int],
+        source_ids: list[int],
+        seed_names: dict[int, str],
     ) -> None:
         """Initialise the zone entity."""
         self._controller = controller
         self._zone = zone
-        self._attr_source_list = source_names
-        self._name_by_byte = name_by_byte
-        self._byte_by_name = byte_by_name
+        self._source_ids = source_ids
+        self._seed_names = seed_names
         self._media_position: int | None = None
         self._media_position_updated: datetime | None = None
         self._attr_unique_id = f"{entry.entry_id}_zone_{zone}"
@@ -199,11 +189,25 @@ class AxiumZone(MediaPlayerEntity):
         """Return whether the zone is muted."""
         return self._controller.zone_state(self._zone).muted
 
+    def _source_display(self, byte: int) -> str:
+        """Return the display name for a source byte (live name preferred)."""
+        return (
+            self._controller.source_name(byte)
+            or self._seed_names.get(byte)
+            or SOURCE_BYTE_TO_NAME.get(byte)
+            or f"Source 0x{byte:02X}"
+        )
+
+    @property
+    def source_list(self) -> list[str]:
+        """Return the selectable sources with their current names."""
+        return [self._source_display(byte) for byte in self._source_ids]
+
     @property
     def source(self) -> str | None:
         """Return the currently selected source."""
         byte = self._controller.zone_state(self._zone).source
-        return None if byte is None else self._name_by_byte.get(byte)
+        return None if byte is None else self._source_display(byte)
 
     @property
     def group_members(self) -> list[str]:
@@ -244,7 +248,10 @@ class AxiumZone(MediaPlayerEntity):
 
     async def async_select_source(self, source: str) -> None:
         """Select an input source (and turn the zone on)."""
-        source_byte = self._byte_by_name.get(source)
+        source_byte = next(
+            (byte for byte in self._source_ids if self._source_display(byte) == source),
+            None,
+        )
         if source_byte is None:
             _LOGGER.warning("Unknown Axium source: %s", source)
             return

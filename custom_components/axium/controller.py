@@ -221,7 +221,9 @@ class AxiumController:
         self._links: list[tuple[set[int], int]] = []
         # Map of zone number -> media_player entity_id, for group membership.
         self._zone_entity_ids: dict[int, str] = {}
-        # Cached per-source (device byte, flags) so name writes preserve options.
+        # Live source names (id -> name) and per-source (device, flags) so name
+        # writes preserve options.
+        self._source_names: dict[int, str] = {}
         self._source_meta: dict[int, tuple[int, int]] = {}
         # Now-playing state keyed by media source data byte.
         self._media: dict[int, MediaState] = {}
@@ -415,6 +417,10 @@ class AxiumController:
             info = parse_source_name(data)
             if info is not None:
                 self._source_meta[info["id"]] = (info["device"], info["flags"])
+                if info["name"]:
+                    self._source_names[info["id"]] = info["name"]
+                self._notify_all()
+                self._notify_diagnostics()
             return
         elif command == CMD_MEDIA_STATUS and len(data) >= 2:
             self._handle_media_status(data)
@@ -643,6 +649,10 @@ class AxiumController:
     def standby_seconds(self) -> int:
         """Auto standby timeout in seconds."""
         return 2 ** min(self._auto_power_standby_n, 30)
+
+    def source_name(self, source_id: int) -> str | None:
+        """Return the amplifier-reported name for a source, if known."""
+        return self._source_names.get(source_id)
 
     @property
     def preset_names(self) -> dict[int, str]:
