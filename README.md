@@ -433,6 +433,21 @@ turns **all** zones off, and tapping the card opens the hub's device page
 no configuration; with several, set `hub:` (the visual editor's Amplifier
 dropdown does this for you).
 
+### Matrix card
+
+The **Axium Matrix Card** (`type: custom:axium-matrix-card`) is the whole-system
+routing grid: **zones are rows, sources are columns** (plus an *Off* column).
+Each cell shows whether that zone is on that source; tap a cell to route the
+zone there — or the *Off* cell to turn it off. It's the fastest way to see and
+change what every room is playing at once. Auto-detects the hub's zones and
+sources; set `hub:`/`entities:` to scope or override.
+
+The `+`/`−` volume buttons on the **source** card send a relative step
+(`volume_up`/`volume_down`) to every zone playing that source — each zone moves
+by the same amount from its own level, so relative differences between rooms are
+preserved (it does not force them to one absolute level). Absolute per-zone
+volume lives on each zone's device page.
+
 ## How it works
 
 Commands use the frame format `<command><zone>[<data>...]`. Every byte is sent

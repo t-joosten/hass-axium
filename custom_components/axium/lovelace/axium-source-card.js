@@ -1045,6 +1045,238 @@ class AxiumHubCardEditor extends HTMLElement {
   }
 }
 
+/**
+ * Axium Matrix Card — the whole-system routing grid for one amplifier.
+ *
+ * Zones are rows, sources are columns (plus an "Off" column). Each cell shows
+ * whether that zone is on that source; tapping a cell routes the zone there (or
+ * off). It reads/writes only through the zones' media_player state, storing
+ * nothing itself.
+ *
+ * Config:
+ *   type: custom:axium-matrix-card
+ *   hub: <config_entry_id>   # optional — defaults to the only Axium hub
+ *   name: Matrix             # optional — header text
+ *   entities: [...]          # optional — zone media_players (rows); auto if omitted
+ */
+class AxiumMatrixCard extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._built = false;
+    this._structSig = "";
+  }
+
+  setConfig(config) {
+    this._config = config || {};
+    this._built = false;
+    this.shadowRoot.innerHTML = "";
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!hass || !this._config) return;
+    const sig = this._signature();
+    if (!this._built || sig !== this._structSig) {
+      this._structSig = sig;
+      this._build();
+    }
+    this._update();
+  }
+
+  getCardSize() {
+    return 3;
+  }
+
+  static getConfigElement() {
+    return document.createElement("axium-hub-card-editor");
+  }
+
+  static getStubConfig(hass) {
+    const hubs = axiumHubs(hass);
+    return hubs.length ? { hub: hubs[0].id } : {};
+  }
+
+  _hubId() {
+    return this._config.hub || (axiumHubs(this._hass)[0] || {}).id;
+  }
+
+  _zones() {
+    if (Array.isArray(this._config.entities)) return this._config.entities;
+    return axiumMediaPlayers(this._hass, this._hubId()).sort();
+  }
+
+  // Columns: every source offered across the hub's zones, as {id, name}.
+  _sources() {
+    const byId = new Map();
+    for (const id of this._zones()) {
+      const st = this._hass.states[id];
+      const ids = st && st.attributes.source_ids;
+      const names = st && st.attributes.source_list;
+      if (Array.isArray(ids) && Array.isArray(names)) {
+        ids.forEach((sid, i) => {
+          if (!byId.has(sid)) byId.set(sid, names[i]);
+        });
+      }
+    }
+    return [...byId.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }
+
+  // Rebuild only when the zone or source set changes, not on every state tick.
+  _signature() {
+    return this._zones().join(",") + "|" + this._sources().map((s) => s.id).join(",");
+  }
+
+  _sourceNameFor(st, sid) {
+    const ids = st && st.attributes.source_ids;
+    const names = st && st.attributes.source_list;
+    if (!Array.isArray(ids) || !Array.isArray(names)) return null;
+    const i = ids.indexOf(sid);
+    return i >= 0 ? names[i] : null;
+  }
+
+  _currentSourceId(st) {
+    const names = st && st.attributes.source_list;
+    const ids = st && st.attributes.source_ids;
+    if (!Array.isArray(names) || !Array.isArray(ids)) return null;
+    const i = names.indexOf(st.attributes.source);
+    return i >= 0 ? ids[i] : null;
+  }
+
+  _zoneName(id) {
+    const st = this._hass.states[id];
+    const n = st && st.attributes.friendly_name;
+    return n ? n : id.split(".")[1].replace(/_/g, " ");
+  }
+
+  _route(zoneId, src) {
+    const st = this._hass.states[zoneId];
+    if (src === "off") {
+      this._hass.callService("media_player", "turn_off", { entity_id: zoneId });
+      return;
+    }
+    const name = this._sourceNameFor(st, Number(src));
+    if (name != null) {
+      this._hass.callService("media_player", "select_source", {
+        entity_id: zoneId,
+        source: name,
+      });
+    }
+  }
+
+  _build() {
+    const zones = this._zones();
+    const sources = this._sources();
+    const cols = 1 + sources.length + 1; // zone label + sources + off
+    const head =
+      `<div class="corner"></div>` +
+      sources
+        .map(
+          (s) =>
+            `<div class="colhead" title="${s.name}"><span>${s.name}</span></div>`
+        )
+        .join("") +
+      `<div class="colhead off"><span>Off</span></div>`;
+    const rows = zones
+      .map((z) => {
+        const cells = sources
+          .map(
+            (s) =>
+              `<button class="cell" data-zone="${z}" data-src="${s.id}">` +
+              `<ha-icon icon="mdi:check"></ha-icon></button>`
+          )
+          .join("");
+        return (
+          `<div class="rowhead" title="${this._zoneName(z)}">` +
+          `${this._zoneName(z)}</div>` +
+          cells +
+          `<button class="cell off" data-zone="${z}" data-src="off">` +
+          `<ha-icon icon="mdi:power"></ha-icon></button>`
+        );
+      })
+      .join("");
+
+    this.shadowRoot.innerHTML = `
+      <style>${AxiumMatrixCard.styles}</style>
+      <ha-card>
+        ${this._config.name ? `<div class="title">${this._config.name}</div>` : ""}
+        <div class="scroll">
+          <div class="matrix" style="grid-template-columns: minmax(72px,auto) repeat(${
+            sources.length
+          }, minmax(44px,1fr)) auto;">
+            ${head}${rows}
+          </div>
+        </div>
+      </ha-card>
+    `;
+
+    this.shadowRoot.querySelector(".matrix").addEventListener("click", (ev) => {
+      const cell = ev.target.closest("button.cell");
+      if (!cell) return;
+      this._route(cell.dataset.zone, cell.dataset.src);
+    });
+    this._built = true;
+  }
+
+  _update() {
+    const cells = this.shadowRoot.querySelectorAll("button.cell");
+    for (const cell of cells) {
+      const zoneId = cell.dataset.zone;
+      const src = cell.dataset.src;
+      const st = this._hass.states[zoneId];
+      const on = st && !OFF_STATES.includes(st.state);
+      let active;
+      let unavailable = !st || st.state === "unavailable";
+      if (src === "off") {
+        active = !on;
+      } else {
+        const sid = Number(src);
+        active = on && this._currentSourceId(st) === sid;
+        if (this._sourceNameFor(st, sid) == null) unavailable = true;
+      }
+      cell.classList.toggle("active", !!active);
+      cell.classList.toggle("unavailable", !!unavailable);
+    }
+  }
+}
+
+AxiumMatrixCard.styles = `
+  ha-card { padding: 12px; }
+  .title { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: var(--primary-text-color); }
+  .scroll { overflow-x: auto; }
+  .matrix { display: grid; gap: 4px; align-items: stretch; min-width: min-content; }
+  .corner { }
+  .colhead, .rowhead {
+    font-size: 0.8rem; color: var(--secondary-text-color);
+    display: flex; align-items: center; overflow: hidden;
+  }
+  .colhead { justify-content: center; text-align: center; padding: 0 2px; }
+  .colhead span, .rowhead {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+  }
+  .rowhead { font-size: 0.9rem; color: var(--primary-text-color); padding-right: 6px; }
+  .cell {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-height: 40px; border-radius: 8px;
+    border: 1px solid var(--divider-color);
+    background: var(--card-background-color); cursor: pointer;
+    color: var(--primary-text-color);
+    transition: background 0.15s, border-color 0.15s, transform 0.05s;
+  }
+  .cell:hover { border-color: var(--primary-color); }
+  .cell:active { transform: scale(0.94); }
+  .cell ha-icon { --mdc-icon-size: 18px; opacity: 0; transition: opacity 0.15s; }
+  .cell.active {
+    background: var(--primary-color); border-color: var(--primary-color);
+    color: var(--text-primary-color, #fff);
+  }
+  .cell.active ha-icon { opacity: 1; }
+  .cell.off.active { background: var(--secondary-background-color); color: var(--primary-text-color); border-color: var(--divider-color); }
+  .cell.unavailable { opacity: 0.3; pointer-events: none; }
+`;
+
 // Guard against the module being loaded twice (e.g. a manually-added resource
 // plus the integration's auto-registration), which would otherwise throw.
 if (!customElements.get("axium-source-card")) {
@@ -1052,6 +1284,7 @@ if (!customElements.get("axium-source-card")) {
   customElements.define("axium-source-card-editor", AxiumSourceCardEditor);
   customElements.define("axium-hub-card", AxiumHubCard);
   customElements.define("axium-hub-card-editor", AxiumHubCardEditor);
+  customElements.define("axium-matrix-card", AxiumMatrixCard);
 
   window.customCards = window.customCards || [];
   window.customCards.push(
@@ -1065,6 +1298,12 @@ if (!customElements.get("axium-source-card")) {
       type: "axium-hub-card",
       name: "Axium Hub Card",
       description: "Compact amplifier status with an all-off button (hass-axium).",
+      documentationURL: "https://github.com/t-joosten/hass-axium",
+    },
+    {
+      type: "axium-matrix-card",
+      name: "Axium Matrix Card",
+      description: "Zones × sources routing grid for the whole system (hass-axium).",
       documentationURL: "https://github.com/t-joosten/hass-axium",
     }
   );
