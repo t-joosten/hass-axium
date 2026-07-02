@@ -474,6 +474,8 @@ are `device_class: timestamp`, so the time left is usable in automations, e.g.
 The **Axium Alarms Card** and **Axium Sleep Timers Card** are **interactive**:
 the alarms card lets you enable/disable each alarm, edit its time and days,
 remove it, and add new ones inline (and it shows each alarm's target zones);
+its editor also restricts which **zones** and **sources** are offered in the
+Add form (empty = all), like the matrix card;
 the sleep-timers card lets you start a timer per zone (15/30/60/90 min) and
 cancel it — all with the live countdown. The sleep-timers card's editor has a
 **Show** option to choose which sections appear — the **all-zones timer**,

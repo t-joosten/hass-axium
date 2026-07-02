@@ -1455,7 +1455,7 @@ class AxiumAlarmsCard extends HTMLElement {
     return 3;
   }
   static getConfigElement() {
-    return document.createElement("axium-hub-card-editor");
+    return document.createElement("axium-matrix-card-editor");
   }
   static getStubConfig(hass) {
     const hubs = axiumHubs(hass);
@@ -1481,6 +1481,15 @@ class AxiumAlarmsCard extends HTMLElement {
   _svc(service, data) {
     this._hass.callService("axium", service, { hub: this._hub(), ...data });
   }
+  // Zones offered in the Add form (config `zones` whitelist, else all).
+  _addZones() {
+    const all = axiumMediaPlayers(this._hass, this._hub());
+    const pick = this._config.zones;
+    return Array.isArray(pick) && pick.length
+      ? all.filter((id) => pick.includes(id))
+      : all;
+  }
+  // Sources offered in the Add form (config `sources` whitelist, else all).
   _sources() {
     const map = new Map();
     for (const z of axiumMediaPlayers(this._hass, this._hub())) {
@@ -1493,9 +1502,13 @@ class AxiumAlarmsCard extends HTMLElement {
         });
       }
     }
-    return [...map.entries()]
-      .map(([id, name]) => ({ id, name }))
-      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    let list = [...map.entries()].map(([id, name]) => ({ id, name }));
+    const pick = this._config.sources;
+    if (Array.isArray(pick) && pick.length) {
+      const wanted = new Set(pick.map(Number));
+      list = list.filter((s) => wanted.has(s.id));
+    }
+    return list.sort((a, b) => String(a.name).localeCompare(String(b.name)));
   }
 
   _render() {
@@ -1647,7 +1660,7 @@ class AxiumAlarmsCard extends HTMLElement {
       c.addEventListener("click", () => c.classList.toggle("on"));
       form.querySelector(".f-days").appendChild(c);
     });
-    for (const z of axiumMediaPlayers(this._hass, this._hub())) {
+    for (const z of this._addZones()) {
       const st = this._hass.states[z];
       const c = document.createElement("button");
       c.className = "zonechip";
