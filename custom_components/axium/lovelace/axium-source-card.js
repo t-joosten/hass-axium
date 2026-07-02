@@ -1792,13 +1792,20 @@ class AxiumSleepCard extends HTMLElement {
       .filter((id) => reg[id] && reg[id].platform === "axium")
       .filter((id) => states[id].attributes.axium_kind === "sleep_timer")
       .filter((id) => !this._hub() || entityHub(this._hass, id) === this._hub())
-      .sort((a, b) => this._zoneName(a).localeCompare(this._zoneName(b)));
+      .sort((a, b) => {
+        // The "all zones" timer sorts first; the rest by zone name.
+        const aa = this._hass.states[a].attributes.sleep_all ? 0 : 1;
+        const bb = this._hass.states[b].attributes.sleep_all ? 0 : 1;
+        return aa - bb || this._zoneName(a).localeCompare(this._zoneName(b));
+      });
   }
   _device(id) {
     const reg = (this._hass && this._hass.entities) || {};
     return reg[id] && reg[id].device_id;
   }
   _zoneName(numId) {
+    const st0 = this._hass.states[numId];
+    if (st0 && st0.attributes.sleep_all) return "All zones";
     const reg = (this._hass && this._hass.entities) || {};
     const dev = this._device(numId);
     if (dev) {
@@ -1809,8 +1816,7 @@ class AxiumSleepCard extends HTMLElement {
         }
       }
     }
-    const st = this._hass.states[numId];
-    const fn = (st && st.attributes.friendly_name) || numId;
+    const fn = (st0 && st0.attributes.friendly_name) || numId;
     return fn.replace(/\s*Sleep timer$/i, "");
   }
   _sleepSensor(numId) {

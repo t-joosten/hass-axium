@@ -76,7 +76,11 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   balance/loudness (already implemented). (Corrected an earlier wrong assessment.)
 - **Sleep timer**: per-zone `AxiumSleepTimer` number (number.py) — fades volume down over
   the last ~30s then powers the zone off; restores the pre-fade volume. HA-side asyncio
-  task, no protocol dependency.
+  task, no protocol dependency. Also `AxiumAllZonesSleepTimer` (hub device) fades + powers
+  off ALL zones (`CMD_POWER ZONE_ALL`); its deadline is stored under the `"all"` key and it
+  has a hub-level `AxiumSleepSensor(zone="all", hub_device=True)`. Both numbers carry
+  `axium_kind: "sleep_timer"`; the all-zones one adds `sleep_all: true` (sleep card sorts it
+  first, labels it "All zones").
 - **Alarms (wake-to-music)**: HA-side (the amp's native alarm needs clock+preset+favourite
   config — too rigid/unverified). Stored in options (`CONF_ALARMS`, helper `get_alarms`):
   `{name,time,days[0=Mon..6=Sun],zones[entity_ids],source id,volume,enabled}`. Managed via

@@ -67,6 +67,11 @@ async def async_setup_entry(
     entities.extend(
         AxiumSleepSensor(hass, entry, item[ZONE_KEY]) for item in get_zones(entry)
     )
+    entities.append(
+        AxiumSleepSensor(
+            hass, entry, "all", name="All zones sleep ends", hub_device=True
+        )
+    )
     entities.extend(
         AxiumAlarmSensor(hass, entry, alarm) for alarm in get_alarms(entry)
     )
@@ -80,18 +85,28 @@ class AxiumSleepSensor(SensorEntity):
     _attr_should_poll = False
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.TIMESTAMP
-    _attr_name = "Sleep ends"
     _attr_icon = "mdi:timer-sand"
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, zone: int) -> None:
-        """Initialise the sleep-end sensor."""
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        zone: int | str,
+        name: str = "Sleep ends",
+        hub_device: bool = False,
+    ) -> None:
+        """Initialise the sleep-end sensor (per zone, or the hub's all-zones one)."""
         self._hass = hass
         self._entry_id = entry.entry_id
         self._zone = zone
+        self._attr_name = name
         self._attr_unique_id = f"{entry.entry_id}_zone_{zone}_sleep_ends"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry.entry_id}_zone_{zone}")}
+        identifier = (
+            (DOMAIN, entry.entry_id)
+            if hub_device
+            else (DOMAIN, f"{entry.entry_id}_zone_{zone}")
         )
+        self._attr_device_info = DeviceInfo(identifiers={identifier})
 
     async def async_added_to_hass(self) -> None:
         """Update when the zone's sleep deadline changes."""

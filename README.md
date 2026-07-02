@@ -458,6 +458,9 @@ volume lives on each zone's device page.
 
 - **Sleep timer** — each zone has a *Sleep timer* number (minutes). Set it and the
   zone fades down and powers off when it elapses; set it back to 0 to cancel.
+  There's also a hub-level **All-zone sleep timer** that fades and powers off
+  *every* zone at once (the amp then idles into standby per its Auto standby
+  setting); it appears as the top **All zones** row in the Sleep Timers card.
 - **Alarms (wake-to-music)** — add them under **Settings → Devices & services →
   Axium → Configure → Add a wake-to-music alarm**: a name, time, weekdays, zones,
   source and target volume. At the set time those zones power on, switch to the

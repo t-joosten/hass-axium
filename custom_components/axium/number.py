@@ -48,6 +48,7 @@ from .const import (
     TREBLE_MAX,
     TREBLE_MIN,
     VOLUME_MAX,
+    ZONE_ALL,
     ZONE_GAIN_MAX,
     ZONE_GAIN_MIN,
     ZONE_KEY,
@@ -154,6 +155,11 @@ async def async_setup_entry(
     entities.extend(
         AxiumSleepTimer(controller, entry, item[ZONE_KEY]) for item in get_zones(entry)
     )
+    entities.append(
+        AxiumAllZonesSleepTimer(
+            controller, entry, [item[ZONE_KEY] for item in get_zones(entry)]
+        )
+    )
     if advanced:
         entities.extend(
             AxiumSourceGain(controller, entry, item[ID_KEY])
@@ -249,6 +255,108 @@ class AxiumSleepTimer(NumberEntity):
             await self._controller.async_send(
                 CMD_VOLUME, self._zone, level_to_volume(original)
             )
+
+        self._minutes = 0
+        self._task = None
+        self._publish_deadline(None)
+        self.async_write_ha_state()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Cancel any running timer when the entity goes away."""
+        self._cancel()
+
+
+class AxiumAllZonesSleepTimer(NumberEntity):
+    """Hub-level sleep timer: fade and power off every zone at once.
+
+    After the zones are off the amplifier idles into standby (subject to its
+    Auto standby setting), so this effectively sleeps the whole system.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_name = "All-zone sleep timer"
+    _attr_native_min_value = 0
+    _attr_native_max_value = _SLEEP_MAX_MIN
+    _attr_native_step = 5
+    _attr_native_unit_of_measurement = "min"
+    _attr_mode = NumberMode.BOX
+    _attr_icon = "mdi:power-sleep"
+    _attr_extra_state_attributes = {"axium_kind": "sleep_timer", "sleep_all": True}
+
+    def __init__(
+        self, controller: AxiumController, entry: ConfigEntry, zones: list[int]
+    ) -> None:
+        """Initialise the all-zone sleep-timer number (on the hub device)."""
+        self._controller = controller
+        self._entry_id = entry.entry_id
+        self._zones = zones
+        self._minutes = 0
+        self._task: asyncio.Task | None = None
+        self._attr_unique_id = f"{entry.entry_id}_sleep_all"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
+
+    def _publish_deadline(self, deadline: datetime | None) -> None:
+        store = self.hass.data.setdefault(DATA_SLEEP_DEADLINES, {}).setdefault(
+            self._entry_id, {}
+        )
+        store["all"] = deadline
+        async_dispatcher_send(self.hass, f"{SIGNAL_SLEEP_UPDATE}_{self._entry_id}")
+
+    @property
+    def available(self) -> bool:
+        """Return whether the amplifier connection is up."""
+        return self._controller.available
+
+    @property
+    def native_value(self) -> int:
+        """Return the minutes remaining on the timer (0 = off)."""
+        return self._minutes
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Start (or cancel, when 0) the all-zone sleep timer."""
+        self._cancel()
+        self._minutes = int(value)
+        if self._minutes > 0:
+            self._publish_deadline(
+                dt_util.utcnow() + timedelta(minutes=self._minutes)
+            )
+            self._task = self.hass.async_create_task(self._run(self._minutes))
+        else:
+            self._publish_deadline(None)
+        self.async_write_ha_state()
+
+    def _cancel(self) -> None:
+        if self._task and not self._task.done():
+            self._task.cancel()
+        self._task = None
+
+    async def _run(self, minutes: int) -> None:
+        """Wait out the timer, fade every zone down, then power them all off."""
+        fade = min(_SLEEP_FADE_SECONDS, minutes * 60 * 0.5)
+        await asyncio.sleep(max(0.0, minutes * 60 - fade))
+
+        originals = {
+            zone: self._controller.zone_state(zone).volume for zone in self._zones
+        }
+        if fade > 0:
+            for i in range(1, _SLEEP_FADE_STEPS + 1):
+                for zone, original in originals.items():
+                    if original and original > 0:
+                        level = original * (_SLEEP_FADE_STEPS - i) / _SLEEP_FADE_STEPS
+                        await self._controller.async_send(
+                            CMD_VOLUME, zone, level_to_volume(level)
+                        )
+                await asyncio.sleep(fade / _SLEEP_FADE_STEPS)
+
+        # Power off every zone in one command; the amp idles into standby.
+        await self._controller.async_send(CMD_POWER, ZONE_ALL, POWER_OFF)
+        for zone, original in originals.items():
+            if original and original > 0:
+                await self._controller.async_send(
+                    CMD_VOLUME, zone, level_to_volume(original)
+                )
 
         self._minutes = 0
         self._task = None
