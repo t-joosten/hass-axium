@@ -775,19 +775,299 @@ class AxiumSourceCardEditor extends HTMLElement {
   }
 }
 
+/**
+ * Axium Hub Card — a compact status line for one amplifier.
+ *
+ * Shows the amp's name, model + firmware, how many zones are on, temperature and
+ * a clipping warning. An "all off" button turns every zone off; tapping the card
+ * opens the hub's device page (auto power/standby, presets, gains, diagnostics).
+ *
+ * Config:
+ *   type: custom:axium-hub-card
+ *   hub: <config_entry_id>   # optional — defaults to the only Axium hub
+ *   name: Amplifier          # optional — header text (defaults to the hub name)
+ */
+class AxiumHubCard extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._built = false;
+  }
+
+  setConfig(config) {
+    this._config = config || {};
+    this._built = false;
+    this.shadowRoot.innerHTML = "";
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!hass || !this._config) return;
+    if (!this._built) this._build();
+    this._update();
+  }
+
+  getCardSize() {
+    return 1;
+  }
+
+  static getConfigElement() {
+    return document.createElement("axium-hub-card-editor");
+  }
+
+  static getStubConfig(hass) {
+    const hubs = axiumHubs(hass);
+    return hubs.length ? { hub: hubs[0].id } : {};
+  }
+
+  _hubId() {
+    return this._config.hub || (axiumHubs(this._hass)[0] || {}).id;
+  }
+
+  _hub() {
+    const id = this._hubId();
+    return axiumHubs(this._hass).find((h) => h.id === id);
+  }
+
+  // The hub device carries identifiers ["axium", <config entry id>].
+  _hubDevice() {
+    const id = this._hubId();
+    if (!id) return null;
+    const devices = (this._hass && this._hass.devices) || {};
+    for (const dev of Object.values(devices)) {
+      if ((dev.identifiers || []).some((t) => t[0] === "axium" && t[1] === id)) {
+        return dev;
+      }
+    }
+    return null;
+  }
+
+  _zonesOn() {
+    return axiumMediaPlayers(this._hass, this._hubId()).filter((id) => {
+      const st = this._hass.states[id];
+      return st && !OFF_STATES.includes(st.state);
+    });
+  }
+
+  // Find a hub-owned axium entity whose state matches a predicate.
+  _hubEntity(pred) {
+    const id = this._hubId();
+    const reg = (this._hass && this._hass.entities) || {};
+    for (const eid of Object.keys(reg)) {
+      if (reg[eid].platform !== "axium") continue;
+      if (entityHub(this._hass, eid) !== id) continue;
+      const st = this._hass.states[eid];
+      if (st && pred(eid, st)) return st;
+    }
+    return null;
+  }
+
+  _temperature() {
+    return this._hubEntity(
+      (eid, st) =>
+        eid.startsWith("sensor.") &&
+        st.attributes.device_class === "temperature" &&
+        !eid.includes("peak")
+    );
+  }
+
+  _clipping() {
+    return this._hubEntity(
+      (eid, st) =>
+        eid.startsWith("binary_sensor.") &&
+        st.attributes.device_class === "problem"
+    );
+  }
+
+  _openHub() {
+    const dev = this._hubDevice();
+    if (!dev) return;
+    history.pushState(null, "", `/config/devices/device/${dev.id}`);
+    this.dispatchEvent(
+      new CustomEvent("location-changed", { bubbles: true, composed: true })
+    );
+  }
+
+  _allOff() {
+    const on = this._zonesOn();
+    if (on.length) {
+      this._hass.callService("media_player", "turn_off", { entity_id: on });
+    }
+  }
+
+  _build() {
+    this.shadowRoot.innerHTML = `
+      <style>${AxiumHubCard.styles}</style>
+      <ha-card class="hub" role="button" tabindex="0" title="Open amplifier settings">
+        <ha-icon class="hicon" icon="mdi:amplifier"></ha-icon>
+        <div class="info">
+          <div class="hname" id="hname"></div>
+          <div class="hsub" id="hsub"></div>
+        </div>
+        <button class="alloff" id="alloff" title="Turn all zones off">
+          <ha-icon icon="mdi:power"></ha-icon>
+        </button>
+      </ha-card>
+    `;
+    const card = this.shadowRoot.querySelector(".hub");
+    card.addEventListener("click", (ev) => {
+      if (ev.target.closest("#alloff")) return;
+      this._openHub();
+    });
+    card.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        this._openHub();
+      }
+    });
+    this.shadowRoot.getElementById("alloff").addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      this._allOff();
+    });
+    this._built = true;
+  }
+
+  _update() {
+    const root = this.shadowRoot;
+    const hub = this._hub();
+    const dev = this._hubDevice();
+    root.getElementById("hname").textContent =
+      this._config.name || (hub ? hub.name : "Axium");
+
+    const parts = [];
+    if (dev && dev.model && dev.model !== "Amplifier") parts.push(dev.model);
+    if (dev && dev.sw_version) parts.push(dev.sw_version);
+    const on = this._zonesOn().length;
+    parts.push(`${on} zone${on === 1 ? "" : "s"} on`);
+    const temp = this._temperature();
+    if (temp && temp.state && !isNaN(Number(temp.state))) {
+      const unit = temp.attributes.unit_of_measurement || "°C";
+      parts.push(`${Math.round(Number(temp.state))}${unit}`);
+    }
+    const clip = this._clipping();
+    const clipping = clip && clip.state === "on";
+    if (clipping) parts.push("⚠ Clipping");
+    root.getElementById("hsub").textContent = parts.join(" · ");
+
+    const icon = root.querySelector(".hicon");
+    if (icon) icon.style.color = clipping ? "var(--error-color)" : "";
+    const alloff = root.getElementById("alloff");
+    if (alloff) alloff.toggleAttribute("disabled", on === 0);
+  }
+}
+
+AxiumHubCard.styles = `
+  .hub {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 16px; cursor: pointer;
+  }
+  .hub:focus-visible { outline: 2px solid var(--primary-color); outline-offset: -2px; }
+  .hicon { --mdc-icon-size: 28px; color: var(--primary-color); flex: 0 0 auto; }
+  .info { flex: 1 1 auto; min-width: 0; }
+  .hname { font-size: 1.05rem; font-weight: 600; color: var(--primary-text-color); }
+  .hsub {
+    font-size: 0.85rem; color: var(--secondary-text-color);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .alloff {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 40px; height: 40px; border-radius: 50%;
+    border: none; background: none; cursor: pointer;
+    color: var(--primary-text-color); flex: 0 0 auto;
+    transition: background 0.15s, transform 0.05s;
+  }
+  .alloff:hover { background: var(--secondary-background-color); }
+  .alloff:active { transform: scale(0.92); }
+  .alloff[disabled] { opacity: 0.3; pointer-events: none; }
+`;
+
+/** Visual (UI) editor for the hub card — pick an amplifier, plus an optional name. */
+class AxiumHubCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = { ...config };
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+
+  async _ensureHaForm() {
+    if (customElements.get("ha-form")) return;
+    try {
+      const helpers = await window.loadCardHelpers();
+      const card = await helpers.createCardElement({ type: "entities", entities: [] });
+      await card.constructor.getConfigElement();
+    } catch (err) {
+      /* ha-form will still upgrade once available */
+    }
+  }
+
+  _render() {
+    if (!this._hass || !this._config) return;
+    if (!this._form) {
+      this._form = document.createElement("ha-form");
+      this._form.addEventListener("value-changed", (ev) => this._changed(ev));
+      this.appendChild(this._form);
+      this._ensureHaForm();
+    }
+    const hubs = axiumHubs(this._hass);
+    const options = hubs.map((h) => ({ value: h.id, label: h.name }));
+    const data = { ...this._config };
+    if (!data.hub && hubs.length) data.hub = hubs[0].id;
+
+    this._form.hass = this._hass;
+    this._form.data = data;
+    this._form.schema = [
+      {
+        name: "hub",
+        selector: options.length
+          ? { select: { mode: "dropdown", options } }
+          : { text: {} },
+      },
+      { name: "name", selector: { text: {} } },
+    ];
+    this._form.computeLabel = (s) =>
+      ({ hub: "Amplifier", name: "Card name (optional)" }[s.name] || s.name);
+  }
+
+  _changed(ev) {
+    ev.stopPropagation();
+    this._config = { ...ev.detail.value };
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail: { config: this._config },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+}
+
 // Guard against the module being loaded twice (e.g. a manually-added resource
 // plus the integration's auto-registration), which would otherwise throw.
 if (!customElements.get("axium-source-card")) {
   customElements.define("axium-source-card", AxiumSourceCard);
   customElements.define("axium-source-card-editor", AxiumSourceCardEditor);
+  customElements.define("axium-hub-card", AxiumHubCard);
+  customElements.define("axium-hub-card-editor", AxiumHubCardEditor);
 
   window.customCards = window.customCards || [];
-  window.customCards.push({
-    type: "axium-source-card",
-    name: "Axium Source Card",
-    description: "Assign zones to a source and control playback (hass-axium).",
-    documentationURL: "https://github.com/t-joosten/hass-axium",
-  });
+  window.customCards.push(
+    {
+      type: "axium-source-card",
+      name: "Axium Source Card",
+      description: "Assign zones to a source and control playback (hass-axium).",
+      documentationURL: "https://github.com/t-joosten/hass-axium",
+    },
+    {
+      type: "axium-hub-card",
+      name: "Axium Hub Card",
+      description: "Compact amplifier status with an all-off button (hass-axium).",
+      documentationURL: "https://github.com/t-joosten/hass-axium",
+    }
+  );
 
   // eslint-disable-next-line no-console
   console.info(

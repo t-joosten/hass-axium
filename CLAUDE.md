@@ -60,6 +60,11 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   device page (`_attachChipHandlers`/`_openZoneDevice`, pointer events; navigates to
   `/config/devices/device/<device_id>` via a `location-changed` event, more-info
   fallback). Device id comes from `hass.entities[id].device_id`.
+- The same JS file defines TWO cards: `axium-source-card` and `axium-hub-card` (compact
+  amp status: model/fw/zones-on/temp/clipping + all-off button; tap opens the hub device
+  page). Both + their editors are registered in one guard block and pushed to
+  `window.customCards`. The hub card finds hub-owned entities via `entityHub` + the
+  entity-registry `platform`, and the hub device by identifier `["axium", <hub id>]`.
 - The integration serves it from a **version-stamped path**
   (`/axium/axium-source-card-<version>.js`) via `AxiumCardView.extra_urls`, not a `?v=`
   query — a new path defeats stale browser/service-worker caches on every release.

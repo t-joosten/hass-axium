@@ -423,6 +423,16 @@ currently on this source but not in the preset is turned off. Presets are
 shared, so the same *Downstairs* preset works on your CD card, your Apple TV
 card, and so on.
 
+### Hub card
+
+For a compact amplifier overview, add the **Axium Hub Card**
+(`type: custom:axium-hub-card`). It shows the amp's name, model and firmware,
+how many zones are on, the temperature and a clipping warning. The power button
+turns **all** zones off, and tapping the card opens the hub's device page
+(auto power/standby, presets, gains, diagnostics). With one amplifier it needs
+no configuration; with several, set `hub:` (the visual editor's Amplifier
+dropdown does this for you).
+
 ## How it works
 
 Commands use the frame format `<command><zone>[<data>...]`. Every byte is sent
