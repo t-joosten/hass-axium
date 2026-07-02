@@ -473,8 +473,12 @@ are `device_class: timestamp`, so the time left is usable in automations, e.g.
 `{{ (states('sensor.axium_alarm_wake') | as_datetime - now()).total_seconds() }}`.
 The **Axium Alarms Card** and **Axium Sleep Timers Card** are **interactive**:
 the alarms card lets you enable/disable each alarm, edit its time and days,
-remove it, and add new ones inline; the sleep-timers card lets you start a
-timer per zone (15/30/60/90 min) and cancel it — all with the live countdown.
+remove it, and add new ones inline (and it shows each alarm's target zones);
+the sleep-timers card lets you start a timer per zone (15/30/60/90 min) and
+cancel it — all with the live countdown. The sleep-timers card's editor has a
+**Show** option to choose which sections appear — the **all-zones timer**,
+**individual zones**, and/or **presets** (a per-preset sleep control that
+applies to that preset's zones) — in any combination.
 Behind the scenes the alarm edits use the `axium.set_alarm` / `axium.remove_alarm`
 services (also callable from automations), and the sleep card uses each zone's
 sleep-timer number entity.

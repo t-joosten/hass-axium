@@ -103,7 +103,12 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   services.yaml; upsert/remove in options). The sleep card sets/cancels each zone's timer
   via `number.set_value` on the `axium_kind: "sleep_timer"` number. Rows rebuild only when
   the entity set changes (signature check) so in-progress inputs aren't clobbered; per-tick
-  updates only the countdown/toggle/time. Editing an existing alarm's fields does NOT
+  updates only the countdown/toggle/time. The alarms card also renders each alarm's target
+  zones (from the `alarm_zones` attr). The sleep card is section-configurable via its own
+  editor (`axium-sleep-card-editor`): `sections` = subset of `["all","zones","presets"]`
+  (default all). "presets" rows apply a sleep timer to every zone in a `axium_presets`
+  preset (via each zone's sleep-timer number); preset countdown = furthest deadline among
+  its zones. Editing an existing alarm's fields does NOT
   reload the entry — `_async_update_listener` reloads only when the alarm-name set or a
   non-alarm option changes (else dispatches `SIGNAL_ALARM_UPDATE`); the alarm sensor reads
   its config fresh by name so edits reflect without a reload.

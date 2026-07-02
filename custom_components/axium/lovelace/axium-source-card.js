@@ -1530,6 +1530,7 @@ class AxiumAlarmsCard extends HTMLElement {
         <div class="mid">
           <div class="n"></div>
           <div class="sub"><input type="time" class="time"><span class="days"></span></div>
+          <div class="zn"></div>
         </div>
         <div class="cd" data-id="${id}"></div>
         <button class="x" title="Remove">&#10005;</button>`;
@@ -1587,6 +1588,16 @@ class AxiumAlarmsCard extends HTMLElement {
       for (const chip of row.querySelectorAll(".daychip")) {
         chip.classList.toggle("on", everyDay || set.has(Number(chip.dataset.d)));
       }
+      const zn = row.querySelector(".zn");
+      const zones = Array.isArray(a.alarm_zones) ? a.alarm_zones : [];
+      zn.textContent = zones.length
+        ? zones
+            .map((z) => {
+              const st = this._hass.states[z];
+              return (st && st.attributes.friendly_name) || z;
+            })
+            .join(", ")
+        : "";
     }
     this._tickCountdowns();
   }
@@ -1690,6 +1701,7 @@ AxiumAlarmsCard.styles = `
   .mid { flex: 1 1 auto; min-width: 0; }
   .n { font-weight: 600; color: var(--primary-text-color); }
   .sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+  .zn { font-size: 0.78rem; color: var(--secondary-text-color); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cd { flex: 0 0 auto; text-align: right; font-size: 0.85rem; }
   .in { font-weight: 600; color: var(--primary-color); }
   .off { color: var(--secondary-text-color); }
@@ -1768,7 +1780,7 @@ class AxiumSleepCard extends HTMLElement {
     return 3;
   }
   static getConfigElement() {
-    return document.createElement("axium-hub-card-editor");
+    return document.createElement("axium-sleep-card-editor");
   }
   static getStubConfig(hass) {
     const hubs = axiumHubs(hass);
@@ -1784,24 +1796,40 @@ class AxiumSleepCard extends HTMLElement {
   _hub() {
     return this._config.hub || (axiumHubs(this._hass)[0] || {}).id;
   }
-  _numberIds() {
+  // Which sections to show: any of "all" | "zones" | "presets" (default all).
+  _sections() {
+    const s = this._config.sections;
+    return Array.isArray(s) && s.length ? s : ["all", "zones", "presets"];
+  }
+  _device(id) {
+    const reg = (this._hass && this._hass.entities) || {};
+    return reg[id] && reg[id].device_id;
+  }
+  _sleepNumbers() {
     const states = this._hass.states || {};
     const reg = this._hass.entities || {};
     return Object.keys(states)
       .filter((id) => id.startsWith("number."))
       .filter((id) => reg[id] && reg[id].platform === "axium")
       .filter((id) => states[id].attributes.axium_kind === "sleep_timer")
-      .filter((id) => !this._hub() || entityHub(this._hass, id) === this._hub())
-      .sort((a, b) => {
-        // The "all zones" timer sorts first; the rest by zone name.
-        const aa = this._hass.states[a].attributes.sleep_all ? 0 : 1;
-        const bb = this._hass.states[b].attributes.sleep_all ? 0 : 1;
-        return aa - bb || this._zoneName(a).localeCompare(this._zoneName(b));
-      });
+      .filter((id) => !this._hub() || entityHub(this._hass, id) === this._hub());
   }
-  _device(id) {
-    const reg = (this._hass && this._hass.entities) || {};
-    return reg[id] && reg[id].device_id;
+  _allNumberId() {
+    return this._sleepNumbers().find(
+      (id) => this._hass.states[id].attributes.sleep_all
+    );
+  }
+  _zoneNumberIds() {
+    return this._sleepNumbers()
+      .filter((id) => !this._hass.states[id].attributes.sleep_all)
+      .sort((a, b) => this._zoneName(a).localeCompare(this._zoneName(b)));
+  }
+  _presets() {
+    for (const id of axiumMediaPlayers(this._hass, this._hub())) {
+      const p = this._hass.states[id].attributes.axium_presets;
+      if (Array.isArray(p)) return p;
+    }
+    return [];
   }
   _zoneName(numId) {
     const st0 = this._hass.states[numId];
@@ -1834,17 +1862,76 @@ class AxiumSleepCard extends HTMLElement {
     }
     return null;
   }
+  // The sleep-timer number + sleep sensor entity ids for a zone media_player.
+  _zoneSleep(zoneEntityId) {
+    const reg = (this._hass && this._hass.entities) || {};
+    const dev = reg[zoneEntityId] && reg[zoneEntityId].device_id;
+    let numberId = null;
+    let sensorId = null;
+    if (dev) {
+      for (const eid of Object.keys(reg)) {
+        if (reg[eid].device_id !== dev) continue;
+        const st = this._hass.states[eid];
+        const a = st && st.attributes;
+        if (!a) continue;
+        if (eid.startsWith("number.") && a.axium_kind === "sleep_timer" && !a.sleep_all)
+          numberId = eid;
+        if (eid.startsWith("sensor.") && a.axium_kind === "sleep") sensorId = eid;
+      }
+    }
+    return { numberId, sensorId };
+  }
+  _setZones(zoneEntityIds, minutes) {
+    for (const z of zoneEntityIds) {
+      const { numberId } = this._zoneSleep(z);
+      if (numberId) {
+        this._hass.callService("number", "set_value", {
+          entity_id: numberId,
+          value: minutes,
+        });
+      }
+    }
+  }
+
+  // Descriptors for the rows to show, from the configured sections.
+  _rowDescriptors() {
+    const out = [];
+    const sections = this._sections();
+    if (sections.includes("all")) {
+      const allId = this._allNumberId();
+      if (allId) out.push({ key: `num:${allId}`, kind: "number", numberId: allId });
+    }
+    if (sections.includes("zones")) {
+      for (const id of this._zoneNumberIds()) {
+        out.push({ key: `num:${id}`, kind: "number", numberId: id });
+      }
+    }
+    if (sections.includes("presets")) {
+      for (const p of this._presets()) {
+        out.push({
+          key: `preset:${p.name}`,
+          kind: "preset",
+          label: p.name,
+          zones: p.zones || [],
+        });
+      }
+    }
+    return out;
+  }
+
   _render() {
-    const ids = this._numberIds();
-    const sig = ids.join(",");
+    const descs = this._rowDescriptors();
+    const sig = descs.map((d) => d.key).join(",");
     if (sig !== this._sig) {
       this._sig = sig;
-      this._build(ids);
+      this._build(descs);
     }
     this._tick();
   }
-  _build(ids) {
+
+  _build(descs) {
     this._rowEls = {};
+    this._descs = descs;
     const title = this._config.name || "Sleep timers";
     this.shadowRoot.innerHTML = `
       <style>${AxiumAlarmsCard.styles}</style>
@@ -1853,46 +1940,72 @@ class AxiumSleepCard extends HTMLElement {
         <div class="rows" id="rows"></div>
       </ha-card>`;
     const rows = this.shadowRoot.getElementById("rows");
-    if (!ids.length) rows.innerHTML = `<div class="empty">No zones.</div>`;
-    for (const id of ids) {
+    if (!descs.length) rows.innerHTML = `<div class="empty">Nothing to show.</div>`;
+    for (const d of descs) {
       const row = document.createElement("div");
       row.className = "row";
+      const label = d.kind === "preset" ? d.label : this._zoneName(d.numberId);
       row.innerHTML = `
         <div class="mid">
-          <div class="n">${this._zoneName(id)}</div>
+          <div class="n">${label}</div>
           <div class="quick">${[15, 30, 60, 90]
             .map((m) => `<button class="q" data-m="${m}">${m}m</button>`)
             .join("")}</div>
         </div>
-        <div class="cd" data-num="${id}"></div>
+        <div class="cd"></div>
         <button class="x" title="Cancel" hidden>&#10005;</button>`;
-      row.querySelectorAll(".q").forEach((b) =>
-        b.addEventListener("click", () =>
+      const apply = (minutes) => {
+        if (d.kind === "preset") this._setZones(d.zones, minutes);
+        else
           this._hass.callService("number", "set_value", {
-            entity_id: id,
-            value: Number(b.dataset.m),
-          })
-        )
+            entity_id: d.numberId,
+            value: minutes,
+          });
+      };
+      row.querySelectorAll(".q").forEach((b) =>
+        b.addEventListener("click", () => apply(Number(b.dataset.m)))
       );
-      row.querySelector(".x").addEventListener("click", () =>
-        this._hass.callService("number", "set_value", { entity_id: id, value: 0 })
-      );
+      row.querySelector(".x").addEventListener("click", () => apply(0));
       rows.appendChild(row);
-      this._rowEls[id] = row;
+      this._rowEls[d.key] = row;
     }
     this._tick();
   }
+
+  // The furthest-out running sleep deadline (ms) among a set of zones, or null.
+  _presetDeadline(zoneEntityIds) {
+    let best = null;
+    for (const z of zoneEntityIds) {
+      const { sensorId } = this._zoneSleep(z);
+      if (!sensorId) continue;
+      const st = this._hass.states[sensorId];
+      if (st && st.state && st.state !== "unknown" && st.state !== "unavailable") {
+        const t = Date.parse(st.state);
+        if (!isNaN(t) && (best === null || t > best)) best = t;
+      }
+    }
+    return best;
+  }
+
   _tick() {
-    if (!this._hass) return;
-    for (const [numId, row] of Object.entries(this._rowEls)) {
-      const sensor = this._sleepSensor(numId);
-      const st = sensor ? this._hass.states[sensor] : null;
-      const running =
-        st && st.state && st.state !== "unknown" && st.state !== "unavailable";
+    if (!this._hass || !this._descs) return;
+    for (const d of this._descs) {
+      const row = this._rowEls[d.key];
+      if (!row) continue;
+      let iso = null;
+      if (d.kind === "preset") {
+        const best = this._presetDeadline(d.zones);
+        iso = best === null ? null : new Date(best).toISOString();
+      } else {
+        const sensor = this._sleepSensor(d.numberId);
+        const st = sensor ? this._hass.states[sensor] : null;
+        if (st && st.state && st.state !== "unknown" && st.state !== "unavailable")
+          iso = st.state;
+      }
       const cd = row.querySelector(".cd");
       const x = row.querySelector(".x");
-      if (running) {
-        const left = axiumCountdown(st.state);
+      const left = iso ? axiumCountdown(iso) : null;
+      if (left) {
         cd.innerHTML = `<span class="in">${left} left</span>`;
         x.hidden = false;
       } else {
@@ -1900,6 +2013,85 @@ class AxiumSleepCard extends HTMLElement {
         x.hidden = true;
       }
     }
+  }
+}
+
+/** Visual editor for the sleep card — amplifier, name, and which sections to show. */
+class AxiumSleepCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = { ...config };
+    this._render();
+  }
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+  async _ensureHaForm() {
+    if (customElements.get("ha-form")) return;
+    try {
+      const helpers = await window.loadCardHelpers();
+      const card = await helpers.createCardElement({ type: "entities", entities: [] });
+      await card.constructor.getConfigElement();
+    } catch (err) {
+      /* ha-form upgrades once available */
+    }
+  }
+  _render() {
+    if (!this._hass || !this._config) return;
+    if (!this._form) {
+      this._form = document.createElement("ha-form");
+      this._form.addEventListener("value-changed", (ev) => this._changed(ev));
+      this.appendChild(this._form);
+      this._ensureHaForm();
+    }
+    const hubs = axiumHubs(this._hass);
+    const hubOptions = hubs.map((h) => ({ value: h.id, label: h.name }));
+    const data = {
+      sections: ["all", "zones", "presets"],
+      ...this._config,
+    };
+    if (!data.hub && hubs.length) data.hub = hubs[0].id;
+    this._form.hass = this._hass;
+    this._form.data = data;
+    this._form.schema = [
+      {
+        name: "hub",
+        selector: hubOptions.length
+          ? { select: { mode: "dropdown", options: hubOptions } }
+          : { text: {} },
+      },
+      {
+        name: "sections",
+        selector: {
+          select: {
+            multiple: true,
+            options: [
+              { value: "all", label: "All-zones timer" },
+              { value: "zones", label: "Individual zones" },
+              { value: "presets", label: "Presets" },
+            ],
+          },
+        },
+      },
+      { name: "name", selector: { text: {} } },
+    ];
+    this._form.computeLabel = (s) =>
+      ({
+        hub: "Amplifier",
+        sections: "Show",
+        name: "Card name (optional)",
+      }[s.name] || s.name);
+  }
+  _changed(ev) {
+    ev.stopPropagation();
+    this._config = { ...ev.detail.value };
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail: { config: this._config },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 }
 
@@ -1914,6 +2106,7 @@ if (!customElements.get("axium-source-card")) {
   customElements.define("axium-matrix-card-editor", AxiumMatrixCardEditor);
   customElements.define("axium-alarms-card", AxiumAlarmsCard);
   customElements.define("axium-sleep-card", AxiumSleepCard);
+  customElements.define("axium-sleep-card-editor", AxiumSleepCardEditor);
 
   window.customCards = window.customCards || [];
   window.customCards.push(
