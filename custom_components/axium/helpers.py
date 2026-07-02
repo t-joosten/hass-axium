@@ -8,6 +8,7 @@ the amplifier (native media-player grouping), not in configuration.
 
 from __future__ import annotations
 
+from datetime import datetime, time, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -243,6 +244,29 @@ def get_alarms(entry: ConfigEntry) -> list[dict[str, Any]]:
             }
         )
     return alarms
+
+
+def next_alarm_fire(alarm: dict[str, Any], now: datetime) -> datetime | None:
+    """Return the next datetime an alarm will fire at or after ``now``.
+
+    ``now`` must be timezone-aware; the result carries the same tzinfo. Empty
+    ``days`` means every day. Returns None if the time can't be parsed.
+    """
+    try:
+        hour, minute = (int(part) for part in alarm["time"].split(":")[:2])
+    except (KeyError, ValueError):
+        return None
+    days = alarm.get("days") or list(range(7))  # empty = every day
+    for offset in range(8):  # today plus a full week
+        candidate_date = (now + timedelta(days=offset)).date()
+        if candidate_date.weekday() not in days:
+            continue
+        candidate = datetime.combine(
+            candidate_date, time(hour, minute), tzinfo=now.tzinfo
+        )
+        if candidate > now:
+            return candidate
+    return None
 
 
 def get_sources(entry: ConfigEntry) -> list[dict[str, Any]]:

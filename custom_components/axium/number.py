@@ -9,13 +9,16 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from .const import (
     AUDIO_DELAY_MAX,
@@ -34,9 +37,11 @@ from .const import (
     CMD_TREBLE,
     CMD_VOLUME,
     CMD_ZONE_GAIN,
+    DATA_SLEEP_DEADLINES,
     DOMAIN,
     ID_KEY,
     POWER_OFF,
+    SIGNAL_SLEEP_UPDATE,
     SOURCE_BYTE_TO_NAME,
     SOURCE_GAIN_MAX,
     SOURCE_GAIN_MIN,
@@ -178,12 +183,21 @@ class AxiumSleepTimer(NumberEntity):
         """Initialise the sleep-timer number."""
         self._controller = controller
         self._zone = zone
+        self._entry_id = entry.entry_id
         self._minutes = 0
         self._task: asyncio.Task | None = None
         self._attr_unique_id = f"{entry.entry_id}_zone_{zone}_sleep"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"{entry.entry_id}_zone_{zone}")}
         )
+
+    def _publish_deadline(self, deadline: datetime | None) -> None:
+        """Share the timer's end time so the sensor/card can read it."""
+        store = self.hass.data.setdefault(DATA_SLEEP_DEADLINES, {}).setdefault(
+            self._entry_id, {}
+        )
+        store[self._zone] = deadline
+        async_dispatcher_send(self.hass, f"{SIGNAL_SLEEP_UPDATE}_{self._entry_id}")
 
     @property
     def available(self) -> bool:
@@ -200,7 +214,12 @@ class AxiumSleepTimer(NumberEntity):
         self._cancel()
         self._minutes = int(value)
         if self._minutes > 0:
+            self._publish_deadline(
+                dt_util.utcnow() + timedelta(minutes=self._minutes)
+            )
             self._task = self.hass.async_create_task(self._run(self._minutes))
+        else:
+            self._publish_deadline(None)
         self.async_write_ha_state()
 
     def _cancel(self) -> None:
@@ -231,6 +250,7 @@ class AxiumSleepTimer(NumberEntity):
 
         self._minutes = 0
         self._task = None
+        self._publish_deadline(None)
         self.async_write_ha_state()
 
     async def async_will_remove_from_hass(self) -> None:

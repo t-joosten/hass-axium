@@ -83,7 +83,17 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   options-flow steps `add_alarm`/`remove_alarm`. Scheduler `_async_setup_alarms` in
   __init__ registers `async_track_time_change(second=0)`; on a due minute it powers zones
   on, selects source (`| SOURCE_FLAG_TURN_ON`), and fades up to target. Master arm/disarm
-  = `AxiumAlarmsSwitch` (switch.py, runtime flag `hass.data[f"{DOMAIN}_alarms_enabled"]`).
+  = `AxiumAlarmsSwitch` (switch.py, runtime flag `hass.data[DATA_ALARMS_ENABLED]`).
+- **Time-left is exposed as `device_class: timestamp` sensors** (automation-usable):
+  `AxiumAlarmSensor` (per alarm, next fire via `helpers.next_alarm_fire`; recomputes on a
+  minute tick + `SIGNAL_ALARM_UPDATE` from the switch) and `AxiumSleepSensor` (per zone,
+  reads `DATA_SLEEP_DEADLINES` written by the sleep-timer number, updated via
+  `SIGNAL_SLEEP_UPDATE`). Both carry an `axium_kind` attribute ("alarm"/"sleep").
+- Cards `axium-alarms-card` / `axium-sleep-card` (bundle now has FIVE cards) find those
+  sensors via `axiumKindSensors(hass, hub, kind)` and render a live countdown
+  (`axiumCountdown`, `setInterval` in connectedCallback, cleared in disconnectedCallback);
+  reuse `axium-hub-card-editor`. Don't compute time-left only in the card — it must also
+  be a sensor so automations can use it.
 - Show/hide: card config `zones` (zone entity_ids; source + matrix cards) and `sources`
   (source ids; matrix card) are optional whitelists — empty/unset = show all. Editors use
   an axium-scoped entity selector for zones and a source-id select for sources. Matrix has

@@ -1,9 +1,11 @@
-"""Sensor platform for Axium amplifier diagnostics (temperature)."""
+"""Sensor platform for Axium: diagnostics, alarm next-fire and sleep end times."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -14,10 +16,21 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_change
+from homeassistant.util import dt as dt_util, slugify
 
-from .const import DOMAIN
+from .const import (
+    DATA_ALARMS_ENABLED,
+    DATA_SLEEP_DEADLINES,
+    DOMAIN,
+    SIGNAL_ALARM_UPDATE,
+    SIGNAL_SLEEP_UPDATE,
+    ZONE_KEY,
+)
 from .controller import AxiumController
+from .helpers import get_alarms, get_zones, next_alarm_fire
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -46,9 +59,132 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the diagnostic sensors on the amplifier device."""
+    """Set up diagnostic, alarm and sleep-timer sensors."""
     controller: AxiumController = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(AxiumSensor(controller, entry, desc) for desc in SENSORS)
+    entities: list[SensorEntity] = [
+        AxiumSensor(controller, entry, desc) for desc in SENSORS
+    ]
+    entities.extend(
+        AxiumSleepSensor(hass, entry, item[ZONE_KEY]) for item in get_zones(entry)
+    )
+    entities.extend(
+        AxiumAlarmSensor(hass, entry, alarm) for alarm in get_alarms(entry)
+    )
+    async_add_entities(entities)
+
+
+class AxiumSleepSensor(SensorEntity):
+    """When a zone's sleep timer will power it off (usable in automations)."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_name = "Sleep ends"
+    _attr_icon = "mdi:timer-sand"
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, zone: int) -> None:
+        """Initialise the sleep-end sensor."""
+        self._hass = hass
+        self._entry_id = entry.entry_id
+        self._zone = zone
+        self._attr_unique_id = f"{entry.entry_id}_zone_{zone}_sleep_ends"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_zone_{zone}")}
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Update when the zone's sleep deadline changes."""
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self._hass,
+                f"{SIGNAL_SLEEP_UPDATE}_{self._entry_id}",
+                self._update,
+            )
+        )
+
+    @callback
+    def _update(self) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the timer's end time, or None when no timer is running."""
+        return (
+            self._hass.data.get(DATA_SLEEP_DEADLINES, {})
+            .get(self._entry_id, {})
+            .get(self._zone)
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Mark the sensor kind so the sleep card can find it."""
+        return {"axium_kind": "sleep"}
+
+
+class AxiumAlarmSensor(SensorEntity):
+    """The next time an alarm will fire (usable in automations and the card)."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:alarm"
+
+    def __init__(
+        self, hass: HomeAssistant, entry: ConfigEntry, alarm: dict
+    ) -> None:
+        """Initialise the alarm next-fire sensor."""
+        self._hass = hass
+        self._entry_id = entry.entry_id
+        self._alarm = alarm
+        self._attr_name = f"Alarm {alarm['name']}"
+        self._attr_unique_id = f"{entry.entry_id}_alarm_{slugify(alarm['name'])}"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
+
+    async def async_added_to_hass(self) -> None:
+        """Recompute each minute (rolls over after firing) and on arm/disarm."""
+        self.async_on_remove(
+            async_track_time_change(self._hass, self._tick, second=0)
+        )
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self._hass,
+                f"{SIGNAL_ALARM_UPDATE}_{self._entry_id}",
+                self._tick,
+            )
+        )
+
+    @callback
+    def _tick(self, *_: Any) -> None:
+        self.async_write_ha_state()
+
+    def _armed(self) -> bool:
+        master = self._hass.data.get(DATA_ALARMS_ENABLED, {}).get(
+            self._entry_id, True
+        )
+        return bool(master and self._alarm.get("enabled", True))
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the next fire time, or None when disarmed/disabled."""
+        if not self._armed():
+            return None
+        return next_alarm_fire(self._alarm, dt_util.now())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose the schedule so the alarms card can render it."""
+        return {
+            "axium_kind": "alarm",
+            "alarm_name": self._alarm["name"],
+            "alarm_time": self._alarm["time"],
+            "alarm_days": self._alarm["days"],
+            "alarm_zones": self._alarm["zones"],
+            "alarm_source": self._alarm["source"],
+            "alarm_volume": self._alarm["volume"],
+            "alarm_enabled": self._alarm.get("enabled", True),
+            "armed": self._armed(),
+        }
 
 
 class AxiumSensor(SensorEntity):

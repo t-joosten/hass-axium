@@ -11,13 +11,16 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     AUTO_POWER_ON_BIT,
     AUTO_STANDBY_BIT,
+    DATA_ALARMS_ENABLED,
     DOMAIN,
     NAME_KEY,
+    SIGNAL_ALARM_UPDATE,
     SPECIAL_LOUDNESS_BIT,
     SPECIAL_MONO_BIT,
     ZONE_KEY,
@@ -90,7 +93,15 @@ class AxiumAlarmsSwitch(SwitchEntity):
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
 
     def _flags(self) -> dict:
-        return self._hass.data.setdefault(f"{DOMAIN}_alarms_enabled", {})
+        return self._hass.data.setdefault(DATA_ALARMS_ENABLED, {})
+
+    def _set(self, enabled: bool) -> None:
+        self._flags()[self._entry_id] = enabled
+        self.async_write_ha_state()
+        # Nudge the per-alarm "next fire" sensors to recompute (None when off).
+        async_dispatcher_send(
+            self._hass, f"{SIGNAL_ALARM_UPDATE}_{self._entry_id}"
+        )
 
     @property
     def is_on(self) -> bool:
@@ -99,13 +110,11 @@ class AxiumAlarmsSwitch(SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Arm all alarms."""
-        self._flags()[self._entry_id] = True
-        self.async_write_ha_state()
+        self._set(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disarm all alarms."""
-        self._flags()[self._entry_id] = False
-        self.async_write_ha_state()
+        self._set(False)
 
 
 class AxiumZoneSwitch(SwitchEntity):

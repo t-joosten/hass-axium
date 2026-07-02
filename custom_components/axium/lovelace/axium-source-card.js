@@ -1389,6 +1389,234 @@ class AxiumMatrixCardEditor extends HTMLElement {
   }
 }
 
+// Axium sensor entity_ids on a hub carrying a given axium_kind attribute.
+function axiumKindSensors(hass, hubId, kind) {
+  const states = (hass && hass.states) || {};
+  const reg = (hass && hass.entities) || {};
+  return Object.keys(states)
+    .filter((id) => id.startsWith("sensor."))
+    .filter((id) => reg[id] && reg[id].platform === "axium")
+    .filter((id) => states[id].attributes.axium_kind === kind)
+    .filter((id) => !hubId || entityHub(hass, id) === hubId);
+}
+
+// Human "time left" from an ISO timestamp to now (e.g. "7h 12m", "45s").
+function axiumCountdown(iso) {
+  const target = Date.parse(iso);
+  if (isNaN(target)) return null;
+  let s = Math.round((target - Date.now()) / 1000);
+  if (s <= 0) return "now";
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  s = s % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+const _DAY_ABBR = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function axiumDaysLabel(days) {
+  if (!Array.isArray(days) || days.length === 0 || days.length === 7) {
+    return "Every day";
+  }
+  const set = [...days].sort();
+  if (set.join() === "0,1,2,3,4") return "Weekdays";
+  if (set.join() === "5,6") return "Weekends";
+  return set.map((d) => _DAY_ABBR[d]).join(", ");
+}
+
+/**
+ * Axium Alarms Card — lists wake-to-music alarms with a live "time left" until
+ * each next fires. Reads the per-alarm timestamp sensors (device_class
+ * timestamp), so the same value is available to automations.
+ */
+class AxiumAlarmsCard extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._timer = null;
+  }
+  setConfig(config) {
+    this._config = config || {};
+    this.shadowRoot.innerHTML = "";
+  }
+  set hass(hass) {
+    this._hass = hass;
+    if (hass && this._config) this._render();
+  }
+  getCardSize() {
+    return 2;
+  }
+  static getConfigElement() {
+    return document.createElement("axium-hub-card-editor");
+  }
+  static getStubConfig(hass) {
+    const hubs = axiumHubs(hass);
+    return hubs.length ? { hub: hubs[0].id } : {};
+  }
+  connectedCallback() {
+    // Tick the "time left" text every second without a full re-render.
+    this._timer = setInterval(() => this._renderCountdowns(), 1000);
+  }
+  disconnectedCallback() {
+    if (this._timer) clearInterval(this._timer);
+    this._timer = null;
+  }
+  _hubId() {
+    return this._config.hub || (axiumHubs(this._hass)[0] || {}).id;
+  }
+  _render() {
+    const ids = axiumKindSensors(this._hass, this._hubId(), "alarm").sort((a, b) => {
+      const na = this._hass.states[a].attributes.alarm_name || "";
+      const nb = this._hass.states[b].attributes.alarm_name || "";
+      return na.localeCompare(nb);
+    });
+    const title = this._config.name || "Alarms";
+    const rows = ids
+      .map((id) => {
+        const a = this._hass.states[id].attributes;
+        const sched = `${a.alarm_time || "--:--"} · ${axiumDaysLabel(a.alarm_days)}`;
+        return (
+          `<div class="row">` +
+          `<div class="l"><div class="n">${a.alarm_name || id}</div>` +
+          `<div class="s">${sched}</div></div>` +
+          `<div class="r" data-id="${id}"></div></div>`
+        );
+      })
+      .join("");
+    this.shadowRoot.innerHTML = `
+      <style>${AxiumAlarmsCard.styles}</style>
+      <ha-card>
+        <div class="title">${title}</div>
+        ${ids.length ? `<div class="rows">${rows}</div>` : `<div class="empty">No alarms set.</div>`}
+      </ha-card>`;
+    this._renderCountdowns();
+  }
+  _renderCountdowns() {
+    if (!this._hass) return;
+    for (const el of this.shadowRoot.querySelectorAll(".r[data-id]")) {
+      const st = this._hass.states[el.dataset.id];
+      if (!st) continue;
+      const a = st.attributes;
+      if (!a.armed || a.alarm_enabled === false) {
+        el.innerHTML = `<span class="off">Disarmed</span>`;
+      } else {
+        const left = axiumCountdown(st.state);
+        el.innerHTML = left
+          ? `<span class="cd">in ${left}</span>`
+          : `<span class="off">—</span>`;
+      }
+    }
+  }
+}
+
+AxiumAlarmsCard.styles = `
+  ha-card { padding: 12px 16px; }
+  .title { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: var(--primary-text-color); }
+  .empty { color: var(--secondary-text-color); padding: 4px 0; }
+  .rows { display: flex; flex-direction: column; gap: 8px; }
+  .row { display: flex; align-items: center; gap: 12px; }
+  .l { flex: 1 1 auto; min-width: 0; }
+  .n { font-weight: 600; color: var(--primary-text-color); }
+  .s { font-size: 0.82rem; color: var(--secondary-text-color); }
+  .r { flex: 0 0 auto; text-align: right; }
+  .cd { font-weight: 600; color: var(--primary-color); }
+  .off { color: var(--secondary-text-color); }
+`;
+
+/**
+ * Axium Sleep Timers Card — lists zones with a running sleep timer and the live
+ * time left until each powers off. Reads the per-zone "Sleep ends" timestamp
+ * sensors, so the value is also available to automations.
+ */
+class AxiumSleepCard extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._timer = null;
+  }
+  setConfig(config) {
+    this._config = config || {};
+    this.shadowRoot.innerHTML = "";
+  }
+  set hass(hass) {
+    this._hass = hass;
+    if (hass && this._config) this._render();
+  }
+  getCardSize() {
+    return 2;
+  }
+  static getConfigElement() {
+    return document.createElement("axium-hub-card-editor");
+  }
+  static getStubConfig(hass) {
+    const hubs = axiumHubs(hass);
+    return hubs.length ? { hub: hubs[0].id } : {};
+  }
+  connectedCallback() {
+    this._timer = setInterval(() => this._renderCountdowns(), 1000);
+  }
+  disconnectedCallback() {
+    if (this._timer) clearInterval(this._timer);
+    this._timer = null;
+  }
+  _hubId() {
+    return this._config.hub || (axiumHubs(this._hass)[0] || {}).id;
+  }
+  // The friendly name of the zone a sleep sensor belongs to (via its device).
+  _zoneName(sensorId) {
+    const reg = (this._hass && this._hass.entities) || {};
+    const dev = reg[sensorId] && reg[sensorId].device_id;
+    if (dev) {
+      for (const eid of Object.keys(reg)) {
+        if (eid.startsWith("media_player.") && reg[eid].device_id === dev) {
+          const st = this._hass.states[eid];
+          if (st) return st.attributes.friendly_name || eid;
+        }
+      }
+    }
+    const fn =
+      (this._hass.states[sensorId] &&
+        this._hass.states[sensorId].attributes.friendly_name) ||
+      sensorId;
+    return fn.replace(/\s*Sleep ends$/i, "");
+  }
+  _running() {
+    return axiumKindSensors(this._hass, this._hubId(), "sleep").filter((id) => {
+      const st = this._hass.states[id];
+      return st && st.state && st.state !== "unknown" && st.state !== "unavailable";
+    });
+  }
+  _render() {
+    const ids = this._running();
+    const title = this._config.name || "Sleep timers";
+    const rows = ids
+      .map(
+        (id) =>
+          `<div class="row"><div class="l"><div class="n">${this._zoneName(
+            id
+          )}</div></div><div class="r" data-id="${id}"></div></div>`
+      )
+      .join("");
+    this.shadowRoot.innerHTML = `
+      <style>${AxiumAlarmsCard.styles}</style>
+      <ha-card>
+        <div class="title">${title}</div>
+        ${ids.length ? `<div class="rows">${rows}</div>` : `<div class="empty">No sleep timers running.</div>`}
+      </ha-card>`;
+    this._renderCountdowns();
+  }
+  _renderCountdowns() {
+    if (!this._hass) return;
+    for (const el of this.shadowRoot.querySelectorAll(".r[data-id]")) {
+      const st = this._hass.states[el.dataset.id];
+      const left = st ? axiumCountdown(st.state) : null;
+      el.innerHTML = left ? `<span class="cd">${left} left</span>` : "";
+    }
+  }
+}
+
 // Guard against the module being loaded twice (e.g. a manually-added resource
 // plus the integration's auto-registration), which would otherwise throw.
 if (!customElements.get("axium-source-card")) {
@@ -1398,6 +1626,8 @@ if (!customElements.get("axium-source-card")) {
   customElements.define("axium-hub-card-editor", AxiumHubCardEditor);
   customElements.define("axium-matrix-card", AxiumMatrixCard);
   customElements.define("axium-matrix-card-editor", AxiumMatrixCardEditor);
+  customElements.define("axium-alarms-card", AxiumAlarmsCard);
+  customElements.define("axium-sleep-card", AxiumSleepCard);
 
   window.customCards = window.customCards || [];
   window.customCards.push(
@@ -1417,6 +1647,18 @@ if (!customElements.get("axium-source-card")) {
       type: "axium-matrix-card",
       name: "Axium Matrix Card",
       description: "Zones × sources routing grid for the whole system (hass-axium).",
+      documentationURL: "https://github.com/t-joosten/hass-axium",
+    },
+    {
+      type: "axium-alarms-card",
+      name: "Axium Alarms Card",
+      description: "Wake-to-music alarms with a live time-left countdown (hass-axium).",
+      documentationURL: "https://github.com/t-joosten/hass-axium",
+    },
+    {
+      type: "axium-sleep-card",
+      name: "Axium Sleep Timers Card",
+      description: "Running sleep timers with time left per zone (hass-axium).",
       documentationURL: "https://github.com/t-joosten/hass-axium",
     }
   );
