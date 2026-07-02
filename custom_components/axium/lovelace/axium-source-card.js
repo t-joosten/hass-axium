@@ -249,10 +249,16 @@ class AxiumSourceCard extends HTMLElement {
   }
 
   _zones() {
-    if (Array.isArray(this._config.entities)) return this._config.entities;
-    return axiumMediaPlayers(this._hass, this._config.hub)
+    const auto = axiumMediaPlayers(this._hass, this._config.hub)
       .filter((id) => this._sourceNameFor(this._state(id)) != null)
       .sort();
+    // Optional whitelist (`zones`, or legacy `entities`): show only these, in
+    // the order given, dropping any that no longer offer the source.
+    const pick = this._config.zones || this._config.entities;
+    if (Array.isArray(pick) && pick.length) {
+      return pick.filter((id) => auto.includes(id));
+    }
+    return auto;
   }
 
   _state(id) {
@@ -740,10 +746,20 @@ class AxiumSourceCardEditor extends HTMLElement {
           ? { select: { mode: "dropdown", options } }
           : { text: {} },
       },
+      {
+        name: "zones",
+        selector: {
+          entity: { integration: "axium", domain: "media_player", multiple: true },
+        },
+      },
       { name: "name", selector: { text: {} } },
     ];
     this._form.computeLabel = (s) =>
-      ({ source: "Source", name: "Card name (optional)" }[s.name] || s.name);
+      ({
+        source: "Source",
+        zones: "Zones to show (empty = all)",
+        name: "Card name (optional)",
+      }[s.name] || s.name);
   }
 
   _changed(ev) {
@@ -1089,7 +1105,7 @@ class AxiumMatrixCard extends HTMLElement {
   }
 
   static getConfigElement() {
-    return document.createElement("axium-hub-card-editor");
+    return document.createElement("axium-matrix-card-editor");
   }
 
   static getStubConfig(hass) {
@@ -1102,14 +1118,19 @@ class AxiumMatrixCard extends HTMLElement {
   }
 
   _zones() {
-    if (Array.isArray(this._config.entities)) return this._config.entities;
-    return axiumMediaPlayers(this._hass, this._hubId()).sort();
+    const auto = axiumMediaPlayers(this._hass, this._hubId()).sort();
+    const pick = this._config.zones || this._config.entities;
+    if (Array.isArray(pick) && pick.length) {
+      return pick.filter((id) => auto.includes(id));
+    }
+    return auto;
   }
 
-  // Columns: every source offered across the hub's zones, as {id, name}.
+  // Columns: every source offered across the hub's zones, as {id, name},
+  // optionally narrowed to a configured `sources` whitelist (of ids).
   _sources() {
     const byId = new Map();
-    for (const id of this._zones()) {
+    for (const id of axiumMediaPlayers(this._hass, this._hubId())) {
       const st = this._hass.states[id];
       const ids = st && st.attributes.source_ids;
       const names = st && st.attributes.source_list;
@@ -1119,9 +1140,13 @@ class AxiumMatrixCard extends HTMLElement {
         });
       }
     }
-    return [...byId.entries()]
-      .map(([id, name]) => ({ id, name }))
-      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    let list = [...byId.entries()].map(([id, name]) => ({ id, name }));
+    const pick = this._config.sources;
+    if (Array.isArray(pick) && pick.length) {
+      const wanted = new Set(pick.map(Number));
+      list = list.filter((s) => wanted.has(s.id));
+    }
+    return list.sort((a, b) => String(a.name).localeCompare(String(b.name)));
   }
 
   // Rebuild only when the zone or source set changes, not on every state tick.
@@ -1277,6 +1302,93 @@ AxiumMatrixCard.styles = `
   .cell.unavailable { opacity: 0.3; pointer-events: none; }
 `;
 
+/** Visual (UI) editor for the matrix card — amplifier, zones, sources, name. */
+class AxiumMatrixCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = { ...config };
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+
+  async _ensureHaForm() {
+    if (customElements.get("ha-form")) return;
+    try {
+      const helpers = await window.loadCardHelpers();
+      const card = await helpers.createCardElement({ type: "entities", entities: [] });
+      await card.constructor.getConfigElement();
+    } catch (err) {
+      /* ha-form will still upgrade once available */
+    }
+  }
+
+  _render() {
+    if (!this._hass || !this._config) return;
+    if (!this._form) {
+      this._form = document.createElement("ha-form");
+      this._form.addEventListener("value-changed", (ev) => this._changed(ev));
+      this.appendChild(this._form);
+      this._ensureHaForm();
+    }
+    const hubs = axiumHubs(this._hass);
+    const hubOptions = hubs.map((h) => ({ value: h.id, label: h.name }));
+    const data = { ...this._config };
+    if (!data.hub && hubs.length) data.hub = hubs[0].id;
+
+    // Source columns available on the selected hub.
+    const sourceOptions = axiumSourceChoices(this._hass)
+      .filter((c) => c.hub === data.hub)
+      .map((c) => ({ value: String(c.id), label: c.name }));
+
+    this._form.hass = this._hass;
+    this._form.data = data;
+    this._form.schema = [
+      {
+        name: "hub",
+        selector: hubOptions.length
+          ? { select: { mode: "dropdown", options: hubOptions } }
+          : { text: {} },
+      },
+      {
+        name: "zones",
+        selector: {
+          entity: { integration: "axium", domain: "media_player", multiple: true },
+        },
+      },
+      {
+        name: "sources",
+        selector: sourceOptions.length
+          ? { select: { multiple: true, options: sourceOptions } }
+          : { text: {} },
+      },
+      { name: "name", selector: { text: {} } },
+    ];
+    this._form.computeLabel = (s) =>
+      ({
+        hub: "Amplifier",
+        zones: "Zones to show (empty = all)",
+        sources: "Sources to show (empty = all)",
+        name: "Card name (optional)",
+      }[s.name] || s.name);
+  }
+
+  _changed(ev) {
+    ev.stopPropagation();
+    this._config = { ...ev.detail.value };
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail: { config: this._config },
+        bubbles: true,
+        composed: true,
+      })
+    );
+    this._render(); // hub change updates the available source columns
+  }
+}
+
 // Guard against the module being loaded twice (e.g. a manually-added resource
 // plus the integration's auto-registration), which would otherwise throw.
 if (!customElements.get("axium-source-card")) {
@@ -1285,6 +1397,7 @@ if (!customElements.get("axium-source-card")) {
   customElements.define("axium-hub-card", AxiumHubCard);
   customElements.define("axium-hub-card-editor", AxiumHubCardEditor);
   customElements.define("axium-matrix-card", AxiumMatrixCard);
+  customElements.define("axium-matrix-card-editor", AxiumMatrixCardEditor);
 
   window.customCards = window.customCards || [];
   window.customCards.push(

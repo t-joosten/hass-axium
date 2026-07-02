@@ -440,7 +440,13 @@ routing grid: **zones are rows, sources are columns** (plus an *Off* column).
 Each cell shows whether that zone is on that source; tap a cell to route the
 zone there — or the *Off* cell to turn it off. It's the fastest way to see and
 change what every room is playing at once. Auto-detects the hub's zones and
-sources; set `hub:`/`entities:` to scope or override.
+sources.
+
+**Show/hide** what appears: both the source card and the matrix card have
+**Zones to show** (and the matrix card, **Sources to show**) fields in the
+visual editor — leave them empty for everything, or pick a subset to declutter
+a card. In YAML these are `zones:` (zone entity_ids) and `sources:` (source
+ids).
 
 The `+`/`−` volume buttons on the **source** card send a relative step
 (`volume_up`/`volume_down`) to every zone playing that source — each zone moves

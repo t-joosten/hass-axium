@@ -70,6 +70,11 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
 - Source card volume: `+`/`−` send `volume_up`/`volume_down` (relative step) to all zones
   on that source — each moves by the same amount from its own level (not equalised to one
   absolute level). Axium has no master-volume command.
+- Show/hide: card config `zones` (zone entity_ids; source + matrix cards) and `sources`
+  (source ids; matrix card) are optional whitelists — empty/unset = show all. Editors use
+  an axium-scoped entity selector for zones and a source-id select for sources. Matrix has
+  its own editor (`axium-matrix-card-editor`: hub/zones/sources/name); the source editor
+  gained a zones field. `entities` remains a legacy alias for `zones` on the source card.
 - The integration serves it from a **version-stamped path**
   (`/axium/axium-source-card-<version>.js`) via `AxiumCardView.extra_urls`, not a `?v=`
   query — a new path defeats stale browser/service-worker caches on every release.
