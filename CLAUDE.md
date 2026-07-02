@@ -70,6 +70,20 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
 - Source card volume: `+`/`−` send `volume_up`/`volume_down` (relative step) to all zones
   on that source — each moves by the same amount from its own level (not equalised to one
   absolute level). Axium has no master-volume command.
+- **EQ is NOT implementable**: protocol command `0x21` (Equalisation) is marked
+  "Unsupported by Axium products" and its Frequency/Gain/Q are "only stored and not used
+  by the amplifier." Don't build a parametric EQ; the real tone stack is bass/treble/
+  balance/loudness (already implemented). (Corrected an earlier wrong assessment.)
+- **Sleep timer**: per-zone `AxiumSleepTimer` number (number.py) — fades volume down over
+  the last ~30s then powers the zone off; restores the pre-fade volume. HA-side asyncio
+  task, no protocol dependency.
+- **Alarms (wake-to-music)**: HA-side (the amp's native alarm needs clock+preset+favourite
+  config — too rigid/unverified). Stored in options (`CONF_ALARMS`, helper `get_alarms`):
+  `{name,time,days[0=Mon..6=Sun],zones[entity_ids],source id,volume,enabled}`. Managed via
+  options-flow steps `add_alarm`/`remove_alarm`. Scheduler `_async_setup_alarms` in
+  __init__ registers `async_track_time_change(second=0)`; on a due minute it powers zones
+  on, selects source (`| SOURCE_FLAG_TURN_ON`), and fades up to target. Master arm/disarm
+  = `AxiumAlarmsSwitch` (switch.py, runtime flag `hass.data[f"{DOMAIN}_alarms_enabled"]`).
 - Show/hide: card config `zones` (zone entity_ids; source + matrix cards) and `sources`
   (source ids; matrix card) are optional whitelists — empty/unset = show all. Editors use
   an axium-scoped entity selector for zones and a source-id select for sources. Matrix has

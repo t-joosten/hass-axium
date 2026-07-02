@@ -32,6 +32,7 @@ CONF_ZONES: Final = "zones"
 CONF_SOURCES: Final = "sources"
 CONF_ADVANCED: Final = "advanced"  # expose risky level/gain controls
 CONF_PRESETS: Final = "presets"  # named zone sets a source card can activate
+CONF_ALARMS: Final = "alarms"  # scheduled wake-to-music alarms
 
 # Keys within a stored zone / source definition.
 ZONE_KEY: Final = "zone"

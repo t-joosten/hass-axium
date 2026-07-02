@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from datetime import datetime
 from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
@@ -10,11 +12,27 @@ from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.event import async_track_time_change
 
-from .const import DEFAULT_PORT, DOMAIN
+from .const import (
+    CMD_POWER,
+    CMD_SOURCE,
+    CMD_VOLUME,
+    DEFAULT_PORT,
+    DOMAIN,
+    POWER_ON,
+    SOURCE_FLAG_TURN_ON,
+)
 from .controller import AxiumController, AxiumDeviceInfo
+from .helpers import get_alarms
+from .protocol import level_to_volume
 
 _LOGGER = logging.getLogger(__name__)
+
+# Runtime "alarms enabled" master flag per entry (toggled by a switch entity).
+ALARMS_ENABLED = f"{DOMAIN}_alarms_enabled"
+_ALARM_FADE_SECONDS = 30
+_ALARM_FADE_STEPS = 6
 
 PLATFORMS: list[Platform] = [
     Platform.MEDIA_PLAYER,
@@ -215,10 +233,62 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ) from err
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = controller
+    hass.data.setdefault(ALARMS_ENABLED, {}).setdefault(entry.entry_id, True)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    _async_setup_alarms(hass, entry, controller)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
+
+
+@callback
+def _async_setup_alarms(
+    hass: HomeAssistant, entry: ConfigEntry, controller: AxiumController
+) -> None:
+    """Fire configured wake-to-music alarms each minute they are due."""
+
+    async def _fire(alarm: dict) -> None:
+        zones = [
+            zone
+            for eid in alarm["zones"]
+            if (zone := controller.zone_for_entity_id(eid)) is not None
+        ]
+        if not zones:
+            return
+        source = alarm["source"]
+        target = alarm["volume"] / 100
+        start = min(target, 0.1)
+        # Power on, select the source (turn-on flag, as the media_player does)
+        # and start quiet.
+        for zone in zones:
+            await controller.async_send(CMD_POWER, zone, POWER_ON)
+            await controller.async_send(
+                CMD_SOURCE, zone, source | SOURCE_FLAG_TURN_ON
+            )
+            await controller.async_send(CMD_VOLUME, zone, level_to_volume(start))
+        # Gently fade up to the target volume (wake-to-music).
+        for step in range(1, _ALARM_FADE_STEPS + 1):
+            level = start + (target - start) * step / _ALARM_FADE_STEPS
+            for zone in zones:
+                await controller.async_send(
+                    CMD_VOLUME, zone, level_to_volume(level)
+                )
+            await asyncio.sleep(_ALARM_FADE_SECONDS / _ALARM_FADE_STEPS)
+
+    @callback
+    def _tick(now: datetime) -> None:
+        if not hass.data.get(ALARMS_ENABLED, {}).get(entry.entry_id, True):
+            return
+        hhmm = now.strftime("%H:%M")
+        weekday = now.weekday()  # Monday = 0 .. Sunday = 6
+        for alarm in get_alarms(entry):
+            if not alarm["enabled"] or alarm["time"] != hhmm:
+                continue
+            if alarm["days"] and weekday not in alarm["days"]:
+                continue
+            hass.async_create_task(_fire(alarm))
+
+    entry.async_on_unload(async_track_time_change(hass, _tick, second=0))
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

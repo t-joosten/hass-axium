@@ -62,6 +62,7 @@ async def async_setup_entry(
     entities: list[SwitchEntity] = [
         AxiumSwitch(controller, entry, desc) for desc in SWITCHES
     ]
+    entities.append(AxiumAlarmsSwitch(hass, entry))
     for item in get_zones(entry):
         entities.append(
             AxiumZoneSwitch(controller, entry, item[ZONE_KEY], "loudness", "Loudness", 0, SPECIAL_LOUDNESS_BIT)
@@ -70,6 +71,41 @@ async def async_setup_entry(
             AxiumZoneSwitch(controller, entry, item[ZONE_KEY], "mono", "Mono", 1, SPECIAL_MONO_BIT)
         )
     async_add_entities(entities)
+
+
+class AxiumAlarmsSwitch(SwitchEntity):
+    """Master enable for all wake-to-music alarms on this amplifier."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_name = "Alarms"
+    _attr_icon = "mdi:alarm"
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        """Initialise the alarms master switch."""
+        self._hass = hass
+        self._entry_id = entry.entry_id
+        self._attr_unique_id = f"{entry.entry_id}_alarms_enabled"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
+
+    def _flags(self) -> dict:
+        return self._hass.data.setdefault(f"{DOMAIN}_alarms_enabled", {})
+
+    @property
+    def is_on(self) -> bool:
+        """Return whether alarms are armed."""
+        return bool(self._flags().get(self._entry_id, True))
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Arm all alarms."""
+        self._flags()[self._entry_id] = True
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disarm all alarms."""
+        self._flags()[self._entry_id] = False
+        self.async_write_ha_state()
 
 
 class AxiumZoneSwitch(SwitchEntity):

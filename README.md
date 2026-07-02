@@ -454,6 +454,21 @@ by the same amount from its own level, so relative differences between rooms are
 preserved (it does not force them to one absolute level). Absolute per-zone
 volume lives on each zone's device page.
 
+## Sleep timer & alarms
+
+- **Sleep timer** — each zone has a *Sleep timer* number (minutes). Set it and the
+  zone fades down and powers off when it elapses; set it back to 0 to cancel.
+- **Alarms (wake-to-music)** — add them under **Settings → Devices & services →
+  Axium → Configure → Add a wake-to-music alarm**: a name, time, weekdays, zones,
+  source and target volume. At the set time those zones power on, switch to the
+  source and gently fade up to the target volume. The **Alarms** switch on the
+  amplifier device arms/disarms them all at once (e.g. while you're away).
+
+> Note on EQ: the Axium protocol defines an equaliser command (`0x21`) but the
+> spec marks it **"Unsupported by Axium products"**, so a parametric EQ can't be
+> implemented. Use the per-zone **bass / treble / balance / loudness** controls,
+> which the amplifier does honour.
+
 ## How it works
 
 Commands use the frame format `<command><zone>[<data>...]`. Every byte is sent

@@ -27,6 +27,7 @@ from .const import (
     CMD_REQUEST_DEVICE_INFO,
     CMD_SOURCE_NAME,
     CONF_ADVANCED,
+    CONF_ALARMS,
     CONF_PRESETS,
     CONF_SOURCES,
     CONF_ZONES,
@@ -35,6 +36,8 @@ from .const import (
     DEFAULT_ZONE_COUNT,
     DEVICE_INFO_LIST_ZONES,
     DOMAIN,
+    ID_KEY,
+    NAME_KEY,
     RESP_DEVICE_INFO,
     ZONE_ALL,
 )
@@ -42,10 +45,22 @@ from .controller import AxiumDeviceInfo, parse_device_info, parse_source_name
 from .helpers import (
     default_sources,
     get_advanced,
+    get_alarms,
     get_presets,
+    get_sources,
     sources_from_detection,
     zones_from_numbers,
 )
+
+_WEEKDAYS = [
+    ("0", "Monday"),
+    ("1", "Tuesday"),
+    ("2", "Wednesday"),
+    ("3", "Thursday"),
+    ("4", "Friday"),
+    ("5", "Saturday"),
+    ("6", "Sunday"),
+]
 
 _CONNECT_TIMEOUT = 10.0
 _PROBE_TIMEOUT = 6.0
@@ -196,7 +211,13 @@ class AxiumOptionsFlow(OptionsFlow):
         """Choose what to configure."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["settings", "add_preset", "remove_preset"],
+            menu_options=[
+                "settings",
+                "add_preset",
+                "remove_preset",
+                "add_alarm",
+                "remove_alarm",
+            ],
         )
 
     async def async_step_settings(
@@ -275,3 +296,97 @@ class AxiumOptionsFlow(OptionsFlow):
             }
         )
         return self.async_show_form(step_id="remove_preset", data_schema=schema)
+
+    async def async_step_add_alarm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Add (or replace by name) a wake-to-music alarm."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            name = user_input[CONF_NAME].strip()
+            zones = user_input["zones"]
+            if not name:
+                errors["base"] = "alarm_name_required"
+            elif not zones:
+                errors["base"] = "alarm_zones_required"
+            else:
+                alarms = [
+                    a
+                    for a in get_alarms(self._config_entry)
+                    if a["name"] != name
+                ]
+                alarms.append(
+                    {
+                        "name": name,
+                        "time": str(user_input["time"])[:5],
+                        "days": [int(d) for d in user_input.get("days", [])],
+                        "zones": zones,
+                        "source": int(user_input["source"]),
+                        "volume": int(user_input["volume"]),
+                        "enabled": True,
+                    }
+                )
+                self._options[CONF_ALARMS] = alarms
+                return self.async_create_entry(data=self._options)
+
+        source_options = [
+            selector.SelectOptionDict(value=str(s[ID_KEY]), label=s[NAME_KEY])
+            for s in get_sources(self._config_entry)
+        ]
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_NAME): cv.string,
+                vol.Required("time"): selector.TimeSelector(),
+                vol.Optional("days", default=[d for d, _ in _WEEKDAYS]): (
+                    selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                selector.SelectOptionDict(value=v, label=label)
+                                for v, label in _WEEKDAYS
+                            ],
+                            multiple=True,
+                        )
+                    )
+                ),
+                vol.Required("zones"): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        integration=DOMAIN, domain="media_player", multiple=True
+                    )
+                ),
+                vol.Required("source"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=source_options)
+                ),
+                vol.Required("volume", default=30): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=100, step=1, unit_of_measurement="%"
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(
+            step_id="add_alarm", data_schema=schema, errors=errors
+        )
+
+    async def async_step_remove_alarm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Remove one or more alarms."""
+        alarms = get_alarms(self._config_entry)
+        names = [a["name"] for a in alarms]
+        if not names:
+            return self.async_abort(reason="no_alarms")
+        if user_input is not None:
+            remove = set(user_input.get("remove", []))
+            self._options[CONF_ALARMS] = [
+                a for a in alarms if a["name"] not in remove
+            ]
+            return self.async_create_entry(data=self._options)
+
+        schema = vol.Schema(
+            {
+                vol.Optional("remove", default=[]): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=names, multiple=True)
+                ),
+            }
+        )
+        return self.async_show_form(step_id="remove_alarm", data_schema=schema)

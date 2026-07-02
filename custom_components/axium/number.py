@@ -1,11 +1,12 @@
 """Number platform for Axium zone controls.
 
 Exposes per-zone bass, treble and balance (tone), plus a maximum-volume limit,
-power-on (startup) volume and audio (lip-sync) delay.
+power-on (startup) volume, audio (lip-sync) delay and a sleep timer.
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -27,12 +28,15 @@ from .const import (
     CMD_BALANCE,
     CMD_BASS,
     CMD_MAX_VOLUME,
+    CMD_POWER,
     CMD_POWER_ON_VOLUME,
     CMD_SOURCE_GAIN,
     CMD_TREBLE,
+    CMD_VOLUME,
     CMD_ZONE_GAIN,
     DOMAIN,
     ID_KEY,
+    POWER_OFF,
     SOURCE_BYTE_TO_NAME,
     SOURCE_GAIN_MAX,
     SOURCE_GAIN_MIN,
@@ -44,8 +48,14 @@ from .const import (
     ZONE_KEY,
 )
 from .controller import AxiumController, ZoneState
-from .protocol import to_signed_byte
+from .protocol import level_to_volume, to_signed_byte
 from .helpers import get_advanced, get_sources, get_zones
+
+# Sleep-timer fade: ramp the volume down over the final part of the countdown
+# (capped) before turning the zone off, so it doesn't cut out abruptly.
+_SLEEP_MAX_MIN = 180
+_SLEEP_FADE_SECONDS = 30
+_SLEEP_FADE_STEPS = 6
 
 
 def _signed_byte(value: float) -> int:
@@ -136,6 +146,9 @@ async def async_setup_entry(
         for desc in NUMBERS
         if advanced or not desc.advanced
     ]
+    entities.extend(
+        AxiumSleepTimer(controller, entry, item[ZONE_KEY]) for item in get_zones(entry)
+    )
     if advanced:
         entities.extend(
             AxiumSourceGain(controller, entry, item[ID_KEY])
@@ -143,6 +156,86 @@ async def async_setup_entry(
         )
     entities.append(AxiumStandbyTime(controller, entry))
     async_add_entities(entities)
+
+
+class AxiumSleepTimer(NumberEntity):
+    """Per-zone sleep timer: after N minutes, fade the zone down and power off."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_name = "Sleep timer"
+    _attr_native_min_value = 0
+    _attr_native_max_value = _SLEEP_MAX_MIN
+    _attr_native_step = 5
+    _attr_native_unit_of_measurement = "min"
+    _attr_mode = NumberMode.BOX
+    _attr_icon = "mdi:timer-sand"
+
+    def __init__(
+        self, controller: AxiumController, entry: ConfigEntry, zone: int
+    ) -> None:
+        """Initialise the sleep-timer number."""
+        self._controller = controller
+        self._zone = zone
+        self._minutes = 0
+        self._task: asyncio.Task | None = None
+        self._attr_unique_id = f"{entry.entry_id}_zone_{zone}_sleep"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_zone_{zone}")}
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return whether the amplifier connection is up."""
+        return self._controller.available
+
+    @property
+    def native_value(self) -> int:
+        """Return the minutes remaining on the timer (0 = off)."""
+        return self._minutes
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Start (or cancel, when 0) the sleep timer."""
+        self._cancel()
+        self._minutes = int(value)
+        if self._minutes > 0:
+            self._task = self.hass.async_create_task(self._run(self._minutes))
+        self.async_write_ha_state()
+
+    def _cancel(self) -> None:
+        if self._task and not self._task.done():
+            self._task.cancel()
+        self._task = None
+
+    async def _run(self, minutes: int) -> None:
+        """Wait out the timer, fade the zone down, then power it off."""
+        fade = min(_SLEEP_FADE_SECONDS, minutes * 60 * 0.5)
+        await asyncio.sleep(max(0.0, minutes * 60 - fade))
+
+        original = self._controller.zone_state(self._zone).volume
+        if original and original > 0 and fade > 0:
+            for i in range(1, _SLEEP_FADE_STEPS + 1):
+                level = original * (_SLEEP_FADE_STEPS - i) / _SLEEP_FADE_STEPS
+                await self._controller.async_send(
+                    CMD_VOLUME, self._zone, level_to_volume(level)
+                )
+                await asyncio.sleep(fade / _SLEEP_FADE_STEPS)
+
+        await self._controller.async_send(CMD_POWER, self._zone, POWER_OFF)
+        # Restore the pre-fade volume so the next power-on isn't silent.
+        if original and original > 0:
+            await self._controller.async_send(
+                CMD_VOLUME, self._zone, level_to_volume(original)
+            )
+
+        self._minutes = 0
+        self._task = None
+        self.async_write_ha_state()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Cancel any running timer when the entity goes away."""
+        self._cancel()
 
 
 class AxiumSourceGain(NumberEntity):

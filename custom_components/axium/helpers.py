@@ -14,6 +14,7 @@ from homeassistant.config_entries import ConfigEntry
 
 from .const import (
     CONF_ADVANCED,
+    CONF_ALARMS,
     CONF_PRESETS,
     CONF_SOURCES,
     CONF_ZONES,
@@ -203,6 +204,45 @@ def get_presets(entry: ConfigEntry) -> list[dict[str, Any]]:
             continue
         presets.append({"name": name, "zones": [str(z) for z in zones]})
     return presets
+
+
+def get_alarms(entry: ConfigEntry) -> list[dict[str, Any]]:
+    """Return the configured wake-to-music alarms.
+
+    Each alarm is ``{name, time: "HH:MM", days: [0..6 Mon..Sun], zones:
+    [entity_id], source: int, volume: 0..100, enabled: bool}``. Malformed
+    entries are dropped.
+    """
+    raw = entry.options.get(CONF_ALARMS, [])
+    if not isinstance(raw, list):
+        return []
+    alarms: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        time_str = str(item.get("time", "")).strip()
+        zones = item.get("zones")
+        if not name or ":" not in time_str or not isinstance(zones, list):
+            continue
+        try:
+            days = [int(d) for d in item.get("days", []) if 0 <= int(d) <= 6]
+            source = int(item["source"])
+            volume = max(0, min(100, int(item.get("volume", 30))))
+        except (KeyError, ValueError, TypeError):
+            continue
+        alarms.append(
+            {
+                "name": name,
+                "time": time_str[:5],
+                "days": days,
+                "zones": [str(z) for z in zones],
+                "source": source,
+                "volume": volume,
+                "enabled": bool(item.get("enabled", True)),
+            }
+        )
+    return alarms
 
 
 def get_sources(entry: ConfigEntry) -> list[dict[str, Any]]:

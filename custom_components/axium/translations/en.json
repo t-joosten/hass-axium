@@ -26,7 +26,9 @@
         "menu_options": {
           "settings": "Advanced settings",
           "add_preset": "Add a zone preset",
-          "remove_preset": "Remove zone presets"
+          "remove_preset": "Remove zone presets",
+          "add_alarm": "Add a wake-to-music alarm",
+          "remove_alarm": "Remove alarms"
         }
       },
       "settings": {
@@ -49,14 +51,35 @@
         "data": {
           "remove": "Presets to remove"
         }
+      },
+      "add_alarm": {
+        "title": "Add a wake-to-music alarm",
+        "description": "At the set time the chosen zones power on, switch to the chosen source and gently fade up to the target volume. Pick the weekdays it should run (all by default). Adding an alarm with an existing name replaces it. Arm/disarm all alarms with the Alarms switch on the amplifier device.",
+        "data": {
+          "name": "Alarm name",
+          "time": "Time",
+          "days": "Days",
+          "zones": "Zones",
+          "source": "Source",
+          "volume": "Target volume"
+        }
+      },
+      "remove_alarm": {
+        "title": "Remove alarms",
+        "data": {
+          "remove": "Alarms to remove"
+        }
       }
     },
     "error": {
       "preset_name_required": "Enter a name for the preset.",
-      "preset_zones_required": "Select at least one zone for the preset."
+      "preset_zones_required": "Select at least one zone for the preset.",
+      "alarm_name_required": "Enter a name for the alarm.",
+      "alarm_zones_required": "Select at least one zone for the alarm."
     },
     "abort": {
-      "no_presets": "There are no presets to remove yet."
+      "no_presets": "There are no presets to remove yet.",
+      "no_alarms": "There are no alarms to remove yet."
     }
   }
 }
