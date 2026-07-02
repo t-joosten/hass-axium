@@ -306,6 +306,64 @@ class AxiumSourceCard extends HTMLElement {
     this._hass.callService("media_player", service, data);
   }
 
+  /**
+   * Wire a chip for tap (toggle the zone) and hold (open the zone's device page,
+   * where its volume, tone, gains and other settings live). Uses pointer events
+   * so it works for mouse and touch; the hold suppresses the following click.
+   */
+  _attachChipHandlers(chip, id) {
+    let timer = null;
+    let held = false;
+    const cancel = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
+    chip.addEventListener("pointerdown", () => {
+      held = false;
+      cancel();
+      timer = setTimeout(() => {
+        held = true;
+        this._openZoneDevice(id);
+      }, 500);
+    });
+    chip.addEventListener("pointerup", cancel);
+    chip.addEventListener("pointerleave", cancel);
+    chip.addEventListener("pointercancel", cancel);
+    chip.addEventListener("click", (ev) => {
+      if (held) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        held = false;
+        return;
+      }
+      this._toggleZone(id);
+    });
+    // Suppress the touch/right-click context menu during a hold.
+    chip.addEventListener("contextmenu", (ev) => ev.preventDefault());
+  }
+
+  /** Navigate to a zone's device page (fallback: its more-info dialog). */
+  _openZoneDevice(id) {
+    const entry = this._hass.entities && this._hass.entities[id];
+    const deviceId = entry && entry.device_id;
+    if (deviceId) {
+      history.pushState(null, "", `/config/devices/device/${deviceId}`);
+      this.dispatchEvent(
+        new CustomEvent("location-changed", { bubbles: true, composed: true })
+      );
+      return;
+    }
+    this.dispatchEvent(
+      new CustomEvent("hass-more-info", {
+        detail: { entityId: id },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
   _toggleZone(id) {
     const st = this._state(id);
     if (this._isActive(st)) {
@@ -413,7 +471,8 @@ class AxiumSourceCard extends HTMLElement {
       chip.innerHTML =
         `<ha-icon class="tick" icon="mdi:check"></ha-icon>` +
         `<span class="label"></span>`;
-      chip.addEventListener("click", () => this._toggleZone(id));
+      chip.title = "Tap to toggle · hold for zone settings";
+      this._attachChipHandlers(chip, id);
       chips.appendChild(chip);
       this._chipEls[id] = chip;
     }
@@ -449,7 +508,7 @@ class AxiumSourceCard extends HTMLElement {
       return;
     }
     sel.hidden = false;
-    const sig = presets.map((p) => p.name).join(" ");
+    const sig = presets.map((p) => p.name).join("|");
     if (sel._sig !== sig) {
       sel._sig = sig;
       sel.textContent = "";
@@ -570,6 +629,8 @@ AxiumSourceCard.styles = `
     color: var(--primary-text-color);
     font: inherit; font-size: 0.95rem; cursor: pointer;
     transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.05s;
+    touch-action: manipulation; user-select: none; -webkit-user-select: none;
+    -webkit-touch-callout: none;
   }
   .chip .tick { --mdc-icon-size: 18px; width: 0; opacity: 0; transition: width 0.15s, opacity 0.15s; }
   .chip:hover { border-color: var(--primary-color); }

@@ -393,6 +393,10 @@ type: custom:axium-source-card
 source: Apple TV
 ```
 
+Tap a zone chip to move that zone onto the source (tap again to turn it off).
+**Long-press** a zone chip to open that zone's **device page**, where its
+volume, bass/treble, gains and other per-zone settings live.
+
 Zones are auto-detected (any Axium zone that offers the chosen source). The
 visual editor's **Source** dropdown lists every source across all your Axium
 amplifiers — only Axium sources, never those of other media players. Sources

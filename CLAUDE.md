@@ -52,8 +52,14 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
 ## Dashboard card (`custom_components/axium/lovelace/axium-source-card.js`)
 
 - Vanilla-JS web component (shadow DOM, no build step). Validate with `node --check`
-  and **check for stray null bytes** before committing (a null once slipped into a
-  string constant and made the file "binary").
+  and **check for stray control/null bytes** before committing:
+  `perl -ne 'print "$." if /[\x00-\x08\x0b\x0c\x0e-\x1f]/'`. A null byte has twice
+  slipped into a string literal that renders as a space (e.g. `.join(" ")`), making
+  `file` report "data"/"binary" — replace the separator with a printable char.
+- Chip interactions: **tap** toggles the zone, **long-press (500ms)** opens the zone's
+  device page (`_attachChipHandlers`/`_openZoneDevice`, pointer events; navigates to
+  `/config/devices/device/<device_id>` via a `location-changed` event, more-info
+  fallback). Device id comes from `hass.entities[id].device_id`.
 - The integration serves it from a **version-stamped path**
   (`/axium/axium-source-card-<version>.js`) via `AxiumCardView.extra_urls`, not a `?v=`
   query — a new path defeats stale browser/service-worker caches on every release.
