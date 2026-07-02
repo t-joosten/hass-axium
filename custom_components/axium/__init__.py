@@ -12,20 +12,25 @@ from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_change
 
 from .const import (
     CMD_POWER,
     CMD_SOURCE,
     CMD_VOLUME,
+    CONF_ALARMS,
+    DATA_PREV_OPTIONS,
     DEFAULT_PORT,
     DOMAIN,
     POWER_ON,
+    SIGNAL_ALARM_UPDATE,
     SOURCE_FLAG_TURN_ON,
 )
 from .controller import AxiumController, AxiumDeviceInfo
 from .helpers import get_alarms
 from .protocol import level_to_volume
+from .services import async_register_services
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -234,7 +239,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = controller
     hass.data.setdefault(ALARMS_ENABLED, {}).setdefault(entry.entry_id, True)
+    hass.data.setdefault(DATA_PREV_OPTIONS, {})[entry.entry_id] = dict(entry.options)
 
+    async_register_services(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _async_setup_alarms(hass, entry, controller)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
@@ -300,6 +307,31 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
+def _alarm_names(options: dict) -> list[str]:
+    """Sorted alarm names from a raw options dict (for change detection)."""
+    raw = options.get(CONF_ALARMS, [])
+    if not isinstance(raw, list):
+        return []
+    return sorted(
+        str(a.get("name", "")) for a in raw if isinstance(a, dict) and a.get("name")
+    )
+
+
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the entry when options (zones) change."""
+    """Reload on option changes, except pure alarm field edits (refresh instead).
+
+    Editing an existing alarm's time/days/enabled (e.g. from the card) doesn't
+    change the set of entities, so we skip the disruptive full reload and just
+    nudge the alarm sensors to re-read.
+    """
+    prev = hass.data.get(DATA_PREV_OPTIONS, {}).get(entry.entry_id, {})
+    cur = dict(entry.options)
+    hass.data.setdefault(DATA_PREV_OPTIONS, {})[entry.entry_id] = cur
+
+    same_alarm_set = _alarm_names(prev) == _alarm_names(cur)
+    other_prev = {k: v for k, v in prev.items() if k != CONF_ALARMS}
+    other_cur = {k: v for k, v in cur.items() if k != CONF_ALARMS}
+    if same_alarm_set and other_prev == other_cur:
+        async_dispatcher_send(hass, f"{SIGNAL_ALARM_UPDATE}_{entry.entry_id}")
+        return
     await hass.config_entries.async_reload(entry.entry_id)

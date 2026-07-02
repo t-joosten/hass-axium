@@ -135,11 +135,18 @@ class AxiumAlarmSensor(SensorEntity):
     ) -> None:
         """Initialise the alarm next-fire sensor."""
         self._hass = hass
+        self._entry = entry
         self._entry_id = entry.entry_id
-        self._alarm = alarm
+        self._name = alarm["name"]
         self._attr_name = f"Alarm {alarm['name']}"
         self._attr_unique_id = f"{entry.entry_id}_alarm_{slugify(alarm['name'])}"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
+
+    def _alarm(self) -> dict | None:
+        """The alarm's current config, read fresh (in-place edits, no reload)."""
+        return next(
+            (a for a in get_alarms(self._entry) if a["name"] == self._name), None
+        )
 
     async def async_added_to_hass(self) -> None:
         """Recompute each minute (rolls over after firing) and on arm/disarm."""
@@ -158,32 +165,36 @@ class AxiumAlarmSensor(SensorEntity):
     def _tick(self, *_: Any) -> None:
         self.async_write_ha_state()
 
-    def _armed(self) -> bool:
+    def _armed(self, alarm: dict) -> bool:
         master = self._hass.data.get(DATA_ALARMS_ENABLED, {}).get(
             self._entry_id, True
         )
-        return bool(master and self._alarm.get("enabled", True))
+        return bool(master and alarm.get("enabled", True))
 
     @property
     def native_value(self) -> datetime | None:
         """Return the next fire time, or None when disarmed/disabled."""
-        if not self._armed():
+        alarm = self._alarm()
+        if alarm is None or not self._armed(alarm):
             return None
-        return next_alarm_fire(self._alarm, dt_util.now())
+        return next_alarm_fire(alarm, dt_util.now())
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Expose the schedule so the alarms card can render it."""
+        alarm = self._alarm()
+        if alarm is None:
+            return {"axium_kind": "alarm", "alarm_name": self._name}
         return {
             "axium_kind": "alarm",
-            "alarm_name": self._alarm["name"],
-            "alarm_time": self._alarm["time"],
-            "alarm_days": self._alarm["days"],
-            "alarm_zones": self._alarm["zones"],
-            "alarm_source": self._alarm["source"],
-            "alarm_volume": self._alarm["volume"],
-            "alarm_enabled": self._alarm.get("enabled", True),
-            "armed": self._armed(),
+            "alarm_name": alarm["name"],
+            "alarm_time": alarm["time"],
+            "alarm_days": alarm["days"],
+            "alarm_zones": alarm["zones"],
+            "alarm_source": alarm["source"],
+            "alarm_volume": alarm["volume"],
+            "alarm_enabled": alarm.get("enabled", True),
+            "armed": self._armed(alarm),
         }
 
 

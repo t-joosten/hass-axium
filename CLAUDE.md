@@ -94,6 +94,15 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   (`axiumCountdown`, `setInterval` in connectedCallback, cleared in disconnectedCallback);
   reuse `axium-hub-card-editor`. Don't compute time-left only in the card — it must also
   be a sensor so automations can use it.
+- Cards are **interactive**: the alarms card enables/disables, edits time/days, removes
+  and adds alarms via the `axium.set_alarm` / `axium.remove_alarm` services (services.py +
+  services.yaml; upsert/remove in options). The sleep card sets/cancels each zone's timer
+  via `number.set_value` on the `axium_kind: "sleep_timer"` number. Rows rebuild only when
+  the entity set changes (signature check) so in-progress inputs aren't clobbered; per-tick
+  updates only the countdown/toggle/time. Editing an existing alarm's fields does NOT
+  reload the entry — `_async_update_listener` reloads only when the alarm-name set or a
+  non-alarm option changes (else dispatches `SIGNAL_ALARM_UPDATE`); the alarm sensor reads
+  its config fresh by name so edits reflect without a reload.
 - Show/hide: card config `zones` (zone entity_ids; source + matrix cards) and `sources`
   (source ids; matrix card) are optional whitelists — empty/unset = show all. Editors use
   an axium-scoped entity selector for zones and a source-id select for sources. Matrix has

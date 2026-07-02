@@ -204,6 +204,8 @@ class AxiumSleepTimer(NumberEntity):
         """Return whether the amplifier connection is up."""
         return self._controller.available
 
+    _attr_extra_state_attributes = {"axium_kind": "sleep_timer"}
+
     @property
     def native_value(self) -> int:
         """Return the minutes remaining on the timer (0 = off)."""

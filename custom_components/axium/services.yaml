@@ -1,0 +1,89 @@
+set_alarm:
+  name: Set alarm
+  description: >-
+    Add or update a wake-to-music alarm by name. Any field left out keeps its
+    current value (or a default for a new alarm).
+  fields:
+    hub:
+      name: Amplifier
+      description: Config entry id of the amplifier (only needed with more than one).
+      required: false
+      selector:
+        text:
+    name:
+      name: Name
+      description: Alarm name (the key; reusing a name edits that alarm).
+      required: true
+      selector:
+        text:
+    time:
+      name: Time
+      description: Time of day (HH:MM).
+      required: false
+      selector:
+        time:
+    days:
+      name: Days
+      description: Weekdays to run on (0=Mon .. 6=Sun); empty means every day.
+      required: false
+      selector:
+        select:
+          multiple: true
+          options:
+            - { value: "0", label: Monday }
+            - { value: "1", label: Tuesday }
+            - { value: "2", label: Wednesday }
+            - { value: "3", label: Thursday }
+            - { value: "4", label: Friday }
+            - { value: "5", label: Saturday }
+            - { value: "6", label: Sunday }
+    zones:
+      name: Zones
+      description: Zone media_player entities to wake.
+      required: false
+      selector:
+        entity:
+          integration: axium
+          domain: media_player
+          multiple: true
+    source:
+      name: Source
+      description: Source id (protocol byte) to play.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 63
+          mode: box
+    volume:
+      name: Target volume
+      description: Volume to fade up to (percent).
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    enabled:
+      name: Enabled
+      description: Whether the alarm is armed.
+      required: false
+      selector:
+        boolean:
+
+remove_alarm:
+  name: Remove alarm
+  description: Delete a wake-to-music alarm by name.
+  fields:
+    hub:
+      name: Amplifier
+      description: Config entry id of the amplifier (only needed with more than one).
+      required: false
+      selector:
+        text:
+    name:
+      name: Name
+      description: Name of the alarm to remove.
+      required: true
+      selector:
+        text:

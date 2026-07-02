@@ -1427,26 +1427,32 @@ function axiumDaysLabel(days) {
 }
 
 /**
- * Axium Alarms Card — lists wake-to-music alarms with a live "time left" until
- * each next fires. Reads the per-alarm timestamp sensors (device_class
- * timestamp), so the same value is available to automations.
+ * Axium Alarms Card — add, remove, enable/disable and edit alarms inline.
+ *
+ * Reads the per-alarm timestamp sensors (for the live countdown and current
+ * schedule) and writes changes through the axium.set_alarm / axium.remove_alarm
+ * services, so everything stays in sync and is also automation-usable.
  */
 class AxiumAlarmsCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
     this._timer = null;
+    this._rowEls = {};
+    this._sig = null;
+    this._addOpen = false;
   }
   setConfig(config) {
     this._config = config || {};
     this.shadowRoot.innerHTML = "";
+    this._sig = null;
   }
   set hass(hass) {
     this._hass = hass;
     if (hass && this._config) this._render();
   }
   getCardSize() {
-    return 2;
+    return 3;
   }
   static getConfigElement() {
     return document.createElement("axium-hub-card-editor");
@@ -1456,58 +1462,222 @@ class AxiumAlarmsCard extends HTMLElement {
     return hubs.length ? { hub: hubs[0].id } : {};
   }
   connectedCallback() {
-    // Tick the "time left" text every second without a full re-render.
-    this._timer = setInterval(() => this._renderCountdowns(), 1000);
+    this._timer = setInterval(() => this._tickCountdowns(), 1000);
   }
   disconnectedCallback() {
     if (this._timer) clearInterval(this._timer);
     this._timer = null;
   }
-  _hubId() {
+  _hub() {
     return this._config.hub || (axiumHubs(this._hass)[0] || {}).id;
   }
+  _alarmIds() {
+    return axiumKindSensors(this._hass, this._hub(), "alarm").sort((a, b) =>
+      (this._hass.states[a].attributes.alarm_name || "").localeCompare(
+        this._hass.states[b].attributes.alarm_name || ""
+      )
+    );
+  }
+  _svc(service, data) {
+    this._hass.callService("axium", service, { hub: this._hub(), ...data });
+  }
+  _sources() {
+    const map = new Map();
+    for (const z of axiumMediaPlayers(this._hass, this._hub())) {
+      const a = this._hass.states[z].attributes;
+      const ids = a.source_ids;
+      const names = a.source_list;
+      if (Array.isArray(ids) && Array.isArray(names)) {
+        ids.forEach((sid, i) => {
+          if (!map.has(sid)) map.set(sid, names[i]);
+        });
+      }
+    }
+    return [...map.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }
+
   _render() {
-    const ids = axiumKindSensors(this._hass, this._hubId(), "alarm").sort((a, b) => {
-      const na = this._hass.states[a].attributes.alarm_name || "";
-      const nb = this._hass.states[b].attributes.alarm_name || "";
-      return na.localeCompare(nb);
-    });
+    const ids = this._alarmIds();
+    const sig = ids.join(",");
+    if (sig !== this._sig) {
+      this._sig = sig;
+      this._build(ids);
+    }
+    this._refresh(ids);
+  }
+
+  _build(ids) {
+    this._rowEls = {};
     const title = this._config.name || "Alarms";
-    const rows = ids
-      .map((id) => {
-        const a = this._hass.states[id].attributes;
-        const sched = `${a.alarm_time || "--:--"} · ${axiumDaysLabel(a.alarm_days)}`;
-        return (
-          `<div class="row">` +
-          `<div class="l"><div class="n">${a.alarm_name || id}</div>` +
-          `<div class="s">${sched}</div></div>` +
-          `<div class="r" data-id="${id}"></div></div>`
-        );
-      })
-      .join("");
     this.shadowRoot.innerHTML = `
       <style>${AxiumAlarmsCard.styles}</style>
       <ha-card>
         <div class="title">${title}</div>
-        ${ids.length ? `<div class="rows">${rows}</div>` : `<div class="empty">No alarms set.</div>`}
+        <div class="rows" id="rows"></div>
+        <div class="addbar"><button class="link" id="addtoggle">+ Add alarm</button></div>
+        <div class="addform" id="addform" hidden></div>
       </ha-card>`;
-    this._renderCountdowns();
+    const rows = this.shadowRoot.getElementById("rows");
+    if (!ids.length) rows.innerHTML = `<div class="empty">No alarms yet.</div>`;
+    for (const id of ids) {
+      const name = this._hass.states[id].attributes.alarm_name;
+      const row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML = `
+        <label class="tog"><input type="checkbox" class="en"><span class="track"></span></label>
+        <div class="mid">
+          <div class="n"></div>
+          <div class="sub"><input type="time" class="time"><span class="days"></span></div>
+        </div>
+        <div class="cd" data-id="${id}"></div>
+        <button class="x" title="Remove">&#10005;</button>`;
+      row.querySelector(".en").addEventListener("change", (e) =>
+        this._svc("set_alarm", { name, enabled: e.target.checked })
+      );
+      row.querySelector(".time").addEventListener("change", (e) => {
+        if (e.target.value) this._svc("set_alarm", { name, time: e.target.value });
+      });
+      row.querySelector(".x").addEventListener("click", () =>
+        this._svc("remove_alarm", { name })
+      );
+      const days = row.querySelector(".days");
+      _DAY_ABBR.forEach((lbl, idx) => {
+        const c = document.createElement("button");
+        c.className = "daychip";
+        c.textContent = lbl[0];
+        c.dataset.d = idx;
+        c.title = lbl;
+        c.addEventListener("click", () => this._toggleDay(name, idx));
+        days.appendChild(c);
+      });
+      rows.appendChild(row);
+      this._rowEls[id] = row;
+    }
+    this.shadowRoot
+      .getElementById("addtoggle")
+      .addEventListener("click", () => this._toggleAdd());
+    this._buildAddForm();
   }
-  _renderCountdowns() {
-    if (!this._hass) return;
-    for (const el of this.shadowRoot.querySelectorAll(".r[data-id]")) {
-      const st = this._hass.states[el.dataset.id];
-      if (!st) continue;
-      const a = st.attributes;
-      if (!a.armed || a.alarm_enabled === false) {
-        el.innerHTML = `<span class="off">Disarmed</span>`;
-      } else {
-        const left = axiumCountdown(st.state);
-        el.innerHTML = left
-          ? `<span class="cd">in ${left}</span>`
-          : `<span class="off">—</span>`;
+
+  _toggleDay(name, idx) {
+    const id = this._alarmIds().find(
+      (i) => this._hass.states[i].attributes.alarm_name === name
+    );
+    const cur = new Set(
+      (id && this._hass.states[id].attributes.alarm_days) || []
+    );
+    if (cur.has(idx)) cur.delete(idx);
+    else cur.add(idx);
+    this._svc("set_alarm", { name, days: [...cur].sort((a, b) => a - b) });
+  }
+
+  _refresh(ids) {
+    for (const id of ids) {
+      const row = this._rowEls[id];
+      if (!row) continue;
+      const a = this._hass.states[id].attributes;
+      row.querySelector(".n").textContent = a.alarm_name || id;
+      row.querySelector(".en").checked = a.alarm_enabled !== false;
+      const t = row.querySelector(".time");
+      if (this.shadowRoot.activeElement !== t && a.alarm_time) t.value = a.alarm_time;
+      const set = new Set(a.alarm_days || []);
+      const everyDay = !a.alarm_days || a.alarm_days.length === 0;
+      for (const chip of row.querySelectorAll(".daychip")) {
+        chip.classList.toggle("on", everyDay || set.has(Number(chip.dataset.d)));
       }
     }
+    this._tickCountdowns();
+  }
+
+  _tickCountdowns() {
+    if (!this._hass) return;
+    for (const el of this.shadowRoot.querySelectorAll(".cd[data-id]")) {
+      const st = this._hass.states[el.dataset.id];
+      if (!st) {
+        el.textContent = "";
+        continue;
+      }
+      const a = st.attributes;
+      if (a.alarm_enabled === false) el.innerHTML = `<span class="off">Off</span>`;
+      else if (!a.armed) el.innerHTML = `<span class="off">Disarmed</span>`;
+      else {
+        const left = axiumCountdown(st.state);
+        el.innerHTML = left ? `<span class="in">in ${left}</span>` : "";
+      }
+    }
+  }
+
+  _toggleAdd() {
+    this._addOpen = !this._addOpen;
+    this.shadowRoot.getElementById("addform").hidden = !this._addOpen;
+  }
+
+  _buildAddForm() {
+    const form = this.shadowRoot.getElementById("addform");
+    const sources = this._sources();
+    form.innerHTML = `
+      <input type="text" class="f-name" placeholder="Name">
+      <input type="time" class="f-time" value="07:00">
+      <div class="chips f-days"></div>
+      <div class="chips f-zones"></div>
+      <select class="f-source">${sources
+        .map((s) => `<option value="${s.id}">${s.name}</option>`)
+        .join("")}</select>
+      <label class="f-vol">Volume <input type="range" min="0" max="100" value="30"><span class="volval">30%</span></label>
+      <button class="addbtn">Add</button>`;
+    _DAY_ABBR.forEach((lbl, idx) => {
+      const c = document.createElement("button");
+      c.className = "daychip on";
+      c.textContent = lbl[0];
+      c.dataset.d = idx;
+      c.title = lbl;
+      c.addEventListener("click", () => c.classList.toggle("on"));
+      form.querySelector(".f-days").appendChild(c);
+    });
+    for (const z of axiumMediaPlayers(this._hass, this._hub())) {
+      const st = this._hass.states[z];
+      const c = document.createElement("button");
+      c.className = "zonechip";
+      c.textContent = (st && st.attributes.friendly_name) || z;
+      c.dataset.z = z;
+      c.addEventListener("click", () => c.classList.toggle("on"));
+      form.querySelector(".f-zones").appendChild(c);
+    }
+    const vol = form.querySelector('input[type="range"]');
+    const volval = form.querySelector(".volval");
+    vol.addEventListener("input", () => (volval.textContent = `${vol.value}%`));
+    form.querySelector(".addbtn").addEventListener("click", () =>
+      this._submitAdd(form)
+    );
+  }
+
+  _submitAdd(form) {
+    const nameEl = form.querySelector(".f-name");
+    const name = nameEl.value.trim();
+    if (!name) {
+      nameEl.focus();
+      return;
+    }
+    const zones = [...form.querySelectorAll(".f-zones .zonechip.on")].map(
+      (c) => c.dataset.z
+    );
+    if (!zones.length) return;
+    const days = [...form.querySelectorAll(".f-days .daychip.on")].map((c) =>
+      Number(c.dataset.d)
+    );
+    this._svc("set_alarm", {
+      name,
+      time: form.querySelector(".f-time").value || "07:00",
+      days,
+      zones,
+      source: Number(form.querySelector(".f-source").value),
+      volume: Number(form.querySelector('input[type="range"]').value),
+      enabled: true,
+    });
+    nameEl.value = "";
+    this._toggleAdd();
   }
 }
 
@@ -1515,37 +1685,87 @@ AxiumAlarmsCard.styles = `
   ha-card { padding: 12px 16px; }
   .title { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: var(--primary-text-color); }
   .empty { color: var(--secondary-text-color); padding: 4px 0; }
-  .rows { display: flex; flex-direction: column; gap: 8px; }
-  .row { display: flex; align-items: center; gap: 12px; }
-  .l { flex: 1 1 auto; min-width: 0; }
+  .rows { display: flex; flex-direction: column; gap: 10px; }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .mid { flex: 1 1 auto; min-width: 0; }
   .n { font-weight: 600; color: var(--primary-text-color); }
-  .s { font-size: 0.82rem; color: var(--secondary-text-color); }
-  .r { flex: 0 0 auto; text-align: right; }
-  .cd { font-weight: 600; color: var(--primary-color); }
+  .sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+  .cd { flex: 0 0 auto; text-align: right; font-size: 0.85rem; }
+  .in { font-weight: 600; color: var(--primary-color); }
   .off { color: var(--secondary-text-color); }
+  input[type="time"] {
+    font: inherit; font-size: 0.85rem; padding: 2px 4px; border-radius: 6px;
+    border: 1px solid var(--divider-color);
+    background: var(--card-background-color); color: var(--primary-text-color);
+  }
+  .days { display: inline-flex; gap: 2px; }
+  .daychip {
+    width: 20px; height: 20px; border-radius: 50%; padding: 0;
+    border: 1px solid var(--divider-color); background: none; cursor: pointer;
+    font-size: 0.7rem; color: var(--secondary-text-color);
+  }
+  .daychip.on { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .x { border: none; background: none; cursor: pointer; color: var(--secondary-text-color); font-size: 0.9rem; flex: 0 0 auto; }
+  .x:hover { color: var(--error-color); }
+  .tog { position: relative; display: inline-block; width: 36px; height: 20px; flex: 0 0 auto; }
+  .tog input { opacity: 0; width: 0; height: 0; }
+  .track { position: absolute; inset: 0; border-radius: 20px; background: var(--divider-color); transition: background 0.15s; }
+  .track::before { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
+  .tog input:checked + .track { background: var(--primary-color); }
+  .tog input:checked + .track::before { transform: translateX(16px); }
+  .addbar { margin-top: 10px; }
+  .link { border: none; background: none; color: var(--primary-color); cursor: pointer; font: inherit; padding: 0; }
+  .addform { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--divider-color); }
+  .addform input[type="text"], .addform select {
+    font: inherit; padding: 6px 8px; border-radius: 6px;
+    border: 1px solid var(--divider-color);
+    background: var(--card-background-color); color: var(--primary-text-color);
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .zonechip {
+    padding: 4px 10px; border-radius: 16px; border: 1px solid var(--divider-color);
+    background: none; cursor: pointer; font: inherit; font-size: 0.85rem;
+    color: var(--primary-text-color);
+  }
+  .zonechip.on { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .f-vol { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--secondary-text-color); }
+  .addbtn {
+    align-self: flex-start; padding: 6px 16px; border-radius: 8px; border: none;
+    background: var(--primary-color); color: var(--text-primary-color, #fff);
+    cursor: pointer; font: inherit;
+  }
+  .quick { display: inline-flex; gap: 4px; margin-top: 4px; }
+  .q {
+    padding: 3px 10px; border-radius: 14px; border: 1px solid var(--divider-color);
+    background: none; cursor: pointer; font: inherit; font-size: 0.8rem;
+    color: var(--primary-text-color);
+  }
+  .q:hover { border-color: var(--primary-color); }
 `;
 
 /**
- * Axium Sleep Timers Card — lists zones with a running sleep timer and the live
- * time left until each powers off. Reads the per-zone "Sleep ends" timestamp
- * sensors, so the value is also available to automations.
+ * Axium Sleep Timers Card — start, adjust and cancel a per-zone sleep timer,
+ * with the live time left. Writes via the zone's sleep-timer number entity.
  */
 class AxiumSleepCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
     this._timer = null;
+    this._rowEls = {};
+    this._sig = null;
   }
   setConfig(config) {
     this._config = config || {};
     this.shadowRoot.innerHTML = "";
+    this._sig = null;
   }
   set hass(hass) {
     this._hass = hass;
     if (hass && this._config) this._render();
   }
   getCardSize() {
-    return 2;
+    return 3;
   }
   static getConfigElement() {
     return document.createElement("axium-hub-card-editor");
@@ -1555,19 +1775,32 @@ class AxiumSleepCard extends HTMLElement {
     return hubs.length ? { hub: hubs[0].id } : {};
   }
   connectedCallback() {
-    this._timer = setInterval(() => this._renderCountdowns(), 1000);
+    this._timer = setInterval(() => this._tick(), 1000);
   }
   disconnectedCallback() {
     if (this._timer) clearInterval(this._timer);
     this._timer = null;
   }
-  _hubId() {
+  _hub() {
     return this._config.hub || (axiumHubs(this._hass)[0] || {}).id;
   }
-  // The friendly name of the zone a sleep sensor belongs to (via its device).
-  _zoneName(sensorId) {
+  _numberIds() {
+    const states = this._hass.states || {};
+    const reg = this._hass.entities || {};
+    return Object.keys(states)
+      .filter((id) => id.startsWith("number."))
+      .filter((id) => reg[id] && reg[id].platform === "axium")
+      .filter((id) => states[id].attributes.axium_kind === "sleep_timer")
+      .filter((id) => !this._hub() || entityHub(this._hass, id) === this._hub())
+      .sort((a, b) => this._zoneName(a).localeCompare(this._zoneName(b)));
+  }
+  _device(id) {
     const reg = (this._hass && this._hass.entities) || {};
-    const dev = reg[sensorId] && reg[sensorId].device_id;
+    return reg[id] && reg[id].device_id;
+  }
+  _zoneName(numId) {
+    const reg = (this._hass && this._hass.entities) || {};
+    const dev = this._device(numId);
     if (dev) {
       for (const eid of Object.keys(reg)) {
         if (eid.startsWith("media_player.") && reg[eid].device_id === dev) {
@@ -1576,43 +1809,90 @@ class AxiumSleepCard extends HTMLElement {
         }
       }
     }
-    const fn =
-      (this._hass.states[sensorId] &&
-        this._hass.states[sensorId].attributes.friendly_name) ||
-      sensorId;
-    return fn.replace(/\s*Sleep ends$/i, "");
+    const st = this._hass.states[numId];
+    const fn = (st && st.attributes.friendly_name) || numId;
+    return fn.replace(/\s*Sleep timer$/i, "");
   }
-  _running() {
-    return axiumKindSensors(this._hass, this._hubId(), "sleep").filter((id) => {
-      const st = this._hass.states[id];
-      return st && st.state && st.state !== "unknown" && st.state !== "unavailable";
-    });
+  _sleepSensor(numId) {
+    const reg = (this._hass && this._hass.entities) || {};
+    const dev = this._device(numId);
+    for (const eid of Object.keys(reg)) {
+      if (
+        eid.startsWith("sensor.") &&
+        reg[eid].device_id === dev &&
+        this._hass.states[eid] &&
+        this._hass.states[eid].attributes.axium_kind === "sleep"
+      ) {
+        return eid;
+      }
+    }
+    return null;
   }
   _render() {
-    const ids = this._running();
+    const ids = this._numberIds();
+    const sig = ids.join(",");
+    if (sig !== this._sig) {
+      this._sig = sig;
+      this._build(ids);
+    }
+    this._tick();
+  }
+  _build(ids) {
+    this._rowEls = {};
     const title = this._config.name || "Sleep timers";
-    const rows = ids
-      .map(
-        (id) =>
-          `<div class="row"><div class="l"><div class="n">${this._zoneName(
-            id
-          )}</div></div><div class="r" data-id="${id}"></div></div>`
-      )
-      .join("");
     this.shadowRoot.innerHTML = `
       <style>${AxiumAlarmsCard.styles}</style>
       <ha-card>
         <div class="title">${title}</div>
-        ${ids.length ? `<div class="rows">${rows}</div>` : `<div class="empty">No sleep timers running.</div>`}
+        <div class="rows" id="rows"></div>
       </ha-card>`;
-    this._renderCountdowns();
+    const rows = this.shadowRoot.getElementById("rows");
+    if (!ids.length) rows.innerHTML = `<div class="empty">No zones.</div>`;
+    for (const id of ids) {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML = `
+        <div class="mid">
+          <div class="n">${this._zoneName(id)}</div>
+          <div class="quick">${[15, 30, 60, 90]
+            .map((m) => `<button class="q" data-m="${m}">${m}m</button>`)
+            .join("")}</div>
+        </div>
+        <div class="cd" data-num="${id}"></div>
+        <button class="x" title="Cancel" hidden>&#10005;</button>`;
+      row.querySelectorAll(".q").forEach((b) =>
+        b.addEventListener("click", () =>
+          this._hass.callService("number", "set_value", {
+            entity_id: id,
+            value: Number(b.dataset.m),
+          })
+        )
+      );
+      row.querySelector(".x").addEventListener("click", () =>
+        this._hass.callService("number", "set_value", { entity_id: id, value: 0 })
+      );
+      rows.appendChild(row);
+      this._rowEls[id] = row;
+    }
+    this._tick();
   }
-  _renderCountdowns() {
+  _tick() {
     if (!this._hass) return;
-    for (const el of this.shadowRoot.querySelectorAll(".r[data-id]")) {
-      const st = this._hass.states[el.dataset.id];
-      const left = st ? axiumCountdown(st.state) : null;
-      el.innerHTML = left ? `<span class="cd">${left} left</span>` : "";
+    for (const [numId, row] of Object.entries(this._rowEls)) {
+      const sensor = this._sleepSensor(numId);
+      const st = sensor ? this._hass.states[sensor] : null;
+      const running =
+        st && st.state && st.state !== "unknown" && st.state !== "unavailable";
+      const cd = row.querySelector(".cd");
+      const x = row.querySelector(".x");
+      if (running) {
+        const left = axiumCountdown(st.state);
+        cd.innerHTML = `<span class="in">${left} left</span>`;
+        x.hidden = false;
+      } else {
+        cd.innerHTML = "";
+        x.hidden = true;
+      }
     }
   }
 }

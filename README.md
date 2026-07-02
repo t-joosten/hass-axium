@@ -468,8 +468,13 @@ Each alarm also gets a **next-fire timestamp sensor** (`sensor.axium_alarm_<name
 and each zone a **sleep-end timestamp sensor** (`sensor.<zone>_sleep_ends`). These
 are `device_class: timestamp`, so the time left is usable in automations, e.g.
 `{{ (states('sensor.axium_alarm_wake') | as_datetime - now()).total_seconds() }}`.
-The **Axium Alarms Card** and **Axium Sleep Timers Card** display these with a
-live "time left" countdown (add them from the "Add card" gallery).
+The **Axium Alarms Card** and **Axium Sleep Timers Card** are **interactive**:
+the alarms card lets you enable/disable each alarm, edit its time and days,
+remove it, and add new ones inline; the sleep-timers card lets you start a
+timer per zone (15/30/60/90 min) and cancel it — all with the live countdown.
+Behind the scenes the alarm edits use the `axium.set_alarm` / `axium.remove_alarm`
+services (also callable from automations), and the sleep card uses each zone's
+sleep-timer number entity.
 
 > Note on EQ: the Axium protocol defines an equaliser command (`0x21`) but the
 > spec marks it **"Unsupported by Axium products"**, so a parametric EQ can't be
