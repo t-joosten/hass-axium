@@ -19,7 +19,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_change
-from homeassistant.util import dt as dt_util, slugify
+from homeassistant.util import dt as dt_util
 
 from .const import (
     DATA_ALARMS_ENABLED,
@@ -154,7 +154,9 @@ class AxiumAlarmSensor(SensorEntity):
         self._entry_id = entry.entry_id
         self._name = alarm["name"]
         self._attr_name = f"Alarm {alarm['name']}"
-        self._attr_unique_id = f"{entry.entry_id}_alarm_{slugify(alarm['name'])}"
+        # Alarm names are unique keys; use the raw name so two names that would
+        # slugify to the same string (e.g. "Wake up" / "Wake-up") don't collide.
+        self._attr_unique_id = f"{entry.entry_id}_alarm_{alarm['name']}"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
 
     def _alarm(self) -> dict | None:

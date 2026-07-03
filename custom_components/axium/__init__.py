@@ -20,7 +20,9 @@ from .const import (
     CMD_SOURCE,
     CMD_VOLUME,
     CONF_ALARMS,
+    DATA_ALARMS_ENABLED,
     DATA_PREV_OPTIONS,
+    DATA_SLEEP_DEADLINES,
     DEFAULT_PORT,
     DOMAIN,
     POWER_ON,
@@ -34,8 +36,6 @@ from .services import async_register_services
 
 _LOGGER = logging.getLogger(__name__)
 
-# Runtime "alarms enabled" master flag per entry (toggled by a switch entity).
-ALARMS_ENABLED = f"{DOMAIN}_alarms_enabled"
 _ALARM_FADE_SECONDS = 30
 _ALARM_FADE_STEPS = 6
 
@@ -238,7 +238,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ) from err
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = controller
-    hass.data.setdefault(ALARMS_ENABLED, {}).setdefault(entry.entry_id, True)
+    hass.data.setdefault(DATA_ALARMS_ENABLED, {}).setdefault(entry.entry_id, True)
     hass.data.setdefault(DATA_PREV_OPTIONS, {})[entry.entry_id] = dict(entry.options)
 
     async_register_services(hass)
@@ -284,7 +284,7 @@ def _async_setup_alarms(
 
     @callback
     def _tick(now: datetime) -> None:
-        if not hass.data.get(ALARMS_ENABLED, {}).get(entry.entry_id, True):
+        if not hass.data.get(DATA_ALARMS_ENABLED, {}).get(entry.entry_id, True):
             return
         hhmm = now.strftime("%H:%M")
         weekday = now.weekday()  # Monday = 0 .. Sunday = 6
@@ -304,6 +304,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok:
         controller: AxiumController = hass.data[DOMAIN].pop(entry.entry_id)
         await controller.async_stop()
+        # Drop this entry's per-entry runtime state so a reload can't surface a
+        # stale sleep-timer deadline (the timer tasks are already cancelled).
+        # The alarms-enabled flag is intentionally kept so arm/disarm survives.
+        hass.data.get(DATA_SLEEP_DEADLINES, {}).pop(entry.entry_id, None)
+        hass.data.get(DATA_PREV_OPTIONS, {}).pop(entry.entry_id, None)
     return unload_ok
 
 

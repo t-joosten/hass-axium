@@ -262,8 +262,9 @@ class AxiumSleepTimer(NumberEntity):
         self.async_write_ha_state()
 
     async def async_will_remove_from_hass(self) -> None:
-        """Cancel any running timer when the entity goes away."""
+        """Cancel any running timer and clear its deadline when removed."""
         self._cancel()
+        self._publish_deadline(None)
 
 
 class AxiumAllZonesSleepTimer(NumberEntity):
@@ -364,8 +365,9 @@ class AxiumAllZonesSleepTimer(NumberEntity):
         self.async_write_ha_state()
 
     async def async_will_remove_from_hass(self) -> None:
-        """Cancel any running timer when the entity goes away."""
+        """Cancel any running timer and clear its deadline when removed."""
         self._cancel()
+        self._publish_deadline(None)
 
 
 class AxiumSourceGain(NumberEntity):

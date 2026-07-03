@@ -310,11 +310,11 @@ class AxiumOptionsFlow(OptionsFlow):
             elif not zones:
                 errors["base"] = "alarm_zones_required"
             else:
-                alarms = [
-                    a
-                    for a in get_alarms(self._config_entry)
-                    if a["name"] != name
-                ]
+                current = get_alarms(self._config_entry)
+                # Preserve the enabled/armed state when editing an existing
+                # alarm (same name); a new alarm defaults to enabled.
+                existing = next((a for a in current if a["name"] == name), None)
+                alarms = [a for a in current if a["name"] != name]
                 alarms.append(
                     {
                         "name": name,
@@ -323,7 +323,7 @@ class AxiumOptionsFlow(OptionsFlow):
                         "zones": zones,
                         "source": int(user_input["source"]),
                         "volume": int(user_input["volume"]),
-                        "enabled": True,
+                        "enabled": existing["enabled"] if existing else True,
                     }
                 )
                 self._options[CONF_ALARMS] = alarms
