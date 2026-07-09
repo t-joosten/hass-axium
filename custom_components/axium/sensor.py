@@ -27,10 +27,11 @@ from .const import (
     DOMAIN,
     SIGNAL_ALARM_UPDATE,
     SIGNAL_SLEEP_UPDATE,
+    UNIT_KEY,
     ZONE_KEY,
 )
 from .controller import AxiumController
-from .helpers import get_alarms, get_zones, next_alarm_fire
+from .helpers import get_alarms, get_units, get_zones, next_alarm_fire
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -40,16 +41,21 @@ class AxiumSensorDescription:
     key: str
     name: str
     getter: Callable[[AxiumController], int | None]
+    unit_attr: str  # UnitInfo attribute read for a stacked expansion amp
 
 
 SENSORS: tuple[AxiumSensorDescription, ...] = (
     AxiumSensorDescription(
-        key="temperature", name="Temperature", getter=lambda c: c.temperature
+        key="temperature",
+        name="Temperature",
+        getter=lambda c: c.temperature,
+        unit_attr="temperature",
     ),
     AxiumSensorDescription(
         key="peak_temperature",
         name="Peak temperature",
         getter=lambda c: c.peak_temperature,
+        unit_attr="peak_temperature",
     ),
 )
 
@@ -61,9 +67,22 @@ async def async_setup_entry(
 ) -> None:
     """Set up diagnostic, alarm and sleep-timer sensors."""
     controller: AxiumController = hass.data[DOMAIN][entry.entry_id]
-    entities: list[SensorEntity] = [
-        AxiumSensor(controller, entry, desc) for desc in SENSORS
-    ]
+    entities: list[SensorEntity] = []
+    units = get_units(entry)
+    if units:
+        # A temperature/peak pair per amp in the stack, on that amp's device.
+        for unit in units:
+            uid = unit[UNIT_KEY]
+            if unit.get("primary"):
+                for desc in SENSORS:
+                    entities.append(AxiumSensor(controller, entry, desc))
+            else:
+                device = (DOMAIN, f"{entry.entry_id}_unit_{uid}")
+                for desc in SENSORS:
+                    entities.append(AxiumSensor(controller, entry, desc, uid, device))
+    else:
+        for desc in SENSORS:
+            entities.append(AxiumSensor(controller, entry, desc))
     entities.extend(
         AxiumSleepSensor(hass, entry, item[ZONE_KEY]) for item in get_zones(entry)
     )
@@ -230,13 +249,23 @@ class AxiumSensor(SensorEntity):
         controller: AxiumController,
         entry: ConfigEntry,
         desc: AxiumSensorDescription,
+        unit_id: int | None = None,
+        device_ident: tuple[str, str] | None = None,
     ) -> None:
-        """Initialise the sensor."""
+        """Initialise the sensor.
+
+        ``unit_id`` is ``None`` for the primary amp (legacy unique id, kept so
+        existing sensors aren't orphaned) or a stacked expansion amp's unit id.
+        """
         self._controller = controller
         self._desc = desc
+        self._unit_id = unit_id
         self._attr_name = desc.name
-        self._attr_unique_id = f"{entry.entry_id}_{desc.key}"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
+        suffix = "" if unit_id is None else f"_unit_{unit_id}"
+        self._attr_unique_id = f"{entry.entry_id}_{desc.key}{suffix}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={device_ident or (DOMAIN, entry.entry_id)}
+        )
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to diagnostic updates."""
@@ -250,8 +279,8 @@ class AxiumSensor(SensorEntity):
         self.async_write_ha_state()
 
     async def async_update(self) -> None:
-        """Request fresh diagnostics from the amplifier."""
-        await self._controller.async_request_extended_info()
+        """Request fresh diagnostics for this sensor's amp."""
+        await self._controller.async_request_extended_info(self._unit_id)
 
     @property
     def available(self) -> bool:
@@ -260,5 +289,8 @@ class AxiumSensor(SensorEntity):
 
     @property
     def native_value(self) -> int | None:
-        """Return the sensor value."""
-        return self._desc.getter(self._controller)
+        """Return the sensor value (this amp's, in a stack)."""
+        if self._unit_id is None:
+            return self._desc.getter(self._controller)
+        unit = self._controller.unit(self._unit_id)
+        return getattr(unit, self._desc.unit_attr) if unit else None

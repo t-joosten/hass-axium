@@ -461,19 +461,29 @@ class Simulator:
                 log("-> reply  ", frame_out, f"preset name {index}")
                 await self._safe_drain(writer)
             return
-        if command == 0x39:  # Request extended device information
+        if command == 0x39:  # Request extended device information (per unit)
+            uid = (data[0] << 8 | data[1]) if len(data) >= 2 else UNIT_ID
+            known = {UNIT_ID}
+            if self.peer_zone_numbers:
+                known.add(UNIT_ID + 1)
+            if uid not in known:
+                return  # unknown unit: stay silent, like real hardware
+            is_peer = uid != UNIT_ID
+            # A stacked peer reports its own (slightly different) diagnostics.
+            temp = self.temperature + (5 if is_peer else 0)
+            peak = self.peak_temperature + (5 if is_peer else 0)
             reply = encode(
                 0xB9, 0x00,
-                0x00, 0x00, 0x12, 0x34,  # 32-bit unit id
-                FIRMWARE_MAJOR, 0x00, 0x00,  # fw major, minor, beta
-                self.temperature & 0xFF, self.peak_temperature & 0xFF,
+                0x00, 0x00, (uid >> 8) & 0xFF, uid & 0xFF,  # 32-bit unit id
+                FIRMWARE_MAJOR, 1 if is_peer else 0, 0,  # fw major.minor.beta
+                temp & 0xFF, peak & 0xFF,
                 192, 168, 1, 50,  # IP
-                0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,  # MAC
+                0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x03 if is_peer else 0x02,  # MAC
                 26, 6, 30,  # manufacture date
                 0x02,  # flags
             )
             writer.write(reply)
-            log("-> reply  ", reply, f"ext info temp={self.temperature}")
+            log("-> reply  ", reply, f"ext info unit=0x{uid:04X} temp={temp}")
             await self._safe_drain(writer)
             return
         if command == 0x29:  # Source Name and Options (request or set)

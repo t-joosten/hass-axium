@@ -82,6 +82,20 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `83h` reads it back; `08h`/`88h` = AirPlay enable/status (only meaningful on AirPlay hardware).
   **UPnP/DLNA/Pandora/TuneIn are NOT in the protocol** (amp web-UI/app only, at `http://<amp-ip>`);
   media servers (SMB shares) = `0x3B`; media control/status = `0x3D`/`0x3E`/`0x3F`.
+- **Multi-amp stacks / per-unit devices**: the controller tracks a `UnitInfo` per amp
+  (`controller._units`, keyed by unit id; `units()`, `unit(id)`, `primary_unit_id`). Device
+  info (0x14) accumulates one unit per reply; extended info (0xB9) is keyed by the unit id at
+  `data[2:4]` and requested **per unit** (`async_request_extended_info(unit_id)`). Legacy
+  single-value props (`temperature`/`_firmware`/`_mac`) mirror the **primary**. Each amp is a
+  device: primary = the hub, expansion = `(<entry>_unit_<uid>)` `via_device` the hub; zones
+  nest under their owning amp (`media_player` `via_device`); per-unit temp/peak sensors
+  (`AxiumSensor(unit_id=…)`, expansion ids suffixed `_unit_<uid>` so primary sensors aren't
+  orphaned). Config: `CONF_UNITS=[{unit_id,primary}]` + `UNIT_KEY` on each `CONF_ZONES` entry
+  (`helpers.zones_from_units`/`units_config`/`get_units`). **Auto-detect**: controller debounces
+  a `set_stack_callback` ~2s after the stack settles; `__init__._handle_stack` reloads the entry
+  when a new unit/zone appears (guarded to add-only; primary implicit for legacy config → no
+  spurious reload). The **reconfigure flow re-scans** the stack too. Simulator: `--peer-zones`
+  gives a 2nd unit; its 0x39 handler now replies **per requested unit** (distinct temp/fw/MAC).
 - **Static IP switch** (`AxiumStaticIPSwitch`, switch.py): reads the amp's network config at connect
   (`controller._request_network_config` → `_handle_network_settings` caches `NetworkConfig`); the hub
   switch toggles `async_set_network_static` which re-writes the *current* IP/subnet/DNS/router with the

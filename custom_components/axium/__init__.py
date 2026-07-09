@@ -23,6 +23,8 @@ from .const import (
     CMD_SOURCE,
     CMD_VOLUME,
     CONF_ALARMS,
+    CONF_UNITS,
+    CONF_ZONES,
     DATA_ALARMS_ENABLED,
     DATA_PREV_OPTIONS,
     DATA_SLEEP_DEADLINES,
@@ -31,9 +33,11 @@ from .const import (
     POWER_ON,
     SIGNAL_ALARM_UPDATE,
     SOURCE_FLAG_TURN_ON,
+    UNIT_KEY,
+    ZONE_KEY,
 )
-from .controller import AxiumController, AxiumDeviceInfo
-from .helpers import get_alarms
+from .controller import AxiumController, AxiumDeviceInfo, UnitInfo
+from .helpers import get_alarms, get_units, get_zones, units_config, zones_from_units
 from .protocol import level_to_volume
 from .services import async_register_services
 
@@ -195,6 +199,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register the amplifier as a hub device so each zone/group device nests
     # under it via their `via_device` reference. Model/firmware are filled in
     # automatically once the amplifier identifies itself (command 0x14).
+    # Each amplifier in the stack is its own device. The primary/connected amp
+    # is the hub device; expansion amps are separate devices nested under it via
+    # `via_device`. Zones nest under their owning amp.
     device_registry = dr.async_get(hass)
     hub = device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
@@ -204,34 +211,97 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         model="Amplifier",
         configuration_url=f"http://{host}",
     )
+    for unit in get_units(entry):
+        if unit.get("primary"):
+            continue
+        uid = unit[UNIT_KEY]
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, f"{entry.entry_id}_unit_{uid}")},
+            via_device=(DOMAIN, entry.entry_id),
+            manufacturer="Axium",
+            model="Amplifier",
+            name=f"{entry.title} amp {uid:#06x}",
+        )
+
+    def _amp_identifier(unit_id: int | None) -> tuple[str, str]:
+        """Device identifier for the amp hosting a unit (primary = the hub)."""
+        if unit_id is None or unit_id == controller.primary_unit_id:
+            return (DOMAIN, entry.entry_id)
+        return (DOMAIN, f"{entry.entry_id}_unit_{unit_id}")
 
     @callback
-    def _update_hub_device(info: AxiumDeviceInfo) -> None:
-        """Enrich the hub device with the reported model and firmware."""
+    def _update_amp_device(info: AxiumDeviceInfo) -> None:
+        """Enrich an amp device with its reported model and firmware."""
+        device = device_registry.async_get_device(
+            identifiers={_amp_identifier(info.unit_id)}
+        )
+        if device is None:
+            return
         updates: dict[str, str] = {}
         if info.model or info.device_type:
             updates["model"] = info.model or info.device_type  # type: ignore[assignment]
         if info.firmware_major is not None:
             updates["sw_version"] = f"v{info.firmware_major}"
         if updates:
-            device_registry.async_update_device(hub.id, **updates)
+            device_registry.async_update_device(device.id, **updates)
 
-    controller.set_device_info_callback(_update_hub_device)
+    controller.set_device_info_callback(_update_amp_device)
 
     @callback
-    def _update_hub_extended(firmware: str | None, mac: str | None) -> None:
-        """Enrich the hub with the full firmware version and MAC address."""
+    def _update_unit_extended(unit: UnitInfo) -> None:
+        """Enrich an amp device with its full firmware, model and MAC."""
+        device = device_registry.async_get_device(
+            identifiers={_amp_identifier(unit.unit_id)}
+        )
+        if device is None:
+            return
         kwargs: dict = {}
-        if firmware:
-            kwargs["sw_version"] = firmware
-        if mac:
+        if unit.firmware:
+            kwargs["sw_version"] = unit.firmware
+        if unit.model:
+            kwargs["model"] = unit.model
+        if unit.mac:
             kwargs["merge_connections"] = {
-                (dr.CONNECTION_NETWORK_MAC, dr.format_mac(mac))
+                (dr.CONNECTION_NETWORK_MAC, dr.format_mac(unit.mac))
             }
         if kwargs:
-            device_registry.async_update_device(hub.id, **kwargs)
+            device_registry.async_update_device(device.id, **kwargs)
 
-    controller.set_extended_info_callback(_update_hub_extended)
+    controller.set_extended_info_callback(_update_unit_extended)
+
+    @callback
+    def _handle_stack(units: list[UnitInfo], primary_unit_id: int | None) -> None:
+        """Auto-detect a newly-stacked expansion amp and add its zones/unit."""
+        discovered_zones = {z for u in units for z in u.zones}
+        cfg_zones = {z[ZONE_KEY] for z in get_zones(entry)}
+        cfg_units = {u[UNIT_KEY] for u in get_units(entry)}
+        if not cfg_units and primary_unit_id is not None:
+            # Legacy single-amp config without unit info: the primary is implicit,
+            # so a lone primary doesn't look like a change (no needless reload).
+            cfg_units = {primary_unit_id}
+        discovered_units = {u.unit_id for u in units}
+        # Only react to growth (an amp added); never drop zones on a partial read.
+        if discovered_zones <= cfg_zones and discovered_units <= cfg_units:
+            return
+        if not discovered_zones >= cfg_zones:
+            return
+        _LOGGER.info(
+            "Axium: expansion detected — %d zones across %d amp(s); reloading",
+            len(discovered_zones),
+            len(units),
+        )
+        hass.config_entries.async_update_entry(
+            entry,
+            data={
+                **entry.data,
+                CONF_ZONES: zones_from_units(units, get_zones(entry)),
+                CONF_UNITS: units_config(units, primary_unit_id),
+            },
+        )
+        hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
+
+    controller.set_stack_callback(_handle_stack)
 
     try:
         await controller.async_start()

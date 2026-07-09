@@ -30,6 +30,7 @@ from .const import (
     CONF_ALARMS,
     CONF_PRESETS,
     CONF_SOURCES,
+    CONF_UNITS,
     CONF_ZONES,
     DEFAULT_NAME,
     DEFAULT_PORT,
@@ -41,15 +42,22 @@ from .const import (
     RESP_DEVICE_INFO,
     ZONE_ALL,
 )
-from .controller import AxiumDeviceInfo, parse_device_info, parse_source_name
+from .controller import (
+    AxiumDeviceInfo,
+    UnitInfo,
+    parse_device_info,
+    parse_source_name,
+)
 from .helpers import (
     default_sources,
     get_advanced,
     get_alarms,
     get_presets,
     get_sources,
+    get_zones,
     sources_from_detection,
-    zones_from_numbers,
+    units_config,
+    zones_from_units,
 )
 
 _WEEKDAYS = [
@@ -67,14 +75,16 @@ _PROBE_TIMEOUT = 6.0
 _STACK_GRACE = 1.5
 
 
-async def _async_probe_amplifier(host: str, port: int) -> AxiumDeviceInfo | None:
+async def _async_probe_amplifier(
+    host: str, port: int
+) -> tuple[list[UnitInfo], int | None, list[dict]] | None:
     """Connect, confirm an Axium amplifier is present, and discover its layout.
 
     Requests device info (with the zone list) from the whole stack and all
-    source names. Returns the parsed device info (with discovered zones and
-    sources) when an amplifier replies, or ``None`` if nothing answers within
-    the timeout. Raises ``OSError``/``asyncio.TimeoutError`` if the connection
-    cannot open.
+    source names. Returns ``(units, primary_unit_id, sources)`` — one UnitInfo
+    per amp in the stack (with its zones), which unit is primary, and the
+    detected sources — or ``None`` if nothing answers within the timeout. Raises
+    ``OSError``/``asyncio.TimeoutError`` if the connection cannot open.
     """
     reader, writer = await asyncio.wait_for(
         asyncio.open_connection(host, port), timeout=_CONNECT_TIMEOUT
@@ -87,8 +97,8 @@ async def _async_probe_amplifier(host: str, port: int) -> AxiumDeviceInfo | None
         writer.write(protocol.encode(CMD_SOURCE_NAME, ZONE_ALL))  # request all names
         await writer.drain()
 
-        device_info: AxiumDeviceInfo | None = None
-        all_zones: set[int] = set()
+        units: dict[int, UnitInfo] = {}
+        primary_unit_id: int | None = None
         sources: list[dict] = []
         end = loop.time() + _PROBE_TIMEOUT
         while True:
@@ -105,23 +115,30 @@ async def _async_probe_amplifier(host: str, port: int) -> AxiumDeviceInfo | None
             if frame is None or len(frame) < 2:
                 continue
             if frame[0] == RESP_DEVICE_INFO:
-                info = parse_device_info(frame[2:]) or AxiumDeviceInfo()
-                all_zones.update(info.zones)
-                if device_info is None:
-                    # First reply (the directly-connected amp) labels the hub;
-                    # wait a short grace for other stack members and names.
-                    device_info = info
+                info = parse_device_info(frame[2:])
+                if info is None or info.unit_id is None:
+                    continue
+                if primary_unit_id is None:
+                    # First reply is the directly-connected/primary amp; wait a
+                    # short grace for other stack members and source names.
+                    primary_unit_id = info.unit_id
                     end = min(end, loop.time() + _STACK_GRACE)
+                unit = units.setdefault(
+                    info.unit_id, UnitInfo(unit_id=info.unit_id)
+                )
+                unit.model = info.model
+                unit.model_code = info.model_code
+                unit.firmware_major = info.firmware_major
+                if info.zones:
+                    unit.zones = sorted(set(unit.zones) | set(info.zones))
             elif frame[0] == CMD_SOURCE_NAME:
                 parsed = parse_source_name(frame[2:])
                 if parsed is not None:
                     sources.append(parsed)
 
-        if device_info is None:
+        if not units:
             return None
-        device_info.zones = sorted(all_zones)
-        device_info.sources = sources
-        return device_info
+        return list(units.values()), primary_unit_id, sources
     finally:
         writer.close()
         try:
@@ -145,30 +162,31 @@ class AxiumConfigFlow(ConfigFlow, domain=DOMAIN):
             port = user_input[CONF_PORT]
             await self.async_set_unique_id(f"{host}:{port}")
             self._abort_if_unique_id_configured()
+            result = None
             try:
-                device_info = await _async_probe_amplifier(host, port)
+                result = await _async_probe_amplifier(host, port)
             except (OSError, asyncio.TimeoutError):
                 errors["base"] = "cannot_connect"
             else:
-                if device_info is None:
+                if result is None:
                     errors["base"] = "no_amplifier"
             if not errors:
-                # Discover every zone the amplifier (stack) reports — or a
-                # sensible default — and the enabled sources with their names.
-                numbers = device_info.zones or list(
-                    range(1, DEFAULT_ZONE_COUNT + 1)
+                units, primary_unit_id, detected = result
+                # Every zone the stack reports (with its owning amp), or a
+                # sensible default; plus the enabled sources with their names.
+                zones = zones_from_units(units) or zones_from_numbers(
+                    list(range(1, DEFAULT_ZONE_COUNT + 1))
                 )
-                sources = (
-                    sources_from_detection(device_info.sources) or default_sources()
-                )
+                sources = sources_from_detection(detected) or default_sources()
                 return self.async_create_entry(
                     title=user_input[CONF_NAME],
                     data={
                         CONF_HOST: host,
                         CONF_PORT: port,
                         CONF_NAME: user_input[CONF_NAME],
-                        CONF_ZONES: zones_from_numbers(numbers),
+                        CONF_ZONES: zones,
                         CONF_SOURCES: sources,
+                        CONF_UNITS: units_config(units, primary_unit_id),
                     },
                 )
 
@@ -204,16 +222,25 @@ class AxiumConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             host = user_input[CONF_HOST]
             port = user_input[CONF_PORT]
+            result = None
             try:
-                device_info = await _async_probe_amplifier(host, port)
+                result = await _async_probe_amplifier(host, port)
             except (OSError, asyncio.TimeoutError):
                 errors["base"] = "cannot_connect"
             else:
-                if device_info is None:
+                if result is None:
                     errors["base"] = "no_amplifier"
             if not errors:
+                units, primary_unit_id, _ = result
+                updates = {CONF_HOST: host, CONF_PORT: port}
+                # Re-detect the stack so a newly-stacked expansion amp's zones
+                # and unit are added, preserving existing zone names.
+                zones = zones_from_units(units, get_zones(entry))
+                if zones:
+                    updates[CONF_ZONES] = zones
+                    updates[CONF_UNITS] = units_config(units, primary_unit_id)
                 return self.async_update_reload_and_abort(
-                    entry, data_updates={CONF_HOST: host, CONF_PORT: port}
+                    entry, data_updates=updates
                 )
 
         current = user_input or entry.data

@@ -18,6 +18,7 @@ from .const import (
     CONF_ALARMS,
     CONF_PRESETS,
     CONF_SOURCES,
+    CONF_UNITS,
     CONF_ZONES,
     DEFAULT_SOURCE_COUNT,
     ID_KEY,
@@ -25,6 +26,7 @@ from .const import (
     SOURCE_AIRPLAY_BYTE,
     SOURCE_BYTE_TO_NAME,
     SOURCE_NUMBER_TO_BYTE,
+    UNIT_KEY,
     ZONE_KEY,
 )
 
@@ -62,13 +64,19 @@ def parse_zone_spec(raw: Any) -> list[dict[str, Any]]:
             zones.append({ZONE_KEY: zone, NAME_KEY: name})
     elif isinstance(raw, list):
         for item in raw:
+            unit_id = None
             if isinstance(item, dict):
                 zone = int(item[ZONE_KEY])
                 name = str(item.get(NAME_KEY) or default_zone_name(zone))
+                if item.get(UNIT_KEY) is not None:
+                    unit_id = int(item[UNIT_KEY])
             else:
                 zone = int(item)
                 name = default_zone_name(zone)
-            zones.append({ZONE_KEY: zone, NAME_KEY: name})
+            entry = {ZONE_KEY: zone, NAME_KEY: name}
+            if unit_id is not None:
+                entry[UNIT_KEY] = unit_id
+            zones.append(entry)
     else:
         raise ValueError("unsupported zone specification")
 
@@ -91,6 +99,46 @@ def zones_from_numbers(numbers: list[int]) -> list[dict[str, Any]]:
     """Build default-named zone dicts from a list of zone numbers."""
     unique = sorted({int(n) for n in numbers if ZONE_MIN <= int(n) <= ZONE_MAX})
     return [{ZONE_KEY: n, NAME_KEY: default_zone_name(n)} for n in unique]
+
+
+def zones_from_units(
+    units: list[Any], existing_zones: list[dict[str, Any]] | None = None
+) -> list[dict[str, Any]]:
+    """Build zone dicts (tagged with their amp's unit_id) from stack units.
+
+    ``units`` items expose ``unit_id`` and ``zones``. Existing zone names are
+    preserved so a re-scan (e.g. after stacking a second amp) keeps user names.
+    """
+    name_by_zone = {
+        int(z[ZONE_KEY]): z.get(NAME_KEY) for z in (existing_zones or [])
+    }
+    result: list[dict[str, Any]] = []
+    for unit in units:
+        for zone in sorted(unit.zones):
+            if not ZONE_MIN <= zone <= ZONE_MAX:
+                continue
+            result.append(
+                {
+                    ZONE_KEY: zone,
+                    NAME_KEY: name_by_zone.get(zone) or default_zone_name(zone),
+                    UNIT_KEY: unit.unit_id,
+                }
+            )
+    return sorted(result, key=lambda z: z[ZONE_KEY])
+
+
+def units_config(units: list[Any], primary_unit_id: int | None) -> list[dict[str, Any]]:
+    """Build the CONF_UNITS list [{unit_id, primary}] from stack units."""
+    return [
+        {UNIT_KEY: unit.unit_id, "primary": unit.unit_id == primary_unit_id}
+        for unit in units
+    ]
+
+
+def get_units(entry: ConfigEntry) -> list[dict[str, Any]]:
+    """Return the configured stack units [{unit_id, primary}] (may be empty)."""
+    raw = entry.options.get(CONF_UNITS) or entry.data.get(CONF_UNITS)
+    return list(raw) if raw else []
 
 
 def get_zones(entry: ConfigEntry) -> list[dict[str, Any]]:

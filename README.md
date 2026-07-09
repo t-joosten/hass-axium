@@ -181,6 +181,16 @@ follows the total zone count (16 zones → up to 8 groups). Zones across the ful
 0–95 range are supported (the higher zone numbers use the protocol's extended
 zone-byte encoding).
 
+**Each amplifier is its own device.** The connected amp is the hub; every
+expansion amp appears as a **separate device nested under it**, with its own
+**firmware, model, temperature, peak temperature and MAC**, and its zones nested
+under it. So you can see each amp's health independently.
+
+**Adding a second amp later:** stack it and it's picked up **automatically** —
+the integration notices the new unit, adds its zones and device, and reloads.
+(If it doesn't appear, open the integration → **Reconfigure** to re-scan; your
+existing zone names are kept.)
+
 ### Renaming zones
 
 Each zone is its own device, so rename one with the **pencil icon on the zone's

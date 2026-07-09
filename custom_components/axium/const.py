@@ -30,6 +30,7 @@ DEFAULT_NAME: Final = "Axium"
 # Configuration / option keys.
 CONF_ZONES: Final = "zones"
 CONF_SOURCES: Final = "sources"
+CONF_UNITS: Final = "units"  # amplifiers in the stack: [{unit_id, primary}]
 CONF_ADVANCED: Final = "advanced"  # expose risky level/gain controls
 CONF_PRESETS: Final = "presets"  # named zone sets a source card can activate
 CONF_ALARMS: Final = "alarms"  # scheduled wake-to-music alarms
@@ -45,6 +46,7 @@ SIGNAL_ALARM_UPDATE: Final = f"{DOMAIN}_alarm_update"  # + "_{entry_id}"
 ZONE_KEY: Final = "zone"
 NAME_KEY: Final = "name"
 ID_KEY: Final = "id"
+UNIT_KEY: Final = "unit_id"  # the amp unit a zone belongs to (stack support)
 
 # Axium command bytes (see AxiumCommsProtocol.pdf, section 2).
 CMD_POWER: Final = 0x01

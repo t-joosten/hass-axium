@@ -161,8 +161,26 @@ class AxiumDeviceInfo:
     sources: list[dict] = field(default_factory=list)  # {id, name, enabled}
 
 
+@dataclass
+class UnitInfo:
+    """Per-unit identity + diagnostics for one amplifier in a stack."""
+
+    unit_id: int
+    device_type: str | None = None
+    model: str | None = None
+    model_code: int | None = None
+    firmware_major: int | None = None
+    firmware: str | None = None  # full x.y.z from extended info
+    mac: str | None = None
+    temperature: int | None = None
+    peak_temperature: int | None = None
+    zones: list[int] = field(default_factory=list)
+
+
 CallbackType = Callable[[], None]
 DeviceInfoCallback = Callable[[AxiumDeviceInfo], None]
+UnitInfoCallback = Callable[["UnitInfo"], None]
+StackCallback = Callable[[list["UnitInfo"], "int | None"], None]
 
 
 def parse_device_info(data: bytes) -> AxiumDeviceInfo | None:
@@ -255,10 +273,18 @@ class AxiumController:
         # Zones for which the amp's special-features bytes (0x0C) are known, so
         # a loudness/mono toggle never clobbers other bits it hasn't read yet.
         self._special_known: set[int] = set()
-        # Extended device info (firmware string, MAC) callback + cache.
-        self._extended_info_callback: Callable[[str | None, str | None], None] | None = (
-            None
-        )
+        # Per-unit identity + diagnostics for every amp in the stack, keyed by
+        # unit id; the directly-connected unit is the primary (its device is the
+        # hub, expansion amps nest under it).
+        self._units: dict[int, UnitInfo] = {}
+        self._primary_unit_id: int | None = None
+        # Fired per unit when its extended info (firmware/temp/MAC) is read.
+        self._extended_info_callback: UnitInfoCallback | None = None
+        # Fired (debounced) when the discovered stack settles, so HA can add a
+        # newly-stacked amp's zones/device.
+        self._stack_callback: StackCallback | None = None
+        self._stack_check_handle: asyncio.TimerHandle | None = None
+        # Primary unit's values, mirrored for the legacy single-value accessors.
         self._firmware: str | None = None
         self._mac: str | None = None
         # Now-playing state keyed by media source data byte.
@@ -296,6 +322,43 @@ class AxiumController:
     def set_device_info_callback(self, callback: DeviceInfoCallback) -> None:
         """Register a callback invoked when device identity is reported."""
         self._device_info_callback = callback
+
+    def set_stack_callback(self, callback: StackCallback) -> None:
+        """Register a callback fired (debounced) when the stack settles."""
+        self._stack_callback = callback
+
+    def _schedule_stack_check(self) -> None:
+        """Debounce: fire the stack callback ~2s after the last unit is seen."""
+        if self._stack_callback is None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if self._stack_check_handle is not None:
+            self._stack_check_handle.cancel()
+        self._stack_check_handle = loop.call_later(2.0, self._run_stack_check)
+
+    def _run_stack_check(self) -> None:
+        self._stack_check_handle = None
+        if self._stack_callback is not None:
+            self._stack_callback(self.units(), self._primary_unit_id)
+
+    def units(self) -> list[UnitInfo]:
+        """All amplifier units in the stack, primary first then by unit id."""
+        primary = self._primary_unit_id
+        return sorted(
+            self._units.values(), key=lambda u: (u.unit_id != primary, u.unit_id)
+        )
+
+    def unit(self, unit_id: int) -> UnitInfo | None:
+        """Return a specific unit's info, if known."""
+        return self._units.get(unit_id)
+
+    @property
+    def primary_unit_id(self) -> int | None:
+        """The directly-connected (primary) unit's id."""
+        return self._primary_unit_id
 
     @property
     def available(self) -> bool:
@@ -335,6 +398,9 @@ class AxiumController:
     async def async_stop(self) -> None:
         """Close the connection and stop the background loop."""
         self._closing = True
+        if self._stack_check_handle is not None:
+            self._stack_check_handle.cancel()
+            self._stack_check_handle = None
         if self._run_task:
             self._run_task.cancel()
             try:
@@ -512,13 +578,23 @@ class AxiumController:
             self._notify_diagnostics()
             return
         elif command == RESP_EXTENDED_DEVICE_INFO and len(data) >= 9:
-            self._temperature = protocol.from_signed_byte(data[7])
-            self._peak_temperature = protocol.from_signed_byte(data[8])
-            self._firmware = f"{data[4]}.{data[5]}.{data[6]}"
+            uid = data[2] << 8 | data[3]  # 16-bit unit id (low half of the 32-bit)
+            unit = self._units.get(uid)
+            if unit is None:
+                unit = UnitInfo(unit_id=uid)
+                self._units[uid] = unit
+            unit.temperature = protocol.from_signed_byte(data[7])
+            unit.peak_temperature = protocol.from_signed_byte(data[8])
+            unit.firmware = f"{data[4]}.{data[5]}.{data[6]}"
             if len(data) >= 19:
-                self._mac = ":".join(f"{b:02X}" for b in data[13:19])
+                unit.mac = ":".join(f"{b:02X}" for b in data[13:19])
+            if self._primary_unit_id in (None, uid):
+                self._temperature = unit.temperature
+                self._peak_temperature = unit.peak_temperature
+                self._firmware = unit.firmware
+                self._mac = unit.mac
             if self._extended_info_callback is not None:
-                self._extended_info_callback(self._firmware, self._mac)
+                self._extended_info_callback(unit)
             self._notify_diagnostics()
             return
         elif (
@@ -540,21 +616,37 @@ class AxiumController:
         version, device-specific model code, then a two-byte unit ID.
         """
         info = parse_device_info(data)
-        if info is None:
+        if info is None or info.unit_id is None:
             return
         self._device_info = info
+        if self._primary_unit_id is None:
+            self._primary_unit_id = info.unit_id
+        unit = self._units.get(info.unit_id)
+        if unit is None:
+            unit = UnitInfo(unit_id=info.unit_id)
+            self._units[info.unit_id] = unit
+        unit.device_type = info.device_type
+        unit.model = info.model
+        unit.model_code = info.model_code
+        unit.firmware_major = info.firmware_major
+        if info.zones:
+            unit.zones = list(info.zones)
         _LOGGER.debug(
-            "Axium device info: type=%s model=%s fw=%s",
-            info.device_type,
+            "Axium device info: unit=0x%04X model=%s fw=%s zones=%s",
+            info.unit_id,
             info.model or f"code 0x{info.model_code:02X}",
             info.firmware_major,
+            info.zones,
         )
         if self._device_info_callback is not None:
             self._device_info_callback(info)
-        # Now that the unit id is known, fetch unit-scoped details.
-        asyncio.ensure_future(self._request_auto_power())
-        asyncio.ensure_future(self.async_request_extended_info())
-        asyncio.ensure_future(self._request_network_config())
+        # Per-unit extended info (firmware/temp/MAC). Auto-power and network are
+        # system-wide, so only the primary unit requests them.
+        asyncio.ensure_future(self.async_request_extended_info(info.unit_id))
+        if info.unit_id == self._primary_unit_id:
+            asyncio.ensure_future(self._request_auto_power())
+            asyncio.ensure_future(self._request_network_config())
+        self._schedule_stack_check()
 
     def _handle_media_status(self, data: bytes) -> None:
         """Update now-playing state from a Media Status (0x3E) notification."""
@@ -1036,11 +1128,21 @@ class AxiumController:
             return None
         return ".".join(str(b) for b in self._network.ip)
 
-    async def async_request_extended_info(self) -> None:
-        """Request extended device info (temperature etc.) for the unit."""
-        unit = self._unit_bytes()
-        if unit is not None:
-            await self.async_send(CMD_REQUEST_EXTENDED_INFO, ZONE_ALL, unit[0], unit[1])
+    async def async_request_extended_info(self, unit_id: int | None = None) -> None:
+        """Request extended device info (firmware/temperature/MAC) for a unit.
+
+        Defaults to the primary/connected unit; pass a unit id to poll a stacked
+        expansion amp.
+        """
+        uid = unit_id if unit_id is not None else self._primary_unit_id
+        if uid is None:
+            unit = self._unit_bytes()
+            if unit is None:
+                return
+            uid = unit[0] << 8 | unit[1]
+        await self.async_send(
+            CMD_REQUEST_EXTENDED_INFO, ZONE_ALL, (uid >> 8) & 0xFF, uid & 0xFF
+        )
 
     async def async_request_zone_state(self, zone: int) -> None:
         """Read a zone's power, mute, volume and source (no data = request)."""

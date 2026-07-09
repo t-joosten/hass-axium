@@ -44,6 +44,7 @@ from .const import (
     MUTE_OFF,
     MUTE_ON,
     NAME_KEY,
+    UNIT_KEY,
     POWER_OFF,
     POWER_ON,
     SOURCE_BYTE_TO_NAME,
@@ -51,7 +52,7 @@ from .const import (
     ZONE_KEY,
 )
 from .controller import AxiumController
-from .helpers import get_presets, get_sources, get_zones
+from .helpers import get_presets, get_sources, get_units, get_zones
 from .protocol import level_to_volume
 
 _LOGGER = logging.getLogger(__name__)
@@ -89,6 +90,15 @@ async def async_setup_entry(
     source_ids = [item[ID_KEY] for item in sources]
     seed_names = {item[ID_KEY]: item[NAME_KEY] for item in sources}
     presets = get_presets(entry)
+    units = get_units(entry)
+    primary_uid = next((u[UNIT_KEY] for u in units if u.get("primary")), None)
+
+    def _via(unit_id: int | None) -> tuple[str, str]:
+        """The device a zone nests under — its owning amp (primary = the hub)."""
+        if unit_id is None or not units or unit_id == primary_uid:
+            return (DOMAIN, entry.entry_id)
+        return (DOMAIN, f"{entry.entry_id}_unit_{unit_id}")
+
     async_add_entities(
         AxiumZone(
             controller,
@@ -98,6 +108,7 @@ async def async_setup_entry(
             source_ids,
             seed_names,
             presets,
+            _via(item.get(UNIT_KEY)),
         )
         for item in get_zones(entry)
     )
@@ -121,6 +132,7 @@ class AxiumZone(MediaPlayerEntity):
         source_ids: list[int],
         seed_names: dict[int, str],
         presets: list[dict] | None = None,
+        via_device: tuple[str, str] | None = None,
     ) -> None:
         """Initialise the zone entity."""
         self._controller = controller
@@ -136,7 +148,7 @@ class AxiumZone(MediaPlayerEntity):
             name=name,
             manufacturer="Axium",
             model="Zone",
-            via_device=(DOMAIN, entry.entry_id),
+            via_device=via_device or (DOMAIN, entry.entry_id),
         )
 
     async def async_added_to_hass(self) -> None:
