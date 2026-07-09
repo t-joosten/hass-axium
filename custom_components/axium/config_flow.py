@@ -190,6 +190,47 @@ class AxiumConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="user", data_schema=schema, errors=errors
         )
 
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Change an existing entry's connection details (host/port).
+
+        Use this when the amplifier's IP or port changes (e.g. a new DHCP
+        lease after a reboot) instead of deleting and re-adding the entry —
+        the discovered zones, sources and options are preserved.
+        """
+        entry = self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            host = user_input[CONF_HOST]
+            port = user_input[CONF_PORT]
+            try:
+                device_info = await _async_probe_amplifier(host, port)
+            except (OSError, asyncio.TimeoutError):
+                errors["base"] = "cannot_connect"
+            else:
+                if device_info is None:
+                    errors["base"] = "no_amplifier"
+            if not errors:
+                return self.async_update_reload_and_abort(
+                    entry, data_updates={CONF_HOST: host, CONF_PORT: port}
+                )
+
+        current = user_input or entry.data
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_HOST, default=current.get(CONF_HOST, "")
+                ): cv.string,
+                vol.Required(
+                    CONF_PORT, default=current.get(CONF_PORT, DEFAULT_PORT)
+                ): cv.port,
+            }
+        )
+        return self.async_show_form(
+            step_id="reconfigure", data_schema=schema, errors=errors
+        )
+
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> AxiumOptionsFlow:

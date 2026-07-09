@@ -9,6 +9,14 @@
           "port": "Port",
           "name": "Name"
         }
+      },
+      "reconfigure": {
+        "title": "Axium Amplifier connection",
+        "description": "Update the address the integration uses to reach the amplifier (TCP 17037). Use this if the amplifier's IP address or port changed — your zones, sources and settings are kept.",
+        "data": {
+          "host": "Host",
+          "port": "Port"
+        }
       }
     },
     "error": {
@@ -16,7 +24,8 @@
       "no_amplifier": "Connected, but no Axium amplifier responded at this address. Check that this is an Axium device and that it is powered on."
     },
     "abort": {
-      "already_configured": "This amplifier is already configured."
+      "already_configured": "This amplifier is already configured.",
+      "reconfigure_successful": "Connection details updated."
     }
   },
   "options": {

@@ -60,8 +60,19 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
 - **Zone polling**: the amp broadcasts changes made by *other TCP controllers* (verified:
   a second client's source change reaches HA), but front-panel/IR changes aren't reliably
   pushed. `__init__` schedules `async_track_time_interval` (30s) → `controller.async_poll_zones`
-  (re-reads power/mute/volume/source for every known zone) so on-amp changes reach HA and the
-  cards. Poll re-requests are cheap and cause no state write when unchanged.
+  (re-reads power/mute/volume/source for every known zone, **plus source names** so an on-amp
+  rename shows without a reconnect) so on-amp changes reach HA and the cards. Firmware/temp come
+  from the temperature sensor's own extended-info poll. Poll re-requests are cheap and cause no
+  state write when unchanged.
+- **Reconfigure flow**: `config_flow.async_step_reconfigure` lets the user edit host/port on an
+  existing entry (Settings → the entry → Reconfigure) without losing discovered zones/sources —
+  needed because the ICS-bridge amp IP changes on reboot ([[axium-amp-network-setup]]). It
+  re-probes to validate, then `async_update_reload_and_abort(data_updates=…)`.
+- **AirPlay is hardware, not firmware**: the user's **AX-800-X** has NO internal media/AirPlay
+  module — verified on 5.6.0, it reports only physical inputs (`device=0x00`, none in the
+  `0x10+` media range) and doesn't answer media-status. Only the **AX-800-DAV** has the AirPlay
+  receiver. A source *named* "Airplay" is just a relabeled physical input. Media bytes:
+  `SOURCE_AIRPLAY_BYTE=0x10`, `SOURCE_MEDIA_PLAYER_BYTE=0x12`, `MEDIA_SOURCE_BYTES`.
 - **Zone rename → amp**: renaming a zone's device (HA pencil) is mirrored to the amp.
   `__init__` listens for `dr.EVENT_DEVICE_REGISTRY_UPDATED`; when a zone device's
   `name_by_user` changes it calls `async_set_zone_name` (`CMD_ZONE_NAME` 0x1C, ~15-byte

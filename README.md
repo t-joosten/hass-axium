@@ -144,6 +144,11 @@ identify command, or a firewall is blocking the reply.
    - **Port** – defaults to `17037`.
    - **Name** – a friendly name for the amplifier.
 
+> **If the amplifier's IP later changes** (e.g. a new DHCP lease after a reboot),
+> you don't need to remove the integration — open its entry and choose
+> **Reconfigure** to update the host/port. Your zones, sources and settings are
+> kept. A DHCP reservation on your router avoids the change in the first place.
+
 That's it — **all of the amplifier's zones are added automatically.** On
 connection the integration asks the amplifier which zones it has and creates a
 `media_player` for each one (named `Zone N` by default), so every zone is
