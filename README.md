@@ -186,10 +186,17 @@ expansion amp appears as a **separate device nested under it**, with its own
 **firmware, model, temperature, peak temperature and MAC**, and its zones nested
 under it. So you can see each amp's health independently.
 
-**Adding a second amp later:** stack it and it's picked up **automatically** —
-the integration notices the new unit, adds its zones and device, and reloads.
-(If it doesn't appear, open the integration → **Reconfigure** to re-scan; your
-existing zone names are kept.)
+**Adding a second amp later:** stack it (both amps on the **same network** — these
+amps stack over Ethernet, not the old expansion bus) and it's picked up
+**automatically** — the integration discovers the whole stack, adds the new amp's
+zones and device, and reloads.
+
+**Zone conflicts are auto-resolved.** A factory expansion amp also claims zones
+1–8, which collides with the first amp. The integration detects the clash and
+**reassigns the expansion amp to a free range** (e.g. 9–16) for you — no app or
+DIP switches needed. It re-applies on each connect, so it's self-healing even if
+an amp forgets the setting across a reboot. (Your first/primary amp is never
+touched.)
 
 ### Renaming zones
 

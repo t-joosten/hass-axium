@@ -96,6 +96,17 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   when a new unit/zone appears (guarded to add-only; primary implicit for legacy config → no
   spurious reload). The **reconfigure flow re-scans** the stack too. Simulator: `--peer-zones`
   gives a 2nd unit; its 0x39 handler now replies **per requested unit** (distinct temp/fw/MAC).
+- **Stack discovery + zone-conflict auto-resolve** (verified on real 2-amp hardware): the runtime
+  `_request_device_info` must **NOT** set `NO_EXPANSION_REPLY` (0x01) — that flag makes real amps
+  answer only for the connected unit (the sim ignores it, which hid the bug); use
+  `REPLY_ON_PORT_ONLY|LIST_ZONES` (0x06) so the connected amp relays to and surfaces every stacked
+  unit. A factory expansion amp also claims zones 1-8 (clash), so units won't merge; the controller
+  auto-resolves in `_run_stack_check` → `_find_zone_conflict`/`_resolve_zone_conflict`: reassign the
+  non-primary clashing unit to a free block via `async_set_zone_assignment` (**`CMD_ZONE_ASSIGN`
+  0x2E** = dev id + zone list; **relays across the stack** — send it to the connected amp and it
+  reaches the target), then re-discover. `_resolved_units` guards against loops; the primary is never
+  touched. Self-healing: re-applies each connect (0x2E may not persist a reboot). Sim handles 0x2E
+  (updates `peer_zone_numbers`); test the clash with `--peer-zones "1=..,..,8=.."`.
 - **Static IP switch** (`AxiumStaticIPSwitch`, switch.py): reads the amp's network config at connect
   (`controller._request_network_config` → `_handle_network_settings` caches `NetworkConfig`); the hub
   switch toggles `async_set_network_static` which re-writes the *current* IP/subnet/DNS/router with the

@@ -50,6 +50,7 @@ from .const import (
     CMD_SPECIAL_FEATURES,
     CMD_TREBLE,
     CMD_VOLUME,
+    CMD_ZONE_ASSIGN,
     CMD_ZONE_GAIN,
     CMD_ZONE_NAME,
     DEVICE_INFO_LIST_ZONES,
@@ -278,6 +279,9 @@ class AxiumController:
         # hub, expansion amps nest under it).
         self._units: dict[int, UnitInfo] = {}
         self._primary_unit_id: int | None = None
+        # Expansion units we've already auto-reassigned this session, so a zone
+        # conflict is resolved at most once (never loops).
+        self._resolved_units: set[int] = set()
         # Fired per unit when its extended info (firmware/temp/MAC) is read.
         self._extended_info_callback: UnitInfoCallback | None = None
         # Fired (debounced) when the discovered stack settles, so HA can add a
@@ -341,8 +345,57 @@ class AxiumController:
 
     def _run_stack_check(self) -> None:
         self._stack_check_handle = None
+        # Auto-resolve a zone conflict (a stacked amp claiming zones another amp
+        # already owns) by reassigning the non-primary unit to a free range, then
+        # re-discovering. Only surface the stack once it's clean.
+        conflict = self._find_zone_conflict()
+        if conflict is not None:
+            asyncio.ensure_future(self._resolve_zone_conflict(*conflict))
+            return
         if self._stack_callback is not None:
             self._stack_callback(self.units(), self._primary_unit_id)
+
+    def _find_zone_conflict(self) -> tuple[int, list[int]] | None:
+        """Return (unit_id, free_zones) for a non-primary unit whose zones clash.
+
+        Walks units primary-first, accumulating claimed zones; the first
+        non-primary unit that overlaps is proposed a fresh block of the same size
+        just above the highest claimed zone. Units already reassigned this session
+        are skipped so it never loops.
+        """
+        claimed: set[int] = set()
+        for unit in self.units():
+            zones = set(unit.zones)
+            if unit.unit_id == self._primary_unit_id or not zones:
+                claimed |= zones
+                continue
+            if zones & claimed and unit.unit_id not in self._resolved_units:
+                start = (max(claimed) + 1) if claimed else 1
+                free = list(range(start, start + len(unit.zones)))
+                if free and free[-1] <= 95:
+                    return unit.unit_id, free
+            claimed |= zones
+        return None
+
+    async def _resolve_zone_conflict(self, unit_id: int, zones: list[int]) -> None:
+        """Reassign a clashing expansion unit to ``zones``, then re-discover."""
+        self._resolved_units.add(unit_id)
+        _LOGGER.warning(
+            "Axium: expansion amp 0x%04X clashes on zones; reassigning to %s",
+            unit_id,
+            zones,
+        )
+        await self.async_set_zone_assignment(unit_id, zones)
+        if unit_id in self._units:
+            self._units[unit_id].zones = []  # drop stale cache before re-reading
+        await asyncio.sleep(1.0)  # let the amp apply and settle
+        await self._request_device_info()
+
+    async def async_set_zone_assignment(self, unit_id: int, zones: list[int]) -> None:
+        """Set which zones a unit owns (command 0x2E); relayed across the stack."""
+        await self.async_send(
+            CMD_ZONE_ASSIGN, ZONE_ALL, (unit_id >> 8) & 0xFF, unit_id & 0xFF, *zones
+        )
 
     def units(self) -> list[UnitInfo]:
         """All amplifier units in the stack, primary first then by unit id."""
@@ -1194,11 +1247,15 @@ class AxiumController:
         await self.async_send(CMD_MEDIA_STATUS_REQUEST, ZONE_ALL, source, 0x07, 0xE1)
 
     async def _request_device_info(self) -> None:
-        """Ask the directly-connected amplifier to identify itself (0x14)."""
+        """Ask the whole amplifier stack to identify itself (0x14).
+
+        Dropping NO_EXPANSION_REPLY lets the connected amp relay the request to
+        every stacked/expansion unit so we discover them all (real hardware
+        otherwise answers only for the connected amp; the simulator ignores the
+        flag). REPLY_ON_PORT_ONLY keeps the replies on this connection.
+        """
         await self.async_send(
             CMD_REQUEST_DEVICE_INFO,
             ZONE_ALL,
-            DEVICE_INFO_NO_EXPANSION_REPLY
-            | DEVICE_INFO_REPLY_ON_PORT_ONLY
-            | DEVICE_INFO_LIST_ZONES,
+            DEVICE_INFO_REPLY_ON_PORT_ONLY | DEVICE_INFO_LIST_ZONES,
         )

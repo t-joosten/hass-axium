@@ -82,6 +82,7 @@ CMD_ZONE_NAME: Final = 0x1C
 CMD_SOURCE_NAME: Final = 0x29  # Source Name and Options (report/request/set)
 CMD_LINK_ZONES: Final = 0x30
 CMD_ZONE_NAME_REQUEST: Final = 0x38
+CMD_ZONE_ASSIGN: Final = 0x2E  # set which zones a unit owns: dev id + zone list
 CMD_MEDIA_CONTROL: Final = 0x3D
 CMD_MEDIA_STATUS: Final = 0x3E
 CMD_MEDIA_STATUS_REQUEST: Final = 0x3F

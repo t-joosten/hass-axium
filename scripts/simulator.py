@@ -335,6 +335,15 @@ class Simulator:
             writer.write(encode(0xAF, 0xFF, *self.zones))
             await self._safe_drain(writer)
             return
+        if command == 0x2E and len(data) >= 2:  # Zone assignment (set)
+            dev = data[0] << 8 | data[1]
+            zones = sorted(data[2:])
+            if dev == UNIT_ID:
+                self.own_zone_numbers = zones
+            elif dev == UNIT_ID + 1:
+                self.peer_zone_numbers = zones
+            print(f"   zone assignment: unit 0x{dev:04X} -> zones {zones}")
+            return
         if command == 0x1C and data:  # Zone name set (silent; the client re-reads)
             z = self.zones.get(zone_byte)
             if z:
