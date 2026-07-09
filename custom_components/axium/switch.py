@@ -66,6 +66,7 @@ async def async_setup_entry(
         AxiumSwitch(controller, entry, desc) for desc in SWITCHES
     ]
     entities.append(AxiumAlarmsSwitch(hass, entry))
+    entities.append(AxiumStaticIPSwitch(controller, entry))
     for item in get_zones(entry):
         entities.append(
             AxiumZoneSwitch(controller, entry, item[ZONE_KEY], "loudness", "Loudness", 0, SPECIAL_LOUDNESS_BIT)
@@ -115,6 +116,61 @@ class AxiumAlarmsSwitch(SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disarm all alarms."""
         self._set(False)
+
+
+class AxiumStaticIPSwitch(SwitchEntity):
+    """Pin the amplifier's IP as static (on) or use DHCP (off).
+
+    Turning this on writes the amp's *current* address back as static, so a
+    reboot's new DHCP lease can't move it and break the connection. Turning it
+    off returns to DHCP (which may change the IP).
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_name = "Static IP address"
+    _attr_icon = "mdi:ip-network"
+
+    def __init__(self, controller: AxiumController, entry: ConfigEntry) -> None:
+        """Initialise the static-IP switch on the amplifier hub device."""
+        self._controller = controller
+        self._attr_unique_id = f"{entry.entry_id}_static_ip"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to diagnostic updates (network config arrives there)."""
+        self.async_on_remove(
+            self._controller.register_diagnostic_listener(self._handle_update)
+        )
+
+    @callback
+    def _handle_update(self) -> None:
+        """Write state on change."""
+        self.async_write_ha_state()
+
+    @property
+    def available(self) -> bool:
+        """Available once the amp's network settings have been read."""
+        return self._controller.available and self._controller.network_known
+
+    @property
+    def is_on(self) -> bool:
+        """Return whether the amp is on a static IP."""
+        return self._controller.network_is_static
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose the amp's current IP address."""
+        return {"ip_address": self._controller.network_ip}
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Pin the current IP as static."""
+        await self._controller.async_set_network_static(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Return to DHCP."""
+        await self._controller.async_set_network_static(False)
 
 
 class AxiumZoneSwitch(SwitchEntity):

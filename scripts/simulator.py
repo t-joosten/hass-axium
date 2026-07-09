@@ -158,6 +158,14 @@ class Simulator:
         self.media: dict[int, dict] = {}
         # Per-source gain (source byte -> dB).
         self.source_gain: dict[int, int] = {}
+        # Network settings (0x3A/03): flags byte + IP/subnet/DNS/router. DHCP.
+        self.network = {
+            "flags": 0x02,  # bit1 = time server on, bit0 = 0 => DHCP
+            "ip": [192, 168, 1, 50],
+            "subnet": [255, 255, 255, 0],
+            "dns": [192, 168, 1, 1],
+            "router": [192, 168, 1, 1],
+        }
         # Auto power/standby (0x16), presets (0x1E/0x2A), diagnostics (0x39/0x34).
         self.auto_power_options = 0
         self.auto_power_standby_n = 8  # 2^8 = 256 s
@@ -338,6 +346,26 @@ class Simulator:
             if z:
                 writer.write(encode(0x1C, zone_byte, *z.name.encode("utf-8")))
                 await self._safe_drain(writer)
+            return
+        if command == 0x3A and len(data) >= 3:  # Network settings
+            setting = data[2]
+            if setting == 0x83:  # request IP addresses + flags
+                n = self.network
+                reply = encode(
+                    0x3A, 0xFF, data[0], data[1], 0x03, n["flags"],
+                    *n["ip"], *n["subnet"], *n["dns"], *n["router"],
+                )
+                writer.write(reply)
+                await self._safe_drain(writer)
+                log("-> reply  ", reply, "network settings")
+            elif setting == 0x03 and len(data) >= 4:  # set (silent; client re-reads)
+                self.network["flags"] = data[3]
+                if len(data) >= 20:
+                    self.network["ip"] = list(data[4:8])
+                    self.network["subnet"] = list(data[8:12])
+                    self.network["dns"] = list(data[12:16])
+                    self.network["router"] = list(data[16:20])
+                print(f"   network -> {'static' if data[3] & 1 else 'DHCP'}")
             return
         if command == 0x0C:  # Amplifier special features (loudness/mono)
             for z in self._resolve_zones(zone_byte):

@@ -32,6 +32,10 @@ from .const import (
     CMD_MEDIA_CONTROL,
     CMD_MEDIA_STATUS,
     CMD_MEDIA_STATUS_REQUEST,
+    CMD_NETWORK_SETTINGS,
+    NET_FLAG_STATIC,
+    NET_SETTING_IP_FLAGS,
+    NET_SETTING_IP_FLAGS_REQUEST,
     CMD_MUTE,
     CMD_NO_OP,
     CMD_POWER,
@@ -130,6 +134,17 @@ class MediaState:
     duration: int | None = None
     shuffle: bool = False
     repeat: str = "off"  # off | one | all
+
+
+@dataclass
+class NetworkConfig:
+    """The amplifier's network settings (command 0x3A, setting 0x03)."""
+
+    flags: int = 0
+    ip: bytes = b"\x00\x00\x00\x00"
+    subnet: bytes = b"\x00\x00\x00\x00"
+    dns: bytes = b"\x00\x00\x00\x00"
+    router: bytes = b"\x00\x00\x00\x00"
 
 
 @dataclass
@@ -252,6 +267,9 @@ class AxiumController:
         # status request for a real internal player, e.g. 0x12; not for absent
         # ones like AirPlay 0x10). Exposed as selectable sources.
         self._media_sources: set[int] = set()
+        # The amp's network settings (0x3A/03), read at connect; lets HA pin a
+        # static IP so a reboot's new DHCP lease can't break the connection.
+        self._network: NetworkConfig | None = None
         # Diagnostics / amp-wide state.
         self._diag_listeners: list[CallbackType] = []
         self._temperature: int | None = None
@@ -359,6 +377,7 @@ class AxiumController:
             await self._request_source_names()
             await self._request_preset_names()
             await self._request_media_sources()
+            await self._request_network_config()
             # Re-read known zones' state (covers reconnects; on first connect
             # entities request it themselves as they are added).
             for zone in list(self._zone_entity_ids):
@@ -500,6 +519,13 @@ class AxiumController:
             if self._extended_info_callback is not None:
                 self._extended_info_callback(self._firmware, self._mac)
             self._notify_diagnostics()
+            return
+        elif (
+            command == CMD_NETWORK_SETTINGS
+            and len(data) >= 4
+            and data[2] == NET_SETTING_IP_FLAGS
+        ):
+            self._handle_network_settings(data)
             return
 
         if changed:
@@ -940,6 +966,73 @@ class AxiumController:
             await self.async_send(CMD_AUTO_POWER, ZONE_ALL, unit[0], unit[1])
 
     # -- extended device info / diagnostics ------------------------------
+
+    def _handle_network_settings(self, data: bytes) -> None:
+        """Cache the amp's network settings from a 0x3A/03 report."""
+        ips = data[4:20]
+        self._network = NetworkConfig(
+            flags=data[3],
+            ip=bytes(ips[0:4]),
+            subnet=bytes(ips[4:8]),
+            dns=bytes(ips[8:12]),
+            router=bytes(ips[12:16]),
+        )
+        self._notify_diagnostics()
+
+    async def _request_network_config(self) -> None:
+        """Request the amp's IP addresses and DHCP/static flag."""
+        unit = self._unit_bytes()
+        if unit is not None:
+            await self.async_send(
+                CMD_NETWORK_SETTINGS,
+                ZONE_ALL,
+                unit[0],
+                unit[1],
+                NET_SETTING_IP_FLAGS_REQUEST,
+            )
+
+    async def async_set_network_static(self, static: bool) -> None:
+        """Switch the amp between static IP and DHCP, keeping its addresses.
+
+        Writing static with the *current* addresses pins the working IP so a
+        reboot's new DHCP lease can't move it. Other flag bits (time server etc.)
+        are preserved. Reads the config back afterwards (the amp doesn't echo).
+        """
+        unit = self._unit_bytes()
+        if unit is None or self._network is None:
+            return
+        n = self._network
+        flags = (n.flags | NET_FLAG_STATIC) if static else (n.flags & ~NET_FLAG_STATIC)
+        await self.async_send(
+            CMD_NETWORK_SETTINGS,
+            ZONE_ALL,
+            unit[0],
+            unit[1],
+            NET_SETTING_IP_FLAGS,
+            flags,
+            *n.ip,
+            *n.subnet,
+            *n.dns,
+            *n.router,
+        )
+        await self._request_network_config()
+
+    @property
+    def network_known(self) -> bool:
+        """Whether the amp's network settings have been read."""
+        return self._network is not None
+
+    @property
+    def network_is_static(self) -> bool:
+        """Whether the amp is on a static IP (else DHCP)."""
+        return bool(self._network and self._network.flags & NET_FLAG_STATIC)
+
+    @property
+    def network_ip(self) -> str | None:
+        """The amp's current IP address as a dotted string, if known."""
+        if self._network is None:
+            return None
+        return ".".join(str(b) for b in self._network.ip)
 
     async def async_request_extended_info(self) -> None:
         """Request extended device info (temperature etc.) for the unit."""

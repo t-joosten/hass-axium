@@ -82,6 +82,11 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `83h` reads it back; `08h`/`88h` = AirPlay enable/status (only meaningful on AirPlay hardware).
   **UPnP/DLNA/Pandora/TuneIn are NOT in the protocol** (amp web-UI/app only, at `http://<amp-ip>`);
   media servers (SMB shares) = `0x3B`; media control/status = `0x3D`/`0x3E`/`0x3F`.
+- **Static IP switch** (`AxiumStaticIPSwitch`, switch.py): reads the amp's network config at connect
+  (`controller._request_network_config` → `_handle_network_settings` caches `NetworkConfig`); the hub
+  switch toggles `async_set_network_static` which re-writes the *current* IP/subnet/DNS/router with the
+  static flag set/cleared (pins the working IP; DHCP direction can move the IP → risky over the
+  portproxy). Turn back to DHCP before relocating the amp to another subnet.
 - **Zone rename → amp**: renaming a zone's device (HA pencil) is mirrored to the amp.
   `__init__` listens for `dr.EVENT_DEVICE_REGISTRY_UPDATED`; when a zone device's
   `name_by_user` changes it calls `async_set_zone_name` (`CMD_ZONE_NAME` 0x1C, ~15-byte

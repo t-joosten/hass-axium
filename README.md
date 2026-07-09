@@ -148,6 +148,11 @@ identify command, or a firewall is blocking the reply.
 > you don't need to remove the integration — open its entry and choose
 > **Reconfigure** to update the host/port. Your zones, sources and settings are
 > kept. A DHCP reservation on your router avoids the change in the first place.
+>
+> To stop the IP moving at all, the amplifier device has a **Static IP address**
+> switch: turn it on to pin the amp's current address as static (so a reboot
+> can't hand it a new one). Turn it back to DHCP **before** moving the amp to a
+> different network/subnet, or its fixed address won't be valid there.
 
 That's it — **all of the amplifier's zones are added automatically.** On
 connection the integration asks the amplifier which zones it has and creates a
