@@ -173,8 +173,12 @@ class UnitInfo:
     firmware_major: int | None = None
     firmware: str | None = None  # full x.y.z from extended info
     mac: str | None = None
+    ip: str | None = None  # from extended info
+    manufacture_date: str | None = None  # YYYY-MM-DD from extended info
+    locked: bool | None = None  # settings locked flag
     temperature: int | None = None
     peak_temperature: int | None = None
+    network: "NetworkConfig | None" = None  # per-unit 0x3A network settings
     zones: list[int] = field(default_factory=list)
 
 
@@ -639,8 +643,14 @@ class AxiumController:
             unit.temperature = protocol.from_signed_byte(data[7])
             unit.peak_temperature = protocol.from_signed_byte(data[8])
             unit.firmware = f"{data[4]}.{data[5]}.{data[6]}"
+            if len(data) >= 13:
+                unit.ip = ".".join(str(b) for b in data[9:13])
             if len(data) >= 19:
                 unit.mac = ":".join(f"{b:02X}" for b in data[13:19])
+            if len(data) >= 22 and 1 <= data[20] <= 12 and 1 <= data[21] <= 31:
+                unit.manufacture_date = f"{2000 + data[19]:04d}-{data[20]:02d}-{data[21]:02d}"
+            if len(data) >= 23:
+                unit.locked = bool(data[22] & 0x01)
             if self._primary_unit_id in (None, uid):
                 self._temperature = unit.temperature
                 self._peak_temperature = unit.peak_temperature
@@ -696,9 +706,9 @@ class AxiumController:
         # Per-unit extended info (firmware/temp/MAC). Auto-power and network are
         # system-wide, so only the primary unit requests them.
         asyncio.ensure_future(self.async_request_extended_info(info.unit_id))
+        asyncio.ensure_future(self._request_network_config(info.unit_id))
         if info.unit_id == self._primary_unit_id:
             asyncio.ensure_future(self._request_auto_power())
-            asyncio.ensure_future(self._request_network_config())
         self._schedule_stack_check()
 
     def _handle_media_status(self, data: bytes) -> None:
@@ -1115,20 +1125,41 @@ class AxiumController:
     # -- extended device info / diagnostics ------------------------------
 
     def _handle_network_settings(self, data: bytes) -> None:
-        """Cache the amp's network settings from a 0x3A/03 report."""
+        """Cache a unit's network settings from a 0x3A/03 report."""
+        uid = data[0] << 8 | data[1]
         ips = data[4:20]
-        self._network = NetworkConfig(
+        cfg = NetworkConfig(
             flags=data[3],
             ip=bytes(ips[0:4]),
             subnet=bytes(ips[4:8]),
             dns=bytes(ips[8:12]),
             router=bytes(ips[12:16]),
         )
+        unit = self._units.get(uid)
+        if unit is None:
+            unit = UnitInfo(unit_id=uid)
+            self._units[uid] = unit
+        unit.network = cfg
+        if self._primary_unit_id in (None, uid):
+            self._network = cfg
         self._notify_diagnostics()
 
-    async def _request_network_config(self) -> None:
-        """Request the amp's IP addresses and DHCP/static flag."""
-        unit = self._unit_bytes()
+    def _net_unit_bytes(self, unit_id: int | None) -> tuple[int, int] | None:
+        """Two unit-id bytes for a network request (defaults to the primary)."""
+        uid = unit_id if unit_id is not None else self._primary_unit_id
+        if uid is not None:
+            return (uid >> 8) & 0xFF, uid & 0xFF
+        return self._unit_bytes()
+
+    def _unit_net(self, unit_id: int | None) -> "NetworkConfig | None":
+        if unit_id is None:
+            return self._network
+        unit = self._units.get(unit_id)
+        return unit.network if unit else None
+
+    async def _request_network_config(self, unit_id: int | None = None) -> None:
+        """Request a unit's IP addresses and DHCP/static flag."""
+        unit = self._net_unit_bytes(unit_id)
         if unit is not None:
             await self.async_send(
                 CMD_NETWORK_SETTINGS,
@@ -1138,17 +1169,20 @@ class AxiumController:
                 NET_SETTING_IP_FLAGS_REQUEST,
             )
 
-    async def async_set_network_static(self, static: bool) -> None:
-        """Switch the amp between static IP and DHCP, keeping its addresses.
+    async def async_set_network_static(
+        self, static: bool, unit_id: int | None = None
+    ) -> None:
+        """Switch a unit between static IP and DHCP, keeping its addresses.
 
         Writing static with the *current* addresses pins the working IP so a
-        reboot's new DHCP lease can't move it. Other flag bits (time server etc.)
-        are preserved. Reads the config back afterwards (the amp doesn't echo).
+        reboot's new DHCP lease can't move it. Other flag bits are preserved.
+        Reads the config back afterwards (the amp doesn't echo). ``unit_id``
+        targets a specific amp in the stack (relayed by the connected amp).
         """
-        unit = self._unit_bytes()
-        if unit is None or self._network is None:
+        unit = self._net_unit_bytes(unit_id)
+        n = self._unit_net(unit_id)
+        if unit is None or n is None:
             return
-        n = self._network
         flags = (n.flags | NET_FLAG_STATIC) if static else (n.flags & ~NET_FLAG_STATIC)
         await self.async_send(
             CMD_NETWORK_SETTINGS,
@@ -1162,24 +1196,21 @@ class AxiumController:
             *n.dns,
             *n.router,
         )
-        await self._request_network_config()
+        await self._request_network_config(unit_id)
 
-    @property
-    def network_known(self) -> bool:
-        """Whether the amp's network settings have been read."""
-        return self._network is not None
+    def network_known(self, unit_id: int | None = None) -> bool:
+        """Whether a unit's network settings have been read."""
+        return self._unit_net(unit_id) is not None
 
-    @property
-    def network_is_static(self) -> bool:
-        """Whether the amp is on a static IP (else DHCP)."""
-        return bool(self._network and self._network.flags & NET_FLAG_STATIC)
+    def network_is_static(self, unit_id: int | None = None) -> bool:
+        """Whether a unit is on a static IP (else DHCP)."""
+        n = self._unit_net(unit_id)
+        return bool(n and n.flags & NET_FLAG_STATIC)
 
-    @property
-    def network_ip(self) -> str | None:
-        """The amp's current IP address as a dotted string, if known."""
-        if self._network is None:
-            return None
-        return ".".join(str(b) for b in self._network.ip)
+    def network_ip(self, unit_id: int | None = None) -> str | None:
+        """A unit's current IP address as a dotted string, if known."""
+        n = self._unit_net(unit_id)
+        return ".".join(str(b) for b in n.ip) if n else None
 
     async def async_request_extended_info(self, unit_id: int | None = None) -> None:
         """Request extended device info (firmware/temperature/MAC) for a unit.

@@ -261,6 +261,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             kwargs["sw_version"] = unit.firmware
         if unit.model:
             kwargs["model"] = unit.model
+        if unit.manufacture_date:
+            kwargs["hw_version"] = unit.manufacture_date
         if unit.mac:
             kwargs["merge_connections"] = {
                 (dr.CONNECTION_NETWORK_MAC, dr.format_mac(unit.mac))

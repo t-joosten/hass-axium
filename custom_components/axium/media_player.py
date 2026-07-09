@@ -121,7 +121,7 @@ class AxiumZone(MediaPlayerEntity):
     _attr_name = None
     _attr_should_poll = False
     # These list attributes are static config, not history worth recording.
-    _unrecorded_attributes = frozenset({"source_ids", "axium_presets"})
+    _unrecorded_attributes = frozenset({"source_ids", "axium_presets", "zone_number"})
 
     def __init__(
         self,
@@ -263,6 +263,7 @@ class AxiumZone(MediaPlayerEntity):
         return {
             "source_ids": self._effective_source_ids(),
             "axium_presets": self._presets,
+            "zone_number": self._zone,
         }
 
     @property

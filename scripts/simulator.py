@@ -158,14 +158,19 @@ class Simulator:
         self.media: dict[int, dict] = {}
         # Per-source gain (source byte -> dB).
         self.source_gain: dict[int, int] = {}
-        # Network settings (0x3A/03): flags byte + IP/subnet/DNS/router. DHCP.
-        self.network = {
-            "flags": 0x02,  # bit1 = time server on, bit0 = 0 => DHCP
-            "ip": [192, 168, 1, 50],
-            "subnet": [255, 255, 255, 0],
-            "dns": [192, 168, 1, 1],
-            "router": [192, 168, 1, 1],
-        }
+        # Network settings (0x3A/03) per unit: flags + IP/subnet/DNS/router. DHCP.
+        def _net(ip_last: int) -> dict:
+            return {
+                "flags": 0x02,  # bit1 = time server on, bit0 = 0 => DHCP
+                "ip": [192, 168, 1, ip_last],
+                "subnet": [255, 255, 255, 0],
+                "dns": [192, 168, 1, 1],
+                "router": [192, 168, 1, 1],
+            }
+
+        self.networks = {UNIT_ID: _net(50)}
+        if peer_zones:
+            self.networks[UNIT_ID + 1] = _net(51)
         # Auto power/standby (0x16), presets (0x1E/0x2A), diagnostics (0x39/0x34).
         self.auto_power_options = 0
         self.auto_power_standby_n = 8  # 2^8 = 256 s
@@ -356,10 +361,13 @@ class Simulator:
                 writer.write(encode(0x1C, zone_byte, *z.name.encode("utf-8")))
                 await self._safe_drain(writer)
             return
-        if command == 0x3A and len(data) >= 3:  # Network settings
+        if command == 0x3A and len(data) >= 3:  # Network settings (per unit)
+            uid = data[0] << 8 | data[1]
             setting = data[2]
+            n = self.networks.get(uid)
+            if n is None:
+                return  # unknown unit: stay silent
             if setting == 0x83:  # request IP addresses + flags
-                n = self.network
                 reply = encode(
                     0x3A, 0xFF, data[0], data[1], 0x03, n["flags"],
                     *n["ip"], *n["subnet"], *n["dns"], *n["router"],
@@ -368,13 +376,13 @@ class Simulator:
                 await self._safe_drain(writer)
                 log("-> reply  ", reply, "network settings")
             elif setting == 0x03 and len(data) >= 4:  # set (silent; client re-reads)
-                self.network["flags"] = data[3]
+                n["flags"] = data[3]
                 if len(data) >= 20:
-                    self.network["ip"] = list(data[4:8])
-                    self.network["subnet"] = list(data[8:12])
-                    self.network["dns"] = list(data[12:16])
-                    self.network["router"] = list(data[16:20])
-                print(f"   network -> {'static' if data[3] & 1 else 'DHCP'}")
+                    n["ip"] = list(data[4:8])
+                    n["subnet"] = list(data[8:12])
+                    n["dns"] = list(data[12:16])
+                    n["router"] = list(data[16:20])
+                print(f"   network unit 0x{uid:04X} -> {'static' if data[3] & 1 else 'DHCP'}")
             return
         if command == 0x0C:  # Amplifier special features (loudness/mono)
             for z in self._resolve_zones(zone_byte):
@@ -486,7 +494,7 @@ class Simulator:
                 0x00, 0x00, (uid >> 8) & 0xFF, uid & 0xFF,  # 32-bit unit id
                 FIRMWARE_MAJOR, 1 if is_peer else 0, 0,  # fw major.minor.beta
                 temp & 0xFF, peak & 0xFF,
-                192, 168, 1, 50,  # IP
+                *self.networks.get(uid, {"ip": [192, 168, 1, 50]})["ip"],  # IP
                 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x03 if is_peer else 0x02,  # MAC
                 26, 6, 30,  # manufacture date
                 0x02,  # flags

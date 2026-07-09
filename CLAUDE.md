@@ -107,6 +107,12 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   reaches the target), then re-discover. `_resolved_units` guards against loops; the primary is never
   touched. Self-healing: re-applies each connect (0x2E may not persist a reboot). Sim handles 0x2E
   (updates `peer_zone_numbers`); test the clash with `--peer-zones "1=..,..,8=.."`.
+- **Per-amp diagnostics/network**: extended info (0xB9) also yields `UnitInfo.ip`, `manufacture_date`
+  (→ device `hw_version`) and `locked`. Network settings (0x3A) are **per unit** (keyed by the unit id
+  in the reply, requested per unit at connect, relayed like 0x2E): `network_known/is_static/ip(unit_id)`
+  + `async_set_network_static(static, unit_id)`. So there's a **Static IP switch per amp** device (primary
+  keeps the legacy unique id; expansion suffixed `_unit_<uid>`). media_player exposes `zone_number`
+  (physical zone). Zone *type* (amplified/pre-out/USB) is NOT in the protocol — can't auto-detect it.
 - **Static IP switch** (`AxiumStaticIPSwitch`, switch.py): reads the amp's network config at connect
   (`controller._request_network_config` → `_handle_network_settings` caches `NetworkConfig`); the hub
   switch toggles `async_set_network_static` which re-writes the *current* IP/subnet/DNS/router with the
