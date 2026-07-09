@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from functools import partial
+import logging
 
 import voluptuous as vol
 
@@ -34,6 +35,8 @@ from .const import (
 )
 from .helpers import get_alarms, get_presets
 from .protocol import level_to_volume
+
+_LOGGER = logging.getLogger(__name__)
 
 SERVICE_SET_ALARM = "set_alarm"
 SERVICE_REMOVE_ALARM = "remove_alarm"
@@ -189,62 +192,73 @@ async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> No
             state = controller.zone_state(zone)
             snapshot[zone] = (state.power, state.source, state.volume, state.muted)
 
-        # Override: power on, unmute, select the source, set the volume.
-        for zone in zones:
-            await controller.async_send(CMD_POWER, zone, POWER_ON)
-            await controller.async_send(CMD_MUTE, zone, MUTE_OFF)
-            await controller.async_send(
-                CMD_SOURCE, zone, source | SOURCE_FLAG_TURN_ON
-            )
-            if level is not None:
+        try:
+            # Override: power on, unmute, select the source, set the volume.
+            for zone in zones:
+                await controller.async_send(CMD_POWER, zone, POWER_ON)
+                await controller.async_send(CMD_MUTE, zone, MUTE_OFF)
                 await controller.async_send(
-                    CMD_VOLUME, zone, level_to_volume(level)
+                    CMD_SOURCE, zone, source | SOURCE_FLAG_TURN_ON
                 )
-        for zone in zones:
-            await controller.async_request_zone_state(zone)
+                if level is not None:
+                    await controller.async_send(
+                        CMD_VOLUME, zone, level_to_volume(level)
+                    )
+            for zone in zones:
+                await controller.async_request_zone_state(zone)
 
-        # Play the sound, then wait for it to finish.
-        renderer = call.data.get("media_player")
-        content_id = call.data.get("media_content_id")
-        if renderer and content_id:
-            await hass.services.async_call(
-                "media_player",
-                "play_media",
-                {
-                    "entity_id": renderer,
-                    "media_content_id": content_id,
-                    "media_content_type": call.data.get(
-                        "media_content_type", "music"
-                    ),
-                },
-                blocking=True,
-            )
-        duration = call.data.get("duration")
-        if duration is not None:
-            await asyncio.sleep(duration)
-        elif renderer and content_id:
-            await _wait_media_done(hass, renderer)
-        else:
-            await asyncio.sleep(5)
-
-        # Restore each zone exactly as it was (source, volume, mute — or off).
-        for zone in zones:
-            power, prev_source, prev_level, muted = snapshot[zone]
-            if not power:
-                await controller.async_send(CMD_POWER, zone, POWER_OFF)
-                continue
-            if prev_source is not None:
-                await controller.async_send(
-                    CMD_SOURCE, zone, prev_source | SOURCE_FLAG_TURN_ON
-                )
-            if prev_level is not None:
-                await controller.async_send(
-                    CMD_VOLUME, zone, level_to_volume(prev_level)
-                )
-            if muted:
-                await controller.async_send(CMD_MUTE, zone, MUTE_ON)
-        for zone in zones:
-            await controller.async_request_zone_state(zone)
+            # Play the sound (only through a renderer that exists), then wait.
+            renderer = call.data.get("media_player")
+            content_id = call.data.get("media_content_id")
+            playing = False
+            if renderer and content_id:
+                if hass.states.get(renderer) is None:
+                    _LOGGER.warning(
+                        "axium.play_notification: renderer %s not found — "
+                        "overriding the zones without audio, then restoring",
+                        renderer,
+                    )
+                else:
+                    await hass.services.async_call(
+                        "media_player",
+                        "play_media",
+                        {
+                            "entity_id": renderer,
+                            "media_content_id": content_id,
+                            "media_content_type": call.data.get(
+                                "media_content_type", "music"
+                            ),
+                        },
+                        blocking=True,
+                    )
+                    playing = True
+            duration = call.data.get("duration")
+            if duration is not None:
+                await asyncio.sleep(duration)
+            elif playing:
+                await _wait_media_done(hass, renderer)
+            else:
+                await asyncio.sleep(5)
+        finally:
+            # Always restore each zone, even if playback errored, so a bad or
+            # missing renderer can never leave a zone stuck on the notification.
+            for zone in zones:
+                power, prev_source, prev_level, muted = snapshot[zone]
+                if not power:
+                    await controller.async_send(CMD_POWER, zone, POWER_OFF)
+                    continue
+                if prev_source is not None:
+                    await controller.async_send(
+                        CMD_SOURCE, zone, prev_source | SOURCE_FLAG_TURN_ON
+                    )
+                if prev_level is not None:
+                    await controller.async_send(
+                        CMD_VOLUME, zone, level_to_volume(prev_level)
+                    )
+                if muted:
+                    await controller.async_send(CMD_MUTE, zone, MUTE_ON)
+            for zone in zones:
+                await controller.async_request_zone_state(zone)
 
 
 def async_register_services(hass: HomeAssistant) -> None:

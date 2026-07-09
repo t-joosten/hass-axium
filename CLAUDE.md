@@ -217,7 +217,9 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   the *restored* state), overrides (power on, unmute, select `source` (default = detected
   internal Media Player), set `volume`), plays the sound via `media_player.play_media` on a
   given `renderer` (the amp's DLNA player or an MA player), waits (`_wait_media_done` polls the
-  renderer; or a fixed `duration`; or ~5s), then restores from the snapshot. **The amp can't
+  renderer; or a fixed `duration`; or ~5s), then restores from the snapshot. Restore is in a
+  `finally` and play is skipped if the renderer entity doesn't exist (`hass.states.get`) — so a
+  missing/erroring renderer can never strand a zone on the notification source. **The amp can't
   mix audio** (a zone = one source), so it *overrides* the source — no true ducking; the louder
   notification volume + restore is the equivalent. Uses only existing commands (no sim change);
   restore is exact because `level_to_volume(volume_to_level(b)) == b`. Needs the amp on the main
