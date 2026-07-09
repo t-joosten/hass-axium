@@ -895,6 +895,39 @@ class AxiumHubCard extends HTMLElement {
     );
   }
 
+  // Every amplifier device in this hub: the hub (primary) first, then each
+  // stacked expansion amp (identifier "<hub id>_unit_<uid>", nested via_device).
+  _amps() {
+    const hubId = this._hubId();
+    const hubDev = this._hubDevice();
+    if (!hubId || !hubDev) return [];
+    const amps = [hubDev];
+    const devices = (this._hass && this._hass.devices) || {};
+    for (const dev of Object.values(devices)) {
+      if (dev.id === hubDev.id) continue;
+      if (
+        (dev.identifiers || []).some(
+          (t) => t[0] === "axium" && String(t[1]).startsWith(`${hubId}_unit_`)
+        )
+      ) {
+        amps.push(dev);
+      }
+    }
+    return amps;
+  }
+
+  // The (non-peak) temperature sensor sitting on a given amp device.
+  _ampTemp(deviceId) {
+    const reg = (this._hass && this._hass.entities) || {};
+    for (const eid of Object.keys(reg)) {
+      if (reg[eid].platform !== "axium" || reg[eid].device_id !== deviceId) continue;
+      if (!eid.startsWith("sensor.") || eid.includes("peak")) continue;
+      const st = this._hass.states[eid];
+      if (st && st.attributes.device_class === "temperature") return st;
+    }
+    return null;
+  }
+
   _openHub() {
     const dev = this._hubDevice();
     if (!dev) return;
@@ -919,6 +952,7 @@ class AxiumHubCard extends HTMLElement {
         <div class="info">
           <div class="hname" id="hname"></div>
           <div class="hsub" id="hsub"></div>
+          <div class="amps" id="amps"></div>
         </div>
         <button class="alloff" id="alloff" title="Turn all zones off">
           <ha-icon icon="mdi:power"></ha-icon>
@@ -946,24 +980,37 @@ class AxiumHubCard extends HTMLElement {
   _update() {
     const root = this.shadowRoot;
     const hub = this._hub();
-    const dev = this._hubDevice();
     root.getElementById("hname").textContent =
       this._config.name || (hub ? hub.name : "Axium");
 
-    const parts = [];
-    if (dev && dev.model && dev.model !== "Amplifier") parts.push(dev.model);
-    if (dev && dev.sw_version) parts.push(dev.sw_version);
     const on = this._zonesOn().length;
-    parts.push(`${on} zone${on === 1 ? "" : "s"} on`);
-    const temp = this._temperature();
-    if (temp && temp.state && !isNaN(Number(temp.state))) {
-      const unit = temp.attributes.unit_of_measurement || "°C";
-      parts.push(`${Math.round(Number(temp.state))}${unit}`);
-    }
     const clip = this._clipping();
     const clipping = clip && clip.state === "on";
-    if (clipping) parts.push("⚠ Clipping");
-    root.getElementById("hsub").textContent = parts.join(" · ");
+    const sub = [`${on} zone${on === 1 ? "" : "s"} on`];
+    if (clipping) sub.push("⚠ Clipping");
+    root.getElementById("hsub").textContent = sub.join(" · ");
+
+    // One row per amp: [its name when there's more than one] model · fw · temp.
+    const amps = this._amps();
+    const multi = amps.length > 1;
+    root.getElementById("amps").innerHTML = amps
+      .map((dev, i) => {
+        const parts = [];
+        if (dev.model && dev.model !== "Amplifier") parts.push(dev.model);
+        if (dev.sw_version) parts.push(dev.sw_version);
+        const temp = this._ampTemp(dev.id);
+        if (temp && temp.state && !isNaN(Number(temp.state))) {
+          const u = temp.attributes.unit_of_measurement || "°C";
+          parts.push(`${Math.round(Number(temp.state))}${u}`);
+        }
+        const label = multi
+          ? `<span class="alabel">${
+              i === 0 ? "Main" : dev.name_by_user || dev.name || "Amp"
+            }</span> `
+          : "";
+        return `<div class="amprow">${label}${parts.join(" · ") || "—"}</div>`;
+      })
+      .join("");
 
     const icon = root.querySelector(".hicon");
     if (icon) icon.style.color = clipping ? "var(--error-color)" : "";
@@ -985,6 +1032,12 @@ AxiumHubCard.styles = `
     font-size: 0.85rem; color: var(--secondary-text-color);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
+  .amps { margin-top: 1px; }
+  .amprow {
+    font-size: 0.82rem; color: var(--secondary-text-color);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .alabel { color: var(--primary-text-color); font-weight: 500; }
   .alloff {
     display: inline-flex; align-items: center; justify-content: center;
     width: 40px; height: 40px; border-radius: 50%;
