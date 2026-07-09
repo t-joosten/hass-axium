@@ -72,9 +72,12 @@ CMD_CLIPPING: Final = 0x34
 CMD_REQUEST_EXTENDED_INFO: Final = 0x39
 RESP_EXTENDED_DEVICE_INFO: Final = 0xB9
 CMD_NETWORK_SETTINGS: Final = 0x3A  # Network settings (report/request/set)
+NET_SETTING_NAME: Final = 0x01  # setting id: the amp's own network/device name
 NET_SETTING_IP_FLAGS: Final = 0x03  # setting id: flags byte + 16 bytes of IPs
 NET_SETTING_IP_FLAGS_REQUEST: Final = 0x83  # request the flags + IPs
 NET_FLAG_STATIC: Final = 0x01  # flags bit 0: 0 = DHCP, 1 = Static
+# The amp's network name is hostname-style (a-z 0-9 - _); cap conservatively.
+AMP_NAME_MAX: Final = 31
 CMD_VOLUME_UP: Final = 0x11
 CMD_VOLUME_DOWN: Final = 0x12
 CMD_REQUEST_DEVICE_INFO: Final = 0x14

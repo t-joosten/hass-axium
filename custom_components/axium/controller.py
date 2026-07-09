@@ -14,6 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 import logging
 import math
+import re
 
 from . import protocol
 from .const import (
@@ -34,8 +35,10 @@ from .const import (
     CMD_MEDIA_STATUS_REQUEST,
     CMD_NETWORK_SETTINGS,
     NET_FLAG_STATIC,
+    AMP_NAME_MAX,
     NET_SETTING_IP_FLAGS,
     NET_SETTING_IP_FLAGS_REQUEST,
+    NET_SETTING_NAME,
     CMD_MUTE,
     CMD_NO_OP,
     CMD_POWER,
@@ -230,6 +233,13 @@ def parse_source_name(data: bytes) -> dict | None:
         "device": data[2],
         "flags": flags,
     }
+
+
+def _slug_amp_name(name: str) -> str:
+    """Slugify a display name to the amp's hostname charset (a-z 0-9 - _)."""
+    slug = re.sub(r"[^a-z0-9_-]+", "_", name.strip().lower())
+    slug = re.sub(r"_+", "_", slug).strip("_-")
+    return slug[:AMP_NAME_MAX]
 
 
 def parse_link_group(data: bytes) -> list[int] | None:
@@ -1197,6 +1207,29 @@ class AxiumController:
             *n.router,
         )
         await self._request_network_config(unit_id)
+
+    async def async_set_amp_name(self, name: str, unit_id: int | None = None) -> None:
+        """Set an amplifier's own network name (0x3A setting 0x01).
+
+        The amp name is hostname-style (a-z 0-9 - _), so the HA display name is
+        slugified to fit. ``unit_id`` targets a stacked amp (relayed by the
+        connected amp); ``None`` = the primary/hub. No read-back — the amp doesn't
+        echo and no entity reflects the amp's own name (it mirrors the HA name).
+        """
+        unit = self._net_unit_bytes(unit_id)
+        if unit is None:
+            return
+        slug = _slug_amp_name(name)
+        if not slug:
+            return
+        await self.async_send(
+            CMD_NETWORK_SETTINGS,
+            ZONE_ALL,
+            unit[0],
+            unit[1],
+            NET_SETTING_NAME,
+            *slug.encode("ascii"),
+        )
 
     def network_known(self, unit_id: int | None = None) -> bool:
         """Whether a unit's network settings have been read."""

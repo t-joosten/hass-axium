@@ -380,12 +380,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device = device_registry.async_get(event.data["device_id"])
         if device is None:
             return
-        # Hub device rename -> keep the config-entry title in sync.
+        new_name = device.name_by_user or device.name
+        # Hub device rename -> sync the config-entry title and push the amp's own
+        # network name to the primary unit.
         if (DOMAIN, entry.entry_id) in device.identifiers:
-            new_title = device.name_by_user or device.name
-            if new_title and new_title != entry.title:
-                hass.config_entries.async_update_entry(entry, title=new_title)
+            if new_name and new_name != entry.title:
+                hass.config_entries.async_update_entry(entry, title=new_name)
+            if new_name:
+                hass.async_create_task(controller.async_set_amp_name(new_name))
             return
+        # Expansion amp device rename -> push its own network name to that unit.
+        unit_prefix = f"{entry.entry_id}_unit_"
+        for domain_id, identifier in device.identifiers:
+            if domain_id == DOMAIN and identifier.startswith(unit_prefix):
+                try:
+                    uid = int(identifier[len(unit_prefix):])
+                except ValueError:
+                    return
+                if new_name:
+                    hass.async_create_task(
+                        controller.async_set_amp_name(new_name, uid)
+                    )
+                return
         prefix = f"{entry.entry_id}_zone_"
         zone: int | None = None
         for domain_id, identifier in device.identifiers:

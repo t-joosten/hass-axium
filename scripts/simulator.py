@@ -383,6 +383,9 @@ class Simulator:
                     n["dns"] = list(data[12:16])
                     n["router"] = list(data[16:20])
                 print(f"   network unit 0x{uid:04X} -> {'static' if data[3] & 1 else 'DHCP'}")
+            elif setting == 0x01:  # set the amp's own network name (silent)
+                n["name"] = bytes(data[3:]).decode("ascii", "replace")
+                print(f"   network unit 0x{uid:04X} name -> {n['name']!r}")
             return
         if command == 0x0C:  # Amplifier special features (loudness/mono)
             for z in self._resolve_zones(zone_byte):

@@ -87,8 +87,12 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   so if a 2nd player were ever enabled it'd auto-appear. Independent per-zone streams → Music Assistant
   (the amp is a per-zone DLNA renderer), not the single internal player.
 - **What the control protocol can/can't do** (AxiumCommsProtocol.pdf, 25pp): network config IS
-  settable — `0x3A`: setting `03h` = flags (bit0 0=DHCP/1=Static) + 16 bytes IP/subnet/DNS/router;
-  `83h` reads it back; `08h`/`88h` = AirPlay enable/status (only meaningful on AirPlay hardware).
+  settable — `0x3A`: setting `01h` = amp network name, `02h` = NTP time server, `03h` = flags
+  (bit0 0=DHCP/1=Static) + 16 bytes IP/subnet/DNS/router; `83h` reads the IP config back;
+  `08h`/`88h` = AirPlay enable/status (only meaningful on AirPlay hardware). We implement `01h`
+  (name, mirrored from the hub rename) and `03h`/`83h` (IP). The amp's clock/DST + NTP (`02h`)
+  and KNX/feature-unlock (`0x64`)/digital-IO are **intentionally not implemented** — the amp's
+  native scheduler is unused (HA does alarms/sleep), and the rest are niche/model-specific.
   **UPnP/DLNA/Pandora/TuneIn are NOT in the protocol** (amp web-UI/app only, at `http://<amp-ip>`);
   media servers (SMB shares) = `0x3B`; media control/status = `0x3D`/`0x3E`/`0x3F`.
 - **Multi-amp stacks / per-unit devices**: the controller tracks a `UnitInfo` per amp
@@ -147,10 +151,15 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   editable text entity; zone names use the device pencil.)
 - **Hub rename**: the same `_handle_device_rename` listener also mirrors the **hub**
   device's `name_by_user` → the **config-entry title** (so the integrations page shows the
-  chosen name). The **reconfigure flow** also carries a **Name** field (the whole stack is
-  one TCP connection — a single host/port — so there's no per-amp connection to configure;
-  renaming there updates the title *and* the hub device name unless it has a `name_by_user`
-  override). `async_setup_entry` also syncs an existing hub `name_by_user` → title at start.
+  chosen name) **and pushes the amp's own network name** to the primary via
+  `controller.async_set_amp_name` (`0x3A` setting `01h`; the amp name is hostname-style
+  `a-z 0-9 - _`, so the display name is slugified by `_slug_amp_name`, cap `AMP_NAME_MAX=31`).
+  Renaming an **expansion amp** device pushes the name to *that* unit (relayed). No read-back
+  (nothing reflects the amp's own name; it just mirrors the HA name). The **reconfigure flow**
+  also carries a **Name** field (the whole stack is one TCP connection — a single host/port —
+  so there's no per-amp connection to configure; renaming there updates the title *and* the hub
+  device name unless it has a `name_by_user` override). `async_setup_entry` also syncs an
+  existing hub `name_by_user` → title at start.
   A title-only update does **not** reload the entry (`_async_update_listener` compares only
   `entry.options`). Expansion amps are separate devices renamed via their own pencils.
 

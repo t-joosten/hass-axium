@@ -150,7 +150,9 @@ identify command, or a firewall is blocking the reply.
 > **Port** for when the amplifier's IP changes (e.g. a new DHCP lease after a
 > reboot). Your zones, sources and settings are kept. A DHCP reservation on your
 > router avoids the change in the first place. You can also rename the hub — and
-> each stacked amp — straight from its device page (the pencil).
+> each stacked amp — straight from its device page (the pencil). Renaming an amp
+> also **writes its own network name back to the amplifier** (slugified to the
+> amp's hostname charset, `a-z 0-9 - _`), so the amp's network identity matches.
 >
 > To stop the IP moving at all, the amplifier device has a **Static IP address**
 > switch: turn it on to pin the amp's current address as static (so a reboot
