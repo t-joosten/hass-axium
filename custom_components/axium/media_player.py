@@ -213,10 +213,24 @@ class AxiumZone(MediaPlayerEntity):
             or f"Source 0x{byte:02X}"
         )
 
+    def _effective_source_ids(self) -> list[int]:
+        """Configured sources, plus any internal media player the amp reports.
+
+        The internal media player (e.g. source 0x12) isn't in the amp's named
+        source table, so it isn't discovered at setup — but it is selectable and
+        streams (UPnP push / network shares / built-in services). Appending it
+        here lets a zone be routed to it, which lights up now-playing/transport.
+        """
+        ids = list(self._source_ids)
+        for byte in self._controller.media_sources():
+            if byte not in ids:
+                ids.append(byte)
+        return ids
+
     @property
     def source_list(self) -> list[str]:
         """Return the selectable sources with their current names."""
-        return [self._source_display(byte) for byte in self._source_ids]
+        return [self._source_display(byte) for byte in self._effective_source_ids()]
 
     @property
     def source(self) -> str | None:
@@ -235,7 +249,7 @@ class AxiumZone(MediaPlayerEntity):
         presets a source card can activate.
         """
         return {
-            "source_ids": list(self._source_ids),
+            "source_ids": self._effective_source_ids(),
             "axium_presets": self._presets,
         }
 
@@ -295,7 +309,11 @@ class AxiumZone(MediaPlayerEntity):
     async def async_select_source(self, source: str) -> None:
         """Select an input source (and turn the zone on)."""
         source_byte = next(
-            (byte for byte in self._source_ids if self._source_display(byte) == source),
+            (
+                byte
+                for byte in self._effective_source_ids()
+                if self._source_display(byte) == source
+            ),
             None,
         )
         if source_byte is None:

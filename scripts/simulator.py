@@ -375,10 +375,14 @@ class Simulator:
                 await self._safe_drain(writer)
             return
         if command == 0x3F and data:  # Media Status request
-            for frame_out in self._media_status_frames(data[0]):
-                writer.write(frame_out)
-                log("-> reply  ", frame_out, "media status")
-            await self._safe_drain(writer)
+            # Only real media players answer (source >= 0x10 and known); absent
+            # ones stay silent, like hardware — that's how the integration
+            # discovers which internal players actually exist.
+            if data[0] >= 0x10 and data[0] in self.source_names:
+                for frame_out in self._media_status_frames(data[0]):
+                    writer.write(frame_out)
+                    log("-> reply  ", frame_out, "media status")
+                await self._safe_drain(writer)
             return
         if command == 0x3D and len(data) >= 2:  # Media Control
             source, ctrl = data[0], data[1]

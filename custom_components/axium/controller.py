@@ -248,6 +248,10 @@ class AxiumController:
         self._mac: str | None = None
         # Now-playing state keyed by media source data byte.
         self._media: dict[int, MediaState] = {}
+        # Media-player source bytes the amp actually reports (it answers a media
+        # status request for a real internal player, e.g. 0x12; not for absent
+        # ones like AirPlay 0x10). Exposed as selectable sources.
+        self._media_sources: set[int] = set()
         # Diagnostics / amp-wide state.
         self._diag_listeners: list[CallbackType] = []
         self._temperature: int | None = None
@@ -354,6 +358,7 @@ class AxiumController:
             await self._request_link_groups()
             await self._request_source_names()
             await self._request_preset_names()
+            await self._request_media_sources()
             # Re-read known zones' state (covers reconnects; on first connect
             # entities request it themselves as they are added).
             for zone in list(self._zone_entity_ids):
@@ -529,6 +534,13 @@ class AxiumController:
         param = data[1]
         value = data[2:]
         media = self._media.setdefault(source, MediaState())
+        # The amp only replies here for media players it actually has, so a
+        # reply reveals a real, selectable internal source.
+        new_media_source = (
+            source in MEDIA_SOURCE_BYTES and source not in self._media_sources
+        )
+        if new_media_source:
+            self._media_sources.add(source)
 
         def _text() -> str | None:
             return value.decode("utf-8", errors="replace").rstrip("\x00") or None
@@ -558,13 +570,22 @@ class AxiumController:
         elif param == MS_LENGTH and len(value) >= 2:
             media.duration = value[0] << 8 | value[1]
 
-        for zone, state in self._states.items():
-            if state.source == source:
-                self._notify(zone)
+        if new_media_source:
+            # A newly-discovered media player must appear in every zone's
+            # source_list, so refresh all of them.
+            self._notify_all()
+        else:
+            for zone, state in self._states.items():
+                if state.source == source:
+                    self._notify(zone)
 
     def media_state(self, source: int) -> MediaState:
         """Return (creating if needed) the cached media state for a source."""
         return self._media.setdefault(source, MediaState())
+
+    def media_sources(self) -> list[int]:
+        """Return the internal media-player source bytes the amp reports."""
+        return sorted(self._media_sources)
 
     def _update_link(self, data: bytes) -> None:
         """Apply a Link zones (0x30) frame to the live link state.
@@ -956,6 +977,16 @@ class AxiumController:
         """Set the repeat mode for a media source."""
         value = {"one": REPEAT_TRACK, "all": REPEAT_ALL}.get(repeat, REPEAT_OFF)
         await self.async_media_control(source, MEDIA_REPEAT, value)
+
+    async def _request_media_sources(self) -> None:
+        """Probe each possible internal media player (they answer if present).
+
+        A media-status request to a source that exists returns a Media Status
+        (0x3E) reply, which reveals it as a selectable source; absent players
+        (e.g. AirPlay on a non-AirPlay amp) stay silent.
+        """
+        for source in sorted(MEDIA_SOURCE_BYTES):
+            await self.async_request_media_status(source)
 
     async def async_request_media_status(self, source: int) -> None:
         """Request now-playing details for a media source (0x3F).

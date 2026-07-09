@@ -68,11 +68,20 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   existing entry (Settings → the entry → Reconfigure) without losing discovered zones/sources —
   needed because the ICS-bridge amp IP changes on reboot ([[axium-amp-network-setup]]). It
   re-probes to validate, then `async_update_reload_and_abort(data_updates=…)`.
-- **AirPlay is hardware, not firmware**: the user's **AX-800-X** has NO internal media/AirPlay
-  module — verified on 5.6.0, it reports only physical inputs (`device=0x00`, none in the
-  `0x10+` media range) and doesn't answer media-status. Only the **AX-800-DAV** has the AirPlay
-  receiver. A source *named* "Airplay" is just a relabeled physical input. Media bytes:
-  `SOURCE_AIRPLAY_BYTE=0x10`, `SOURCE_MEDIA_PLAYER_BYTE=0x12`, `MEDIA_SOURCE_BYTES`.
+- **Media Player source detection** (verified on the AX-800-X, fw 5.6.0): the amp HAS an internal
+  **Media Player** (source `0x12`) — it answers media-status there and `0x12` is selectable — but
+  NO **AirPlay** (`0x10` silent; `0x3A/88h` AirPlay-status also silent). So it streams via
+  UPnP/DLNA/Pandora/TuneIn/USB, not AirPlay. The integration **auto-detects** internal players:
+  `_request_media_sources` probes each `MEDIA_SOURCE_BYTES` with a media-status request at connect;
+  a `0x3E` reply marks it present (`controller.media_sources()`), and the media_player appends them
+  to `source_list`/`source_ids`/select via `_effective_source_ids`. now-playing/transport already
+  lights up for `MEDIA_SOURCE_BYTES`. Simulator (a DAV) answers media-status only for `>=0x10` sources
+  it has (0x10+0x12) — keep it that way so the integration doesn't over-detect Media Player 2-8.
+- **What the control protocol can/can't do** (AxiumCommsProtocol.pdf, 25pp): network config IS
+  settable — `0x3A`: setting `03h` = flags (bit0 0=DHCP/1=Static) + 16 bytes IP/subnet/DNS/router;
+  `83h` reads it back; `08h`/`88h` = AirPlay enable/status (only meaningful on AirPlay hardware).
+  **UPnP/DLNA/Pandora/TuneIn are NOT in the protocol** (amp web-UI/app only, at `http://<amp-ip>`);
+  media servers (SMB shares) = `0x3B`; media control/status = `0x3D`/`0x3E`/`0x3F`.
 - **Zone rename → amp**: renaming a zone's device (HA pencil) is mirrored to the amp.
   `__init__` listens for `dr.EVENT_DEVICE_REGISTRY_UPDATED`; when a zone device's
   `name_by_user` changes it calls `async_set_zone_name` (`CMD_ZONE_NAME` 0x1C, ~15-byte

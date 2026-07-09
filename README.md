@@ -289,28 +289,41 @@ automatically with the detected **model** (e.g. *AX-800-X*, *AX-1250*,
 If the amplifier does not respond to the query, control still works and the
 device simply remains labelled generically as *Amplifier*.
 
-## Streaming music with Music Assistant (AirPlay)
+## Streaming music to the amplifier
 
-[Music Assistant](https://www.music-assistant.io/) streams audio by handing a
-player a URL to play, so an Axium zone — which only switches between physical
-inputs and controls volume/power — cannot itself appear as a Music Assistant
-player. The clean way to stream music to the amplifier is via **AirPlay**:
+Ethernet Axium amplifiers with the streaming module have an **internal media
+player** — a UPnP/DLNA renderer (plus Pandora/TuneIn, USB and network shares on
+models that support them). The integration **auto-detects** it and exposes it as
+a selectable source called **Media Player** (and **AirPlay** on the models that
+actually have an AirPlay receiver — it's probed, so base units without it won't
+show a phantom source). Select it on a zone like any other source and the zone
+shows **now-playing and transport** (play/pause/next/prev).
 
-Ethernet Axium amplifiers such as the **AX-800DAV** include an internal media
-player that is an **AirPlay receiver**. Music Assistant has a mature
-[AirPlay player provider](https://www.music-assistant.io/player-support/airplay/)
-that streams directly to it. So Music Assistant carries the audio, and this
-integration handles the amplifier side — powering the zone on and selecting the
-**AirPlay** source.
+> Not every amplifier has this. The integration only shows the Media Player /
+> AirPlay source if the amp answers a media-status probe for it, so a base amp
+> without the streaming hardware simply won't list it.
 
-**Setup**
+**How to feed it audio**
 
-1. Make sure AirPlay is enabled on the amplifier.
-2. In Music Assistant, enable the **AirPlay** provider. It should discover the
-   amplifier as an AirPlay player.
-3. Add an automation so that when Music Assistant starts playing to the
-   amplifier's AirPlay player, the desired Axium zone powers on and switches to
-   the AirPlay source (and optionally powers off when playback stops):
+- **From a phone / Music Assistant (UPnP/DLNA):** the amp is a UPnP renderer —
+  push to it from a DLNA-capable music app, or via **Music Assistant's DLNA
+  provider**. Then select **Media Player** on the target zone(s).
+- **Pandora / TuneIn / USB / network shares:** set these up in the amplifier's
+  own web page (`http://<amp-ip>`) or the free Axium mobile app — they are
+  **amp-side** features, not part of the TCP control protocol, so they can't be
+  enabled from Home Assistant. Once configured they play through the same Media
+  Player source.
+- The internal player is a single stream fanned to whichever zones select it —
+  point a **zone group** at it to play in several rooms at once.
+
+### AirPlay via Music Assistant (only on amps with AirPlay)
+
+On an amp whose probe reveals **AirPlay**, [Music Assistant](https://www.music-assistant.io/)'s
+[AirPlay provider](https://www.music-assistant.io/player-support/airplay/) streams
+straight to it. Music Assistant carries the audio; this integration powers the
+zone on and selects the **AirPlay** source. Add an automation so that when Music
+Assistant starts playing, the zone switches to the source (and optionally powers
+off when it stops):
 
 ```yaml
 alias: "Axium: follow Music Assistant AirPlay (Living room)"
