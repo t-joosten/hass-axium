@@ -30,7 +30,8 @@ from a keypad or the front panel (a `local_push` integration — no polling).
 - 🔊 Volume set and step up/down (commands `0x04`, `0x11`, `0x12`)
 - 🎚️ Source selection with **auto-detected source names** (rename inline in HA; written back to the amp)
 - 🎵 Works with **Music Assistant** for streaming via the amplifier's AirPlay input
-- 📡 Live state updates pushed from the amplifier (notifications)
+- 📡 State kept in sync over a persistent local connection — HA re-reads a zone
+  right after each command (Axium amplifiers don't echo their own control changes)
 - ♻️ Automatic reconnection with backoff
 
 ## Requirements
@@ -171,8 +172,10 @@ zone-byte encoding).
 ### Renaming zones
 
 Each zone is its own device, so rename one with the **pencil icon on the zone's
-device page** (built-in Home Assistant rename — instant, per zone). There is no
-separate settings dialog; everything is discovered from the amplifier.
+device page** (built-in Home Assistant rename — instant, per zone). The new name
+is **written back to the amplifier** (stored on the amp itself, so it also shows
+on the front panel and to other controllers), truncated to ~15 characters. There
+is no separate settings dialog; everything is discovered from the amplifier.
 
 ### Zone groups
 

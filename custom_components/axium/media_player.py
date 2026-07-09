@@ -248,33 +248,49 @@ class AxiumZone(MediaPlayerEntity):
             if (entity_id := self._controller.zone_entity_id(zone))
         ]
 
+    async def _refresh(self) -> None:
+        """Re-read this zone's power/mute/volume/source from the amplifier.
+
+        Real amplifiers send no notification after a set (only the simulator
+        does), so without this an on/off/source change never reflects in HA and
+        the card looks unresponsive. Also catches side effects (selecting a
+        source turns the zone on).
+        """
+        await self._controller.async_request_zone_state(self._zone)
+
     async def async_turn_on(self) -> None:
         """Turn the zone on."""
         await self._controller.async_send(CMD_POWER, self._zone, POWER_ON)
+        await self._refresh()
 
     async def async_turn_off(self) -> None:
         """Turn the zone off."""
         await self._controller.async_send(CMD_POWER, self._zone, POWER_OFF)
+        await self._refresh()
 
     async def async_mute_volume(self, mute: bool) -> None:
         """Mute or unmute the zone."""
         await self._controller.async_send(
             CMD_MUTE, self._zone, MUTE_ON if mute else MUTE_OFF
         )
+        await self._refresh()
 
     async def async_set_volume_level(self, volume: float) -> None:
         """Set the zone volume (0.0..1.0)."""
         await self._controller.async_send(
             CMD_VOLUME, self._zone, level_to_volume(volume)
         )
+        await self._refresh()
 
     async def async_volume_up(self) -> None:
         """Step the zone volume up."""
         await self._controller.async_send(CMD_VOLUME_UP, self._zone)
+        await self._refresh()
 
     async def async_volume_down(self) -> None:
         """Step the zone volume down."""
         await self._controller.async_send(CMD_VOLUME_DOWN, self._zone)
+        await self._refresh()
 
     async def async_select_source(self, source: str) -> None:
         """Select an input source (and turn the zone on)."""
@@ -288,6 +304,7 @@ class AxiumZone(MediaPlayerEntity):
         await self._controller.async_send(
             CMD_SOURCE, self._zone, source_byte | SOURCE_FLAG_TURN_ON
         )
+        await self._refresh()
 
     async def async_join_players(self, group_members: list[str]) -> None:
         """Link this zone with the given zones into a group on the amplifier."""

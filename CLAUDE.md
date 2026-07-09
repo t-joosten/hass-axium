@@ -48,6 +48,20 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   print Unicode arrows — use `>>`/`<<`).
 - The integration package `__init__` imports HA, so unit-test submodules by loading
   them directly rather than importing the package.
+- **Real amplifiers do NOT echo a *set*** — they only reply to an explicit *request*
+  (verified on hardware, AX-800-X fw v5). So every write is followed by a read-back:
+  media_player setters call `_refresh()` (→ `async_request_zone_state`); the controller
+  name/gain/special/auto-power setters and the tone `number` re-request after writing;
+  `async_set_source_name`/`async_set_zone_name` re-read the name. Without this, control
+  changes never reflect in HA on real hardware and the cards look dead. The **simulator
+  models this**: a client's set updates state silently (`echo=False`); only a change
+  typed at the sim console broadcasts (front-panel emulation). The sim's old
+  always-broadcast-on-set behavior *hid* this whole class of bug — keep sets silent.
+- **Zone rename → amp**: renaming a zone's device (HA pencil) is mirrored to the amp.
+  `__init__` listens for `dr.EVENT_DEVICE_REGISTRY_UPDATED`; when a zone device's
+  `name_by_user` changes it calls `async_set_zone_name` (`CMD_ZONE_NAME` 0x1C, ~15-byte
+  cap). We never write the registry back, so it can't loop. (Source names have their own
+  editable text entity; zone names use the device pencil.)
 
 ## Dashboard card (`custom_components/axium/lovelace/axium-source-card.js`)
 

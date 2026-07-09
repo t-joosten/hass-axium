@@ -1200,7 +1200,8 @@ class AxiumMatrixCard extends HTMLElement {
       sources
         .map(
           (s) =>
-            `<div class="colhead" title="${s.name}"><span>${s.name}</span></div>`
+            `<div class="colhead" data-src="${s.id}" title="${s.name}">` +
+            `<span>${s.name}</span></div>`
         )
         .join("") +
       `<div class="colhead off"><span>Off</span></div>`;
@@ -1214,7 +1215,7 @@ class AxiumMatrixCard extends HTMLElement {
           )
           .join("");
         return (
-          `<div class="rowhead" title="${this._zoneName(z)}">` +
+          `<div class="rowhead" data-zone="${z}" title="${this._zoneName(z)}">` +
           `${this._zoneName(z)}</div>` +
           cells +
           `<button class="cell off" data-zone="${z}" data-src="off">` +
@@ -1263,6 +1264,22 @@ class AxiumMatrixCard extends HTMLElement {
       }
       cell.classList.toggle("active", !!active);
       cell.classList.toggle("unavailable", !!unavailable);
+    }
+    // Refresh header labels so source/zone renames appear without a rebuild — a
+    // rename doesn't change the structural signature, so _build() isn't re-run.
+    const srcNames = new Map(this._sources().map((s) => [String(s.id), s.name]));
+    for (const h of this.shadowRoot.querySelectorAll(".colhead[data-src]")) {
+      const name = srcNames.get(h.dataset.src);
+      if (name != null) {
+        h.title = name;
+        const span = h.querySelector("span");
+        if (span) span.textContent = name;
+      }
+    }
+    for (const h of this.shadowRoot.querySelectorAll(".rowhead[data-zone]")) {
+      const name = this._zoneName(h.dataset.zone);
+      h.title = name;
+      h.textContent = name;
     }
   }
 }

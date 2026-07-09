@@ -9,7 +9,7 @@ from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -245,6 +245,41 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _async_setup_alarms(hass, entry, controller)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
+    @callback
+    def _handle_device_rename(event: Event) -> None:
+        """Push a zone device rename (the HA pencil) through to the amplifier.
+
+        Renaming a zone's device in HA only updates the local registry; the
+        amplifier stores its own zone names (used on the front panel and by
+        other controllers), so mirror the new name onto the amp. We never write
+        the registry back here, so this cannot loop.
+        """
+        if event.data.get("action") != "update":
+            return
+        if "name_by_user" not in (event.data.get("changes") or {}):
+            return
+        device = device_registry.async_get(event.data["device_id"])
+        if device is None:
+            return
+        prefix = f"{entry.entry_id}_zone_"
+        zone: int | None = None
+        for domain_id, identifier in device.identifiers:
+            if domain_id == DOMAIN and identifier.startswith(prefix):
+                try:
+                    zone = int(identifier[len(prefix):])
+                except ValueError:
+                    zone = None
+                break
+        if zone is None:
+            return
+        name = device.name_by_user or device.name
+        if name:
+            hass.async_create_task(controller.async_set_zone_name(zone, name))
+
+    entry.async_on_unload(
+        hass.bus.async_listen(dr.EVENT_DEVICE_REGISTRY_UPDATED, _handle_device_rename)
+    )
     return True
 
 

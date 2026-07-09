@@ -711,12 +711,18 @@ class AxiumController:
         self._extended_info_callback = callback
 
     async def async_set_source_gain(self, source_id: int, gain: int) -> None:
-        """Set a source's gain in dB (0..18)."""
+        """Set a source's gain in dB (0..18), then read it back.
+
+        Real amplifiers send no notification after a set (only the simulator
+        does), so we request the value afterwards to refresh our cache.
+        """
         await self.async_send(CMD_SOURCE_GAIN, ZONE_ALL, source_id, gain)
+        await self.async_send(CMD_SOURCE_GAIN, ZONE_ALL, source_id)
 
     async def async_set_zone_gain(self, zone: int, gain: int) -> None:
-        """Set a zone's gain in dB (-12..12)."""
+        """Set a zone's gain in dB (-12..12), then read it back."""
         await self.async_send(CMD_ZONE_GAIN, zone, protocol.to_signed_byte(gain))
+        await self.async_send(CMD_ZONE_GAIN, zone)
 
     async def async_set_special_bit(
         self, zone: int, byte_index: int, bit: int, enabled: bool
@@ -740,6 +746,7 @@ class AxiumController:
         else:
             current[byte_index] &= ~bit
         await self.async_send(CMD_SPECIAL_FEATURES, zone, current[0], current[1])
+        await self.async_send(CMD_SPECIAL_FEATURES, zone)
 
     @property
     def preset_names(self) -> dict[int, str]:
@@ -794,6 +801,27 @@ class AxiumController:
 
         await self.async_send(CMD_ZONE_NAME_REQUEST, zone)
 
+    async def async_set_zone_name(self, zone: int, name: str) -> None:
+        """Write a zone's name to the amplifier (command 0x1C), then read back.
+
+        The name is stored on the amplifier itself (so it survives on the front
+        panel and for other controllers). Names are limited to ~15 UTF-8 bytes,
+        truncated on a character boundary so multi-byte names are not split.
+        Real amplifiers send no notification after a set, so we request the name
+        afterwards to refresh our cache.
+        """
+        from .const import CMD_ZONE_NAME_REQUEST
+
+        encoded = name.encode("utf-8")[:15]
+        while encoded:
+            try:
+                encoded.decode("utf-8")
+                break
+            except UnicodeDecodeError:
+                encoded = encoded[:-1]
+        await self.async_send(CMD_ZONE_NAME, zone, *encoded)
+        await self.async_send(CMD_ZONE_NAME_REQUEST, zone)
+
     async def async_link_zones(self, zones: list[int], options: int) -> None:
         """Link a set of zones into a group on the amplifier (command 0x30).
 
@@ -830,6 +858,9 @@ class AxiumController:
         await self.async_send(
             CMD_SOURCE_NAME, ZONE_ALL, source_id, 0x00, device, flags, *encoded
         )
+        # Real amplifiers do not echo a set; re-read so our cached name (and the
+        # media_player source_list the cards render) reflects the change.
+        await self._request_source_names()
 
     # -- presets ---------------------------------------------------------
 
@@ -864,6 +895,8 @@ class AxiumController:
             self._auto_power_options,
             self._auto_power_standby_n,
         )
+        # Real amplifiers do not echo a set; re-read the applied configuration.
+        await self._request_auto_power()
 
     async def async_set_auto_power_bit(self, bit: int, enabled: bool) -> None:
         """Enable/disable an auto-power option bit, preserving the others."""

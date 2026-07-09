@@ -519,7 +519,12 @@ class AxiumNumber(NumberEntity):
         return self._desc.getter(self._controller.zone_state(self._zone))
 
     async def async_set_native_value(self, value: float) -> None:
-        """Set the value on the amplifier."""
+        """Set the value on the amplifier, then read it back.
+
+        Real amplifiers send no notification after a set, so request the value
+        again (a command with no data byte) to refresh our cache.
+        """
         await self._controller.async_send(
             self._desc.command, self._zone, self._desc.to_byte(value)
         )
+        await self._controller.async_send(self._desc.command, self._zone)

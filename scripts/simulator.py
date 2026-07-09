@@ -250,37 +250,50 @@ class Simulator:
             await writer.drain()
 
     # -- state changes (used by both the protocol and the console) -------
+    #
+    # Real Axium amplifiers send NO notification after a control client's set —
+    # they only reply to an explicit request. So a set from a connected client
+    # (Home Assistant) updates state silently (echo=False); only an *unsolicited*
+    # change, i.e. one typed at this simulator's console (echo=True, the
+    # default, emulating a front-panel action), broadcasts to clients.
 
-    async def set_power(self, zone: Zone, on: bool) -> None:
+    async def set_power(self, zone: Zone, on: bool, echo: bool = True) -> None:
         zone.power = on
-        await self.broadcast(
-            encode(0x01, zone.number, 0x01 if on else 0x00),
-            f"{zone.name} power {'on' if on else 'off'}",
-        )
+        if echo:
+            await self.broadcast(
+                encode(0x01, zone.number, 0x01 if on else 0x00),
+                f"{zone.name} power {'on' if on else 'off'}",
+            )
 
-    async def set_mute(self, zone: Zone, muted: bool) -> None:
+    async def set_mute(self, zone: Zone, muted: bool, echo: bool = True) -> None:
         zone.muted = muted
-        await self.broadcast(
-            encode(0x02, zone.number, 0x00 if muted else 0x01),
-            f"{zone.name} {'muted' if muted else 'unmuted'}",
-        )
+        if echo:
+            await self.broadcast(
+                encode(0x02, zone.number, 0x00 if muted else 0x01),
+                f"{zone.name} {'muted' if muted else 'unmuted'}",
+            )
 
-    async def set_volume(self, zone: Zone, v1: int) -> None:
+    async def set_volume(self, zone: Zone, v1: int, echo: bool = True) -> None:
         zone.volume = max(0, min(160, v1))
-        await self.broadcast(
-            encode(0x04, zone.number, zone.volume),
-            f"{zone.name} volume {round(zone.volume / 160 * 100)}%",
-        )
+        if echo:
+            await self.broadcast(
+                encode(0x04, zone.number, zone.volume),
+                f"{zone.name} volume {round(zone.volume / 160 * 100)}%",
+            )
 
-    async def set_source(self, zone: Zone, byte: int, turn_on: bool) -> None:
+    async def set_source(
+        self, zone: Zone, byte: int, turn_on: bool, echo: bool = True
+    ) -> None:
         zone.source = byte & 0x3F
         if turn_on:
             zone.power = True
         flags = 0x80 if turn_on else 0x00
-        await self.broadcast(
-            encode(0x03, zone.number, zone.source | flags),
-            f"{zone.name} source {SOURCE_BYTE_TO_NAME.get(zone.source, hex(zone.source))}",
-        )
+        if echo:
+            await self.broadcast(
+                encode(0x03, zone.number, zone.source | flags),
+                f"{zone.name} source "
+                f"{SOURCE_BYTE_TO_NAME.get(zone.source, hex(zone.source))}",
+            )
 
     # -- incoming protocol handling --------------------------------------
 
@@ -314,6 +327,12 @@ class Simulator:
             writer.write(encode(0xAF, 0xFF, *self.zones))
             await self._safe_drain(writer)
             return
+        if command == 0x1C and data:  # Zone name set (silent; the client re-reads)
+            z = self.zones.get(zone_byte)
+            if z:
+                z.name = bytes(data).decode("utf-8", "replace").rstrip("\x00")
+                print(f"   zone {zone_byte} renamed to '{z.name}'")
+            return
         if command == 0x38:  # Zone name request
             z = self.zones.get(zone_byte)
             if z:
@@ -322,15 +341,11 @@ class Simulator:
             return
         if command == 0x0C:  # Amplifier special features (loudness/mono)
             for z in self._resolve_zones(zone_byte):
-                if data:
+                if data:  # set (silent; the client re-reads)
                     z.special[0] = data[0]
                     if len(data) >= 2:
                         z.special[1] = data[1]
-                    await self.broadcast(
-                        encode(0x0C, z.number, z.special[0], z.special[1]),
-                        f"{z.name} special",
-                    )
-                else:
+                else:  # request -> reply with current value
                     reply = encode(0x0C, z.number, z.special[0], z.special[1])
                     writer.write(reply)
                     log("-> reply  ", reply, f"{z.name} special")
@@ -338,12 +353,9 @@ class Simulator:
                 await self._safe_drain(writer)
             return
         if command == 0x32:  # Source gain (set: id+gain, request: id)
-            if len(data) >= 2:
+            if len(data) >= 2:  # set (silent; the client re-reads)
                 self.source_gain[data[0]] = data[1]
-                await self.broadcast(
-                    encode(0x32, 0xFF, data[0], data[1]), f"source {data[0]} gain"
-                )
-            elif data:
+            elif data:  # request -> reply with current value
                 reply = encode(0x32, 0xFF, data[0], self.source_gain.get(data[0], 0))
                 writer.write(reply)
                 log("-> reply  ", reply, f"source {data[0]} gain")
@@ -353,12 +365,8 @@ class Simulator:
         # audio delay, power-on volume, zone gain.
         if command in (0x05, 0x06, 0x07, 0x0D, 0x31, 0x48, 0x44):
             for z in self._resolve_zones(zone_byte):
-                if data:  # set
+                if data:  # set (silent; the client re-reads)
                     z.settings[command] = data[0]
-                    await self.broadcast(
-                        encode(command, z.number, data[0]),
-                        f"{z.name} {command:02X}={data[0]}",
-                    )
                 else:  # request -> reply with current value
                     reply = encode(command, z.number, z.settings.get(command, 0))
                     writer.write(reply)
@@ -445,12 +453,11 @@ class Simulator:
                         writer.write(reply)
                         log("-> reply  ", reply, f"source {sid}")
                 await self._safe_drain(writer)
-            elif len(data) >= 4:  # set the source name
+            elif len(data) >= 4:  # set the source name (silent; the client re-reads)
                 sid = data[0]
                 name = bytes(data[4:]).decode("utf-8", "replace").rstrip("\x00")
                 self.source_names[sid] = name
                 print(f"   source {sid} renamed to '{name}'")
-                await self.broadcast(self._source_name_frame(sid), f"source {sid} name")
             return
         if command == 0x30:  # Link zones (command, or request when 0x30 FF 20)
             if len(data) <= 1:  # request for the current groups
@@ -484,29 +491,31 @@ class Simulator:
                 log("-> reply  ", reply, f"{z.name} state")
             await self._safe_drain(writer)
             return
+        # A set from a control client updates state silently (echo=False): real
+        # amplifiers only report state when explicitly requested afterwards.
         if command == 0x01 and data:  # Power
             on = self._power_target(data[0], primary)
             for z in self._expand(base, LINK_OPT_STANDBY):
-                await self.set_power(z, on)
+                await self.set_power(z, on, echo=False)
         elif command == 0x02 and data:  # Mute
             muted = self._mute_target(data[0], primary)
             for z in self._expand(base, LINK_OPT_VOLUME):
-                await self.set_mute(z, muted)
+                await self.set_mute(z, muted, echo=False)
         elif command == 0x04 and data:  # Volume
             for z in self._expand(base, LINK_OPT_VOLUME):
-                await self.set_volume(z, data[0])
+                await self.set_volume(z, data[0], echo=False)
         elif command == 0x11:  # Volume up (relative keeps per-zone offsets)
             step = data[0] if data else 4
             for z in self._expand(base, LINK_OPT_VOLUME):
-                await self.set_volume(z, z.volume + step)
+                await self.set_volume(z, z.volume + step, echo=False)
         elif command == 0x12:  # Volume down
             step = data[0] if data else 4
             for z in self._expand(base, LINK_OPT_VOLUME):
-                await self.set_volume(z, z.volume - step)
+                await self.set_volume(z, z.volume - step, echo=False)
         elif command == 0x03 and data:  # Source select
             turn_on = bool(data[0] & 0x80)
             for z in self._expand(base, LINK_OPT_SOURCE):
-                await self.set_source(z, data[0], turn_on)
+                await self.set_source(z, data[0], turn_on, echo=False)
 
     def _source_name_frame(self, source_id: int) -> bytes:
         """Build a Source Name and Options (0x29) report for one source."""
