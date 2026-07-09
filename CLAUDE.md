@@ -77,6 +77,15 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   to `source_list`/`source_ids`/select via `_effective_source_ids`. now-playing/transport already
   lights up for `MEDIA_SOURCE_BYTES`. Simulator (a DAV) answers media-status only for `>=0x10` sources
   it has (0x10+0x12) — keep it that way so the integration doesn't over-detect Media Player 2-8.
+- **One internal media player per *stack*, not per amp** (probed on the real 2-amp AX-800-X stack):
+  only Media Player 1 (`0x12`) answers a media-status probe, and it answers for **every** zone on both
+  amps (1-16); `0x13`-`0x19` and AirPlay `0x10` stay silent. `0x29` (Source Name and Options) lists only
+  the 8 analog sources (S1-S8, device byte 0) — the media player is not a reassignable source slot there.
+  So a second internal player would need enabling/assigning **on the expansion amp itself** (feature-
+  unlock/setup, not in the control protocol; the expansion amp isn't even directly TCP-reachable — only
+  via the master's relay). Nothing to change in code: `_request_media_sources` already probes `0x12`-`0x19`,
+  so if a 2nd player were ever enabled it'd auto-appear. Independent per-zone streams → Music Assistant
+  (the amp is a per-zone DLNA renderer), not the single internal player.
 - **What the control protocol can/can't do** (AxiumCommsProtocol.pdf, 25pp): network config IS
   settable — `0x3A`: setting `03h` = flags (bit0 0=DHCP/1=Static) + 16 bytes IP/subnet/DNS/router;
   `83h` reads it back; `08h`/`88h` = AirPlay enable/status (only meaningful on AirPlay hardware).

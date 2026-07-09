@@ -351,6 +351,19 @@ shows **now-playing and transport** (play/pause/next/prev).
 - The internal player is a single stream fanned to whichever zones select it —
   point a **zone group** at it to play in several rooms at once.
 
+> **Stacked amplifiers share one internal player.** On a multi-amp stack the
+> internal Media Player is a **single, stack-wide source** — *not* one per amp.
+> (Verified by probing the protocol directly: only Media Player 1 answers, and it
+> answers for every zone on both amps; Media Player 2–8 and AirPlay stay silent.)
+> So selecting **Media Player** on a zone on amp 1 *and* a zone on amp 2 plays the
+> **same** stream, not two independent ones. For **different audio on different
+> amps/zones at the same time**, use Music Assistant's DLNA provider (above) — it
+> drives each zone as its own renderer, which the single internal player can't do.
+> A second internal player would have to be enabled/assigned on the expansion amp
+> itself (a feature-unlock / setup matter on that amp, not in the TCP control
+> protocol); if that were ever done, the integration probes `0x12`–`0x19` on every
+> connect and would surface it as a second **Media Player** source automatically.
+
 ### AirPlay via Music Assistant (only on amps with AirPlay)
 
 On an amp whose probe reveals **AirPlay**, [Music Assistant](https://www.music-assistant.io/)'s
