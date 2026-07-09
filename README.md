@@ -144,10 +144,13 @@ identify command, or a firewall is blocking the reply.
    - **Port** – defaults to `17037`.
    - **Name** – a friendly name for the amplifier.
 
-> **If the amplifier's IP later changes** (e.g. a new DHCP lease after a reboot),
-> you don't need to remove the integration — open its entry and choose
-> **Reconfigure** to update the host/port. Your zones, sources and settings are
-> kept. A DHCP reservation on your router avoids the change in the first place.
+> **To rename the hub or change its address**, open the entry and choose
+> **Reconfigure**. It offers a **Name** (renames the hub — the whole stack is
+> reached over one connection, so there is a single host/port) plus **Host** and
+> **Port** for when the amplifier's IP changes (e.g. a new DHCP lease after a
+> reboot). Your zones, sources and settings are kept. A DHCP reservation on your
+> router avoids the change in the first place. You can also rename the hub — and
+> each stacked amp — straight from its device page (the pencil).
 >
 > To stop the IP moving at all, the amplifier device has a **Static IP address**
 > switch: turn it on to pin the amp's current address as static (so a reboot
@@ -486,6 +489,17 @@ that zone is on that source; tap a cell to route the zone there, or tap the
 zone's currently-active (highlighted) cell to **turn that zone off**. It's the
 fastest way to see and change what every room is playing at once. Auto-detects
 the hub's zones and sources.
+
+The row and column **headers are interactive** too:
+
+- **Tap a zone name** → quick controls for that room: a **volume slider**, mute,
+  and **previous / play-pause / next**.
+- **Hold a zone name** (long-press) → open that zone's **device page** (tone,
+  gains, sleep timer and other settings).
+- **Tap a source name** → pick a **preset**; its zones start playing that source
+  (and any other zone currently on that source is turned off, so the source ends
+  up playing in exactly the preset's rooms). Presets are managed in the Axium
+  options.
 
 **Show/hide** what appears: both the source card and the matrix card have
 **Zones to show** (and the matrix card, **Sources to show**) fields in the

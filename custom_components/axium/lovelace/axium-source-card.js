@@ -1117,10 +1117,14 @@ class AxiumHubCardEditor extends HTMLElement {
 /**
  * Axium Matrix Card — the whole-system routing grid for one amplifier.
  *
- * Zones are rows, sources are columns (plus an "Off" column). Each cell shows
- * whether that zone is on that source; tapping a cell routes the zone there (or
- * off). It reads/writes only through the zones' media_player state, storing
- * nothing itself.
+ * Zones are rows, sources are columns. Each cell shows whether that zone is on
+ * that source; tapping a cell routes the zone there, tapping its active cell
+ * turns the zone off. Beyond the grid the headers are interactive:
+ *   - tap a zone name  → quick volume + transport controls for that zone
+ *   - hold a zone name → open the zone's device page
+ *   - tap a source name → pick a preset to route onto that source
+ * It reads/writes only through the zones' media_player state, storing nothing
+ * itself.
  *
  * Config:
  *   type: custom:axium-matrix-card
@@ -1255,8 +1259,8 @@ class AxiumMatrixCard extends HTMLElement {
       sources
         .map(
           (s) =>
-            `<div class="colhead" data-src="${s.id}" title="${s.name}">` +
-            `<span>${s.name}</span></div>`
+            `<div class="colhead" role="button" tabindex="0" data-src="${s.id}"` +
+            ` title="${s.name}"><span>${s.name}</span></div>`
         )
         .join("");
     const rows = zones
@@ -1269,8 +1273,8 @@ class AxiumMatrixCard extends HTMLElement {
           )
           .join("");
         return (
-          `<div class="rowhead" data-zone="${z}" title="${this._zoneName(z)}">` +
-          `${this._zoneName(z)}</div>` +
+          `<div class="rowhead" role="button" tabindex="0" data-zone="${z}"` +
+          ` title="${this._zoneName(z)}">${this._zoneName(z)}</div>` +
           cells
         );
       })
@@ -1287,6 +1291,7 @@ class AxiumMatrixCard extends HTMLElement {
             ${head}${rows}
           </div>
         </div>
+        <div class="overlay" id="overlay" hidden><div class="sheet" id="sheet"></div></div>
       </ha-card>
     `;
 
@@ -1295,7 +1300,300 @@ class AxiumMatrixCard extends HTMLElement {
       if (!cell) return;
       this._route(cell.dataset.zone, cell.dataset.src);
     });
+    // Zone header: tap for quick volume/transport, hold for the device page.
+    for (const rh of this.shadowRoot.querySelectorAll(".rowhead[data-zone]")) {
+      this._attachHold(
+        rh,
+        () => this._openZonePanel(rh.dataset.zone),
+        () => this._openZoneDevice(rh.dataset.zone)
+      );
+    }
+    // Source header: tap to route a preset's zones onto that source.
+    for (const ch of this.shadowRoot.querySelectorAll(".colhead[data-src]")) {
+      const open = () => this._openPresetPanel(ch.dataset.src);
+      ch.addEventListener("click", open);
+      ch.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          open();
+        }
+      });
+    }
+    const overlay = this.shadowRoot.getElementById("overlay");
+    overlay.addEventListener("click", (ev) => {
+      if (ev.target === overlay) this._closePanel();
+    });
+    this._panel = null;
     this._built = true;
+  }
+
+  /**
+   * Wire an element for tap vs. hold using pointer events (works for mouse and
+   * touch). A 500ms hold fires `onHold` and suppresses the following click;
+   * a plain tap (or Enter/Space) fires `onTap`.
+   */
+  _attachHold(el, onTap, onHold) {
+    let timer = null;
+    let held = false;
+    const cancel = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
+    el.addEventListener("pointerdown", () => {
+      held = false;
+      cancel();
+      timer = setTimeout(() => {
+        held = true;
+        onHold();
+      }, 500);
+    });
+    el.addEventListener("pointerup", cancel);
+    el.addEventListener("pointerleave", cancel);
+    el.addEventListener("pointercancel", cancel);
+    el.addEventListener("click", (ev) => {
+      if (held) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        held = false;
+        return;
+      }
+      onTap();
+    });
+    el.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        onTap();
+      }
+    });
+    el.addEventListener("contextmenu", (ev) => ev.preventDefault());
+  }
+
+  /** Navigate to a zone's device page (fallback: its more-info dialog). */
+  _openZoneDevice(id) {
+    const entry = this._hass.entities && this._hass.entities[id];
+    const deviceId = entry && entry.device_id;
+    if (deviceId) {
+      history.pushState(null, "", `/config/devices/device/${deviceId}`);
+      this.dispatchEvent(
+        new CustomEvent("location-changed", { bubbles: true, composed: true })
+      );
+      return;
+    }
+    this.dispatchEvent(
+      new CustomEvent("hass-more-info", {
+        detail: { entityId: id },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
+  // -- presets & popover ----------------------------------------------
+
+  /** The hub's zone presets (read from any hub zone's attribute). */
+  _presets() {
+    for (const id of axiumMediaPlayers(this._hass, this._hubId())) {
+      const st = this._hass.states[id];
+      const p = st && st.attributes.axium_presets;
+      if (Array.isArray(p)) return p;
+    }
+    return [];
+  }
+
+  /**
+   * Apply a preset onto one source column "set exactly": its zones (that offer
+   * the source) start playing it, and any zone currently on that source but not
+   * in the preset is turned off — so the source's active set becomes exactly the
+   * preset. Mirrors the source card's preset behaviour.
+   */
+  _applyPresetToSource(index, sid) {
+    const preset = this._presets()[Number(index)];
+    if (!preset) return;
+    const known = new Set(this._zones());
+    const target = (preset.zones || []).filter((z) => known.has(z));
+    const targetSet = new Set(target);
+    for (const z of target) {
+      const name = this._sourceNameFor(this._hass.states[z], sid);
+      if (name != null) {
+        this._hass.callService("media_player", "select_source", {
+          entity_id: z,
+          source: name,
+        });
+      }
+    }
+    for (const z of this._zones()) {
+      if (targetSet.has(z)) continue;
+      const st = this._hass.states[z];
+      const on = st && !OFF_STATES.includes(st.state);
+      if (on && this._currentSourceId(st) === sid) {
+        this._hass.callService("media_player", "turn_off", { entity_id: z });
+      }
+    }
+  }
+
+  _closePanel() {
+    const overlay = this.shadowRoot.getElementById("overlay");
+    if (overlay) overlay.hidden = true;
+    if (this._volTimer) {
+      clearTimeout(this._volTimer);
+      this._volTimer = null;
+    }
+    this._panel = null;
+  }
+
+  /** Quick per-zone volume slider + mute + transport, in the popover. */
+  _openZonePanel(zoneId) {
+    const sheet = this.shadowRoot.getElementById("sheet");
+    sheet.innerHTML = `
+      <div class="sheet-head">
+        <span class="sheet-title"></span>
+        <button class="iconbtn close" title="Close"><ha-icon icon="mdi:close"></ha-icon></button>
+      </div>
+      <div class="volrow">
+        <button class="iconbtn mute" title="Mute"><ha-icon icon="mdi:volume-high"></ha-icon></button>
+        <input class="slider" type="range" min="0" max="100" step="1" aria-label="Volume">
+        <span class="volval"></span>
+      </div>
+      <div class="transport">
+        <button class="iconbtn" data-t="prev" title="Previous"><ha-icon icon="mdi:skip-previous"></ha-icon></button>
+        <button class="iconbtn play" data-t="play" title="Play/Pause"><ha-icon icon="mdi:play"></ha-icon></button>
+        <button class="iconbtn" data-t="next" title="Next"><ha-icon icon="mdi:skip-next"></ha-icon></button>
+      </div>
+    `;
+    sheet.querySelector(".sheet-title").textContent = this._zoneName(zoneId);
+    const slider = sheet.querySelector(".slider");
+    slider.addEventListener("input", () => {
+      this._panel.dragging = true;
+      sheet.querySelector(".volval").textContent = `${slider.value}%`;
+      this._scheduleVolume(zoneId, Number(slider.value));
+    });
+    slider.addEventListener("change", () => {
+      this._setVolume(zoneId, Number(slider.value));
+      this._panel.dragging = false;
+    });
+    sheet.querySelector(".mute").addEventListener("click", () =>
+      this._toggleMute(zoneId)
+    );
+    for (const b of sheet.querySelectorAll("button[data-t]")) {
+      b.addEventListener("click", () => {
+        const svc =
+          b.dataset.t === "prev"
+            ? "media_previous_track"
+            : b.dataset.t === "next"
+            ? "media_next_track"
+            : "media_play_pause";
+        this._hass.callService("media_player", svc, { entity_id: zoneId });
+      });
+    }
+    sheet.querySelector(".close").addEventListener("click", () => this._closePanel());
+    this._panel = { type: "zone", zoneId, dragging: false };
+    this.shadowRoot.getElementById("overlay").hidden = false;
+    this._refreshPanel();
+  }
+
+  _scheduleVolume(zoneId, pct) {
+    if (this._volTimer) clearTimeout(this._volTimer);
+    this._volTimer = setTimeout(() => this._setVolume(zoneId, pct), 120);
+  }
+
+  _setVolume(zoneId, pct) {
+    if (this._volTimer) {
+      clearTimeout(this._volTimer);
+      this._volTimer = null;
+    }
+    this._hass.callService("media_player", "volume_set", {
+      entity_id: zoneId,
+      volume_level: Math.max(0, Math.min(1, pct / 100)),
+    });
+  }
+
+  _toggleMute(zoneId) {
+    const st = this._hass.states[zoneId];
+    if (!st) return;
+    this._hass.callService("media_player", "volume_mute", {
+      entity_id: zoneId,
+      is_volume_muted: !st.attributes.is_volume_muted,
+    });
+  }
+
+  /** Preset picker for one source column, in the popover. */
+  _openPresetPanel(sourceId) {
+    const sid = Number(sourceId);
+    const sheet = this.shadowRoot.getElementById("sheet");
+    const presets = this._presets();
+    const srcName = (this._sources().find((s) => s.id === sid) || {}).name || "";
+    const body = presets.length
+      ? `<div class="preset-list">` +
+        presets
+          .map(
+            (p, i) =>
+              `<button class="preset-item" data-idx="${i}">` +
+              `<ha-icon icon="mdi:speaker-multiple"></ha-icon><span></span></button>`
+          )
+          .join("") +
+        `</div>`
+      : `<div class="empty">No presets configured. Add them in the Axium options.</div>`;
+    sheet.innerHTML = `
+      <div class="sheet-head">
+        <span class="sheet-title"></span>
+        <button class="iconbtn close" title="Close"><ha-icon icon="mdi:close"></ha-icon></button>
+      </div>
+      ${body}
+    `;
+    sheet.querySelector(".sheet-title").textContent = srcName
+      ? `${srcName} · preset`
+      : "Preset";
+    for (const b of sheet.querySelectorAll(".preset-item")) {
+      b.querySelector("span").textContent = presets[Number(b.dataset.idx)].name;
+      b.addEventListener("click", () => {
+        this._applyPresetToSource(Number(b.dataset.idx), sid);
+        this._closePanel();
+      });
+    }
+    sheet.querySelector(".close").addEventListener("click", () => this._closePanel());
+    this._panel = { type: "preset", sourceId: sid };
+    this.shadowRoot.getElementById("overlay").hidden = false;
+  }
+
+  /** Keep an open zone popover's slider/mute/transport in step with state. */
+  _refreshPanel() {
+    if (!this._panel || this._panel.type !== "zone") return;
+    const sheet = this.shadowRoot.getElementById("sheet");
+    if (!sheet) return;
+    const st = this._hass.states[this._panel.zoneId];
+    if (!st) return;
+    const slider = sheet.querySelector(".slider");
+    const volval = sheet.querySelector(".volval");
+    const lvl = st.attributes.volume_level;
+    if (slider && !this._panel.dragging && typeof lvl === "number") {
+      const pct = Math.round(lvl * 100);
+      slider.value = String(pct);
+      if (volval) volval.textContent = `${pct}%`;
+    }
+    const muteIcon = sheet.querySelector(".mute ha-icon");
+    if (muteIcon) {
+      muteIcon.setAttribute(
+        "icon",
+        st.attributes.is_volume_muted ? "mdi:volume-off" : "mdi:volume-high"
+      );
+    }
+    const feat = st.attributes.supported_features || 0;
+    const setT = (t, ok) => {
+      const b = sheet.querySelector(`button[data-t="${t}"]`);
+      if (b) b.toggleAttribute("disabled", !ok);
+    };
+    setT("prev", !!(feat & SUPPORT_PREVIOUS_TRACK));
+    setT("next", !!(feat & SUPPORT_NEXT_TRACK));
+    setT("play", !!(feat & (SUPPORT_PLAY | SUPPORT_PAUSE)));
+    const playIcon = sheet.querySelector('button[data-t="play"] ha-icon');
+    if (playIcon) {
+      playIcon.setAttribute(
+        "icon",
+        st.state === "playing" ? "mdi:pause" : "mdi:play"
+      );
+    }
   }
 
   _update() {
@@ -1332,11 +1630,12 @@ class AxiumMatrixCard extends HTMLElement {
       h.title = name;
       h.textContent = name;
     }
+    this._refreshPanel();
   }
 }
 
 AxiumMatrixCard.styles = `
-  ha-card { padding: 12px; }
+  ha-card { padding: 12px; position: relative; }
   .title { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: var(--primary-text-color); }
   .scroll { overflow-x: auto; }
   .matrix { display: grid; gap: 4px; align-items: stretch; min-width: min-content; }
@@ -1344,12 +1643,21 @@ AxiumMatrixCard.styles = `
   .colhead, .rowhead {
     font-size: 0.8rem; color: var(--secondary-text-color);
     display: flex; align-items: center; overflow: hidden;
+    cursor: pointer;
+  }
+  .colhead:hover span, .rowhead:hover { color: var(--primary-color); }
+  .colhead:focus-visible, .rowhead:focus-visible {
+    outline: 2px solid var(--primary-color); outline-offset: 1px; border-radius: 4px;
   }
   .colhead { justify-content: center; text-align: center; padding: 0 2px; }
   .colhead span, .rowhead {
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
   }
-  .rowhead { font-size: 0.9rem; color: var(--primary-text-color); padding-right: 6px; }
+  .rowhead {
+    font-size: 0.9rem; color: var(--primary-text-color); padding-right: 6px;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    touch-action: manipulation;
+  }
   .cell {
     display: inline-flex; align-items: center; justify-content: center;
     min-height: 40px; border-radius: 8px;
@@ -1367,6 +1675,66 @@ AxiumMatrixCard.styles = `
   }
   .cell.active ha-icon { opacity: 1; }
   .cell.unavailable { opacity: 0.3; pointer-events: none; }
+  .overlay {
+    position: absolute; inset: 0; z-index: 5;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, 0.35);
+    border-radius: var(--ha-card-border-radius, 12px);
+  }
+  .overlay[hidden] { display: none; }
+  .sheet {
+    background: var(--card-background-color, var(--ha-card-background, #fff));
+    border: 1px solid var(--divider-color);
+    border-radius: 12px; padding: 12px 14px;
+    min-width: 240px; max-width: 92%;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+  .sheet-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin-bottom: 10px;
+  }
+  .sheet-title {
+    font-weight: 600; color: var(--primary-text-color);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .volrow { display: flex; align-items: center; gap: 10px; }
+  .slider {
+    flex: 1 1 auto; min-width: 120px; height: 24px;
+    accent-color: var(--primary-color); cursor: pointer;
+  }
+  .volval {
+    width: 40px; text-align: right; font-size: 0.85rem;
+    color: var(--secondary-text-color);
+  }
+  .transport {
+    display: flex; align-items: center; justify-content: center;
+    gap: 8px; margin-top: 8px;
+  }
+  .iconbtn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; border-radius: 50%;
+    border: none; background: none; cursor: pointer;
+    color: var(--primary-text-color);
+    transition: background 0.15s, transform 0.05s;
+  }
+  .iconbtn:hover { background: var(--secondary-background-color); }
+  .iconbtn:active { transform: scale(0.92); }
+  .iconbtn[disabled] { opacity: 0.3; pointer-events: none; }
+  .iconbtn.close { width: 36px; height: 36px; color: var(--secondary-text-color); }
+  .iconbtn.play { color: var(--primary-color); }
+  .iconbtn.play ha-icon { --mdc-icon-size: 30px; }
+  .preset-list { display: flex; flex-direction: column; gap: 6px; }
+  .preset-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; border-radius: 8px;
+    border: 1px solid var(--divider-color);
+    background: var(--card-background-color);
+    color: var(--primary-text-color);
+    font: inherit; text-align: left; cursor: pointer;
+  }
+  .preset-item:hover { border-color: var(--primary-color); }
+  .preset-item ha-icon { --mdc-icon-size: 20px; color: var(--primary-color); }
+  .empty { color: var(--secondary-text-color); font-size: 0.9rem; padding: 4px 0; }
 `;
 
 /** Visual (UI) editor for the matrix card — amplifier, zones, sources, name. */

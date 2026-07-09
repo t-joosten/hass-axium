@@ -123,6 +123,14 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `name_by_user` changes it calls `async_set_zone_name` (`CMD_ZONE_NAME` 0x1C, ~15-byte
   cap). We never write the registry back, so it can't loop. (Source names have their own
   editable text entity; zone names use the device pencil.)
+- **Hub rename**: the same `_handle_device_rename` listener also mirrors the **hub**
+  device's `name_by_user` → the **config-entry title** (so the integrations page shows the
+  chosen name). The **reconfigure flow** also carries a **Name** field (the whole stack is
+  one TCP connection — a single host/port — so there's no per-amp connection to configure;
+  renaming there updates the title *and* the hub device name unless it has a `name_by_user`
+  override). `async_setup_entry` also syncs an existing hub `name_by_user` → title at start.
+  A title-only update does **not** reload the entry (`_async_update_listener` compares only
+  `entry.options`). Expansion amps are separate devices renamed via their own pencils.
 
 ## Dashboard card (`custom_components/axium/lovelace/axium-source-card.js`)
 
@@ -140,6 +148,14 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   model/fw/zones-on/temp/clipping + all-off; tap opens the hub device page); and
   `axium-matrix-card` (zones × sources routing grid; tap a cell to route a zone to a
   source, tap the zone's currently-active cell to turn that zone off — no Off column).
+  The matrix headers are interactive too (an in-card popover overlay, `#overlay`/`#sheet`,
+  closed by tapping the backdrop): **tap a zone name** → quick volume slider + mute +
+  prev/play-pause/next for that zone (`_openZonePanel`; slider debounced via `_scheduleVolume`,
+  live-refreshed by `_refreshPanel` from `_update` unless mid-drag); **hold a zone name** →
+  open the zone device page (`_attachHold`, reused 500ms hold pattern); **tap a source name**
+  → preset picker (`_openPresetPanel`) that applies a preset onto that column set-exactly
+  (`_applyPresetToSource`: preset zones → that source, other zones on it → off), mirroring the
+  source card's preset semantics.
   The hub card finds hub-owned entities via `entityHub` + the entity-registry `platform`,
   and the hub device by identifier `["axium", <hub id>]`. The matrix + hub cards reuse
   `axium-hub-card-editor` (hub + name) for their visual editor.

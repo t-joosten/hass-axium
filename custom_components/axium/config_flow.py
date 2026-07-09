@@ -20,7 +20,11 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT
 from homeassistant.core import callback
-from homeassistant.helpers import config_validation as cv, selector
+from homeassistant.helpers import (
+    config_validation as cv,
+    device_registry as dr,
+    selector,
+)
 
 from . import protocol
 from .const import (
@@ -211,17 +215,20 @@ class AxiumConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Change an existing entry's connection details (host/port).
+        """Rename the hub and/or change its connection details (host/port).
 
-        Use this when the amplifier's IP or port changes (e.g. a new DHCP
-        lease after a reboot) instead of deleting and re-adding the entry —
-        the discovered zones, sources and options are preserved.
+        The whole stack is reached over a single TCP connection (the primary amp
+        relays to its expansion amps), so there is one host/port for the hub.
+        Use this when the amplifier's IP or port changes (e.g. a new DHCP lease
+        after a reboot), or to rename the hub — the discovered zones, sources and
+        options are preserved.
         """
         entry = self._get_reconfigure_entry()
         errors: dict[str, str] = {}
         if user_input is not None:
             host = user_input[CONF_HOST]
             port = user_input[CONF_PORT]
+            name = (user_input.get(CONF_NAME) or "").strip()
             result = None
             try:
                 result = await _async_probe_amplifier(host, port)
@@ -233,6 +240,16 @@ class AxiumConfigFlow(ConfigFlow, domain=DOMAIN):
             if not errors:
                 units, primary_unit_id, _ = result
                 updates = {CONF_HOST: host, CONF_PORT: port}
+                if name:
+                    updates[CONF_NAME] = name
+                    # Keep the hub device's own name in step with the title,
+                    # unless the user has renamed it via the device pencil.
+                    dev_reg = dr.async_get(self.hass)
+                    hub_dev = dev_reg.async_get_device(
+                        identifiers={(DOMAIN, entry.entry_id)}
+                    )
+                    if hub_dev and not hub_dev.name_by_user:
+                        dev_reg.async_update_device(hub_dev.id, name=name)
                 # Re-detect the stack so a newly-stacked expansion amp's zones
                 # and unit are added, preserving existing zone names.
                 zones = zones_from_units(units, get_zones(entry))
@@ -240,12 +257,15 @@ class AxiumConfigFlow(ConfigFlow, domain=DOMAIN):
                     updates[CONF_ZONES] = zones
                     updates[CONF_UNITS] = units_config(units, primary_unit_id)
                 return self.async_update_reload_and_abort(
-                    entry, data_updates=updates
+                    entry, data_updates=updates, title=name or entry.title
                 )
 
         current = user_input or entry.data
         schema = vol.Schema(
             {
+                vol.Required(
+                    CONF_NAME, default=current.get(CONF_NAME, entry.title)
+                ): cv.string,
                 vol.Required(
                     CONF_HOST, default=current.get(CONF_HOST, "")
                 ): cv.string,

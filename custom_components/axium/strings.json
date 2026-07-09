@@ -11,9 +11,10 @@
         }
       },
       "reconfigure": {
-        "title": "Axium Amplifier connection",
-        "description": "Update the address the integration uses to reach the amplifier (TCP 17037). Use this if the amplifier's IP address or port changed — your zones, sources and settings are kept.",
+        "title": "Axium Amplifier",
+        "description": "Rename the hub or update the address the integration uses to reach it (TCP 17037). The whole stack is reached over one connection, so there is a single host/port. Use this if the amplifier's IP address or port changed — your zones, sources and settings are kept. Each amp is a separate device you can rename and configure from its own device page.",
         "data": {
+          "name": "Name",
           "host": "Host",
           "port": "Port"
         }

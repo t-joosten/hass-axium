@@ -211,6 +211,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         model="Amplifier",
         configuration_url=f"http://{host}",
     )
+    # If the user has renamed the hub device, keep the config-entry title in
+    # sync so the integrations page shows that name (not the default).
+    if hub.name_by_user and hub.name_by_user != entry.title:
+        hass.config_entries.async_update_entry(entry, title=hub.name_by_user)
     for unit in get_units(entry):
         if unit.get("primary"):
             continue
@@ -323,12 +327,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     @callback
     def _handle_device_rename(event: Event) -> None:
-        """Push a zone device rename (the HA pencil) through to the amplifier.
+        """Mirror an HA device rename (the pencil) to the right place.
 
-        Renaming a zone's device in HA only updates the local registry; the
-        amplifier stores its own zone names (used on the front panel and by
-        other controllers), so mirror the new name onto the amp. We never write
-        the registry back here, so this cannot loop.
+        Renaming a zone's device only updates the local registry; the amplifier
+        stores its own zone names (used on the front panel and by other
+        controllers), so mirror the new name onto the amp. Renaming the hub
+        device instead updates the config-entry title, so the integrations page
+        reflects the chosen hub name. We never write the registry back here, so
+        this cannot loop.
         """
         if event.data.get("action") != "update":
             return
@@ -336,6 +342,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return
         device = device_registry.async_get(event.data["device_id"])
         if device is None:
+            return
+        # Hub device rename -> keep the config-entry title in sync.
+        if (DOMAIN, entry.entry_id) in device.identifiers:
+            new_title = device.name_by_user or device.name
+            if new_title and new_title != entry.title:
+                hass.config_entries.async_update_entry(entry, title=new_title)
             return
         prefix = f"{entry.entry_id}_zone_"
         zone: int | None = None
