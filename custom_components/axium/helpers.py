@@ -23,6 +23,7 @@ from .const import (
     DEFAULT_SOURCE_COUNT,
     ID_KEY,
     NAME_KEY,
+    PREAMP_ZONES_BY_MODEL,
     SOURCE_AIRPLAY_BYTE,
     SOURCE_BYTE_TO_NAME,
     SOURCE_NUMBER_TO_BYTE,
@@ -125,6 +126,41 @@ def zones_from_units(
                 }
             )
     return sorted(result, key=lambda z: z[ZONE_KEY])
+
+
+def amp_zone_positions(zones: list[dict[str, Any]]) -> dict[int, int]:
+    """Map each zone id to its 1-based physical channel within its owning amp.
+
+    The amplifier lists a stacked expansion amp's zones with stack-wide numbers
+    (e.g. 9-16), but each amp's physical channels are 1..N — this recovers that
+    per-amp position so the zone can be labelled "Zone 1".."Zone 8" like the
+    amp's own "Amp Zone" field, regardless of stack numbering.
+    """
+    by_unit: dict[Any, list[int]] = {}
+    for item in zones:
+        by_unit.setdefault(item.get(UNIT_KEY), []).append(item[ZONE_KEY])
+    positions: dict[int, int] = {}
+    for nums in by_unit.values():
+        for index, zone in enumerate(sorted(nums)):
+            positions[zone] = index + 1
+    return positions
+
+
+def zone_type_label(model_code: int | None, amp_zone: int) -> str | None:
+    """Return "Pre-out" for a physical channel that has no power amp, else None.
+
+    Zone type isn't in the control protocol; this is the fixed per-model layout
+    (see PREAMP_ZONES_BY_MODEL).
+    """
+    if amp_zone in PREAMP_ZONES_BY_MODEL.get(model_code, frozenset()):
+        return "Pre-out"
+    return None
+
+
+def zone_device_model(model_code: int | None, amp_zone: int) -> str:
+    """Device model/subtitle for a zone: its physical channel + any type tag."""
+    label = zone_type_label(model_code, amp_zone)
+    return f"Zone {amp_zone}" + (f" · {label}" if label else "")
 
 
 def units_config(units: list[Any], primary_unit_id: int | None) -> list[dict[str, Any]]:

@@ -37,7 +37,15 @@ from .const import (
     ZONE_KEY,
 )
 from .controller import AxiumController, AxiumDeviceInfo, UnitInfo
-from .helpers import get_alarms, get_units, get_zones, units_config, zones_from_units
+from .helpers import (
+    amp_zone_positions,
+    get_alarms,
+    get_units,
+    get_zones,
+    units_config,
+    zone_device_model,
+    zones_from_units,
+)
 from .protocol import level_to_volume
 from .services import async_register_services
 
@@ -234,6 +242,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return (DOMAIN, entry.entry_id)
         return (DOMAIN, f"{entry.entry_id}_unit_{unit_id}")
 
+    def _enrich_zone_models(unit_id: int | None, model_code: int | None) -> None:
+        """Set a unit's zone devices' model to their physical channel (+ type).
+
+        Runs when device info (with the device-type code) arrives, since that can
+        land after the zone devices are created; it's idempotent (only writes on a
+        real change), so re-runs on every device-info reply are cheap.
+        """
+        if model_code is None:
+            return
+        zones = get_zones(entry)
+        positions = amp_zone_positions(zones)
+        for item in zones:
+            z_unit = item.get(UNIT_KEY)
+            # This unit's zones; legacy zones (no unit) belong to the primary.
+            if z_unit != unit_id and not (
+                z_unit is None and unit_id == controller.primary_unit_id
+            ):
+                continue
+            zone = item[ZONE_KEY]
+            dev = device_registry.async_get_device(
+                identifiers={(DOMAIN, f"{entry.entry_id}_zone_{zone}")}
+            )
+            if dev is None:
+                continue
+            model = zone_device_model(model_code, positions.get(zone, zone))
+            if dev.model != model:
+                device_registry.async_update_device(dev.id, model=model)
+
     @callback
     def _update_amp_device(info: AxiumDeviceInfo) -> None:
         """Enrich an amp device with its reported model and firmware."""
@@ -249,6 +285,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             updates["sw_version"] = f"v{info.firmware_major}"
         if updates:
             device_registry.async_update_device(device.id, **updates)
+        _enrich_zone_models(info.unit_id, info.model_code)
 
     controller.set_device_info_callback(_update_amp_device)
 

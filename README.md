@@ -209,6 +209,16 @@ is **written back to the amplifier** (stored on the amp itself, so it also shows
 on the front panel and to other controllers), truncated to ~15 characters. There
 is no separate settings dialog; everything is discovered from the amplifier.
 
+Each zone device also shows its **physical amp channel** as its model (its
+subtitle in the devices list) — *Zone 1*…*Zone 8* per amp, matching the
+amplifier's own "Amp Zone" label (a stacked amp's zones show 1–8 under that amp).
+On AX‑800 / AX‑800‑X, the two **pre‑out** channels (7 and 8) are marked
+*Zone 7 · Pre‑out* / *Zone 8 · Pre‑out*. (Zone type isn't in the control
+protocol — the amp lists its zones as plain numbers — so this reflects the fixed
+AX‑800 layout, the same way the amp's web app hides "Source Gain" on those
+channels.) Sources likewise show their physical label (*Source 1*…*Source 8*) as
+the editable name field's title.
+
 ### Zone groups
 
 Group zones **directly from the media player card** — open a zone, use the

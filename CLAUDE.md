@@ -112,7 +112,20 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   in the reply, requested per unit at connect, relayed like 0x2E): `network_known/is_static/ip(unit_id)`
   + `async_set_network_static(static, unit_id)`. So there's a **Static IP switch per amp** device (primary
   keeps the legacy unique id; expansion suffixed `_unit_<uid>`). media_player exposes `zone_number`
-  (physical zone). Zone *type* (amplified/pre-out/USB) is NOT in the protocol — can't auto-detect it.
+  (stack-wide physical zone).
+- **Zone device model = physical channel (+ pre-out)**: each zone device's `model` is `Zone <N>` where
+  `<N>` is the zone's 1-based **physical channel within its owning amp** (`helpers.amp_zone_positions`),
+  matching the amp web app's "Amp Zone" (a stacked amp's zones 9-16 show as Zone 1-8 under that amp).
+  Shown as the device's subtitle in the devices list. **Zone type is NOT in the control protocol** —
+  verified by raw probe: device-info (0x94) lists zones as plain bytes (`01..08`), no pre-out marker,
+  and the amp's own web app (which tunnels the *same* protocol over `/axium.cgi`) computes it from a
+  fixed per-model layout. So `helpers.zone_type_label` mirrors that: `PREAMP_ZONES_BY_MODEL` (const)
+  marks AX-800/AX-800-X (type `0x84`/`0x90`) physical channels **7-8 as `Pre-out`** (6 amplified + 2
+  pre-out), appended to the model (`Zone 7 · Pre-out`). Derived from the unit's `model_code` (read over
+  the protocol), so it needs no HTTP scraping and covers the whole stack. media_player sets it at setup
+  (best-effort if `model_code` is known then); `__init__._enrich_zone_models` re-applies it idempotently
+  when device info (with the type code) arrives, covering the setup/device-info race. Sources already
+  carry their physical label: the source-name text entity is named `Source <N>` via `SOURCE_NUMBER_TO_BYTE`.
 - **Static IP switch** (`AxiumStaticIPSwitch`, switch.py): reads the amp's network config at connect
   (`controller._request_network_config` → `_handle_network_settings` caches `NetworkConfig`); the hub
   switch toggles `async_set_network_static` which re-writes the *current* IP/subnet/DNS/router with the

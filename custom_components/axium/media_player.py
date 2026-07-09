@@ -52,7 +52,14 @@ from .const import (
     ZONE_KEY,
 )
 from .controller import AxiumController
-from .helpers import get_presets, get_sources, get_units, get_zones
+from .helpers import (
+    amp_zone_positions,
+    get_presets,
+    get_sources,
+    get_units,
+    get_zones,
+    zone_device_model,
+)
 from .protocol import level_to_volume
 
 _LOGGER = logging.getLogger(__name__)
@@ -92,12 +99,27 @@ async def async_setup_entry(
     presets = get_presets(entry)
     units = get_units(entry)
     primary_uid = next((u[UNIT_KEY] for u in units if u.get("primary")), None)
+    zones_cfg = get_zones(entry)
+    # Physical amp channel (1..N within each amp) — matches the amp web app's
+    # "Amp Zone", independent of the stack-wide zone number a stacked amp gets.
+    positions = amp_zone_positions(zones_cfg)
 
     def _via(unit_id: int | None) -> tuple[str, str]:
         """The device a zone nests under — its owning amp (primary = the hub)."""
         if unit_id is None or not units or unit_id == primary_uid:
             return (DOMAIN, entry.entry_id)
         return (DOMAIN, f"{entry.entry_id}_unit_{unit_id}")
+
+    def _model_code(unit_id: int | None) -> int | None:
+        """A zone's amp device-type code (fall back to the primary amp)."""
+        unit = controller.unit(unit_id) if unit_id is not None else None
+        if unit is None:
+            unit = controller.unit(controller.primary_unit_id)
+        return unit.model_code if unit else None
+
+    def _zone_model(item: dict) -> str:
+        amp_zone = positions.get(item[ZONE_KEY], item[ZONE_KEY])
+        return zone_device_model(_model_code(item.get(UNIT_KEY)), amp_zone)
 
     async_add_entities(
         AxiumZone(
@@ -109,8 +131,9 @@ async def async_setup_entry(
             seed_names,
             presets,
             _via(item.get(UNIT_KEY)),
+            _zone_model(item),
         )
-        for item in get_zones(entry)
+        for item in zones_cfg
     )
 
 
@@ -133,6 +156,7 @@ class AxiumZone(MediaPlayerEntity):
         seed_names: dict[int, str],
         presets: list[dict] | None = None,
         via_device: tuple[str, str] | None = None,
+        model: str | None = None,
     ) -> None:
         """Initialise the zone entity."""
         self._controller = controller
@@ -143,11 +167,13 @@ class AxiumZone(MediaPlayerEntity):
         self._media_position: int | None = None
         self._media_position_updated: datetime | None = None
         self._attr_unique_id = f"{entry.entry_id}_zone_{zone}"
+        # The model is the physical amp channel (+ "Pre-out" for line-level
+        # zones) — its subtitle in the devices list, matching the amp web app.
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"{entry.entry_id}_zone_{zone}")},
             name=name,
             manufacturer="Axium",
-            model="Zone",
+            model=model or "Zone",
             via_device=via_device or (DOMAIN, entry.entry_id),
         )
 

@@ -222,6 +222,16 @@ DEVICE_MODELS: Final[dict[int, str]] = {
     0x9C: "AX-Mini4",
 }
 
+# Physical amp channels that are pre-out (line-level, no power amplifier), keyed
+# by device-type code. The control protocol does NOT report zone type (a device
+# lists its zones as plain numbers — verified on hardware), so this mirrors the
+# fixed AX-800 layout: channels 7-8 are pre-out (6 amplified + 2 pre-out), which
+# is exactly why the amp's own web app hides "Source Gain" for those zones.
+PREAMP_ZONES_BY_MODEL: Final[dict[int, frozenset[int]]] = {
+    0x84: frozenset({7, 8}),  # AX-800 / AX-800DAV
+    0x90: frozenset({7, 8}),  # AX-800-X
+}
+
 # Mapping of physical source number (S1..S16, as labelled on the amplifier) to
 # the data byte used by the Source Selection command. The protocol's data-byte
 # ordering does not follow the S-number ordering, so this lookup is required.
