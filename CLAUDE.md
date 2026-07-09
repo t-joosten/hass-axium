@@ -211,6 +211,17 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   __init__ registers `async_track_time_change(second=0)`; on a due minute it powers zones
   on, selects source (`| SOURCE_FLAG_TURN_ON`), and fades up to target. Master arm/disarm
   = `AxiumAlarmsSwitch` (switch.py, runtime flag `hass.data[DATA_ALARMS_ENABLED]`).
+- **Notifications**: `axium.play_notification` service (services.py/.yaml) — plays a sound on
+  `zones`/`presets`, then restores each zone **exactly** (power/source/volume/mute, or off).
+  Snapshots `controller.zone_state` (inside a per-entry `asyncio.Lock` so queued calls capture
+  the *restored* state), overrides (power on, unmute, select `source` (default = detected
+  internal Media Player), set `volume`), plays the sound via `media_player.play_media` on a
+  given `renderer` (the amp's DLNA player or an MA player), waits (`_wait_media_done` polls the
+  renderer; or a fixed `duration`; or ~5s), then restores from the snapshot. **The amp can't
+  mix audio** (a zone = one source), so it *overrides* the source — no true ducking; the louder
+  notification volume + restore is the equivalent. Uses only existing commands (no sim change);
+  restore is exact because `level_to_volume(volume_to_level(b)) == b`. Needs the amp on the main
+  LAN so HA can reach its DLNA renderer (the 17037-only bridge doesn't pass UPnP).
 - **Time-left is exposed as `device_class: timestamp` sensors** (automation-usable):
   `AxiumAlarmSensor` (per alarm, next fire via `helpers.next_alarm_fire`; recomputes on a
   minute tick + `SIGNAL_ALARM_UPDATE` from the switch) and `AxiumSleepSensor` (per zone,

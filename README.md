@@ -440,6 +440,45 @@ integration — and:
 This integration's job is the amplifier side (power, volume, source). Music
 Assistant carries the audio over AirPlay.
 
+### Sound notifications (doorbell, chime, TTS)
+
+The **`axium.play_notification`** service plays a sound on the zones you choose
+and then **puts every zone back exactly as it was** — same source, volume, mute
+(or off if it was off). Because the amplifier can't *mix* audio (a zone plays one
+source at a time), it **overrides** the source for the notification rather than
+ducking under it; give the notification its own (louder) volume so it's heard,
+and each zone's original volume is restored afterwards.
+
+The sound itself is played through a **renderer** — the amp's internal Media
+Player (as a DLNA device) or a Music Assistant player — so **the amp must be on a
+network Home Assistant can reach for streaming** (i.e. your main LAN, not behind
+the 17037-only bridge). This integration handles the amplifier side (which zones,
+volume, source, and the exact restore).
+
+```yaml
+# Doorbell → chime in the hallway + kitchen, then restore
+alias: "Doorbell chime"
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.doorbell
+    to: "on"
+actions:
+  - action: axium.play_notification
+    data:
+      zones:
+        - media_player.hallway
+        - media_player.kitchen
+      volume: 55                       # notification volume (%)
+      media_player: media_player.axium_dlna   # the amp's DLNA renderer
+      media_content_id: media-source://media_source/local/doorbell.mp3
+      media_content_type: music
+```
+
+You can target `presets` (by name) instead of / in addition to `zones`, set a
+fixed `duration` instead of waiting for the renderer, or point `source` at an
+external input if the sound comes from a device wired to one of S1–S8. Overlapping
+notifications are serialised per amplifier so the save/restore never tangles.
+
 ## Dashboard card (Axium Source Card)
 
 A custom Lovelace card is included for a **source-centric** view: one card per
