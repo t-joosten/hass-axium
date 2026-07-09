@@ -1178,11 +1178,14 @@ class AxiumMatrixCard extends HTMLElement {
 
   _route(zoneId, src) {
     const st = this._hass.states[zoneId];
-    if (src === "off") {
+    const sid = Number(src);
+    // Tapping the zone's currently-active source turns the zone off (toggle).
+    const on = st && !OFF_STATES.includes(st.state);
+    if (on && this._currentSourceId(st) === sid) {
       this._hass.callService("media_player", "turn_off", { entity_id: zoneId });
       return;
     }
-    const name = this._sourceNameFor(st, Number(src));
+    const name = this._sourceNameFor(st, sid);
     if (name != null) {
       this._hass.callService("media_player", "select_source", {
         entity_id: zoneId,
@@ -1194,7 +1197,6 @@ class AxiumMatrixCard extends HTMLElement {
   _build() {
     const zones = this._zones();
     const sources = this._sources();
-    const cols = 1 + sources.length + 1; // zone label + sources + off
     const head =
       `<div class="corner"></div>` +
       sources
@@ -1203,8 +1205,7 @@ class AxiumMatrixCard extends HTMLElement {
             `<div class="colhead" data-src="${s.id}" title="${s.name}">` +
             `<span>${s.name}</span></div>`
         )
-        .join("") +
-      `<div class="colhead off"><span>Off</span></div>`;
+        .join("");
     const rows = zones
       .map((z) => {
         const cells = sources
@@ -1217,9 +1218,7 @@ class AxiumMatrixCard extends HTMLElement {
         return (
           `<div class="rowhead" data-zone="${z}" title="${this._zoneName(z)}">` +
           `${this._zoneName(z)}</div>` +
-          cells +
-          `<button class="cell off" data-zone="${z}" data-src="off">` +
-          `<ha-icon icon="mdi:power"></ha-icon></button>`
+          cells
         );
       })
       .join("");
@@ -1231,7 +1230,7 @@ class AxiumMatrixCard extends HTMLElement {
         <div class="scroll">
           <div class="matrix" style="grid-template-columns: minmax(72px,auto) repeat(${
             sources.length
-          }, minmax(44px,1fr)) auto;">
+          }, minmax(44px,1fr));">
             ${head}${rows}
           </div>
         </div>
@@ -1250,20 +1249,19 @@ class AxiumMatrixCard extends HTMLElement {
     const cells = this.shadowRoot.querySelectorAll("button.cell");
     for (const cell of cells) {
       const zoneId = cell.dataset.zone;
-      const src = cell.dataset.src;
+      const sid = Number(cell.dataset.src);
       const st = this._hass.states[zoneId];
       const on = st && !OFF_STATES.includes(st.state);
-      let active;
-      let unavailable = !st || st.state === "unavailable";
-      if (src === "off") {
-        active = !on;
-      } else {
-        const sid = Number(src);
-        active = on && this._currentSourceId(st) === sid;
-        if (this._sourceNameFor(st, sid) == null) unavailable = true;
-      }
+      const sname = this._sourceNameFor(st, sid);
+      const active = on && this._currentSourceId(st) === sid;
+      const unavailable = !st || st.state === "unavailable" || sname == null;
       cell.classList.toggle("active", !!active);
       cell.classList.toggle("unavailable", !!unavailable);
+      cell.title = active
+        ? `${this._zoneName(zoneId)}: tap to turn off`
+        : sname
+        ? `${this._zoneName(zoneId)} → ${sname}`
+        : "";
     }
     // Refresh header labels so source/zone renames appear without a rebuild — a
     // rename doesn't change the structural signature, so _build() isn't re-run.
@@ -1315,7 +1313,6 @@ AxiumMatrixCard.styles = `
     color: var(--text-primary-color, #fff);
   }
   .cell.active ha-icon { opacity: 1; }
-  .cell.off.active { background: var(--secondary-background-color); color: var(--primary-text-color); border-color: var(--divider-color); }
   .cell.unavailable { opacity: 0.3; pointer-events: none; }
 `;
 

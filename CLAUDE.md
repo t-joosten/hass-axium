@@ -82,7 +82,8 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
 - The same JS file defines THREE cards, all registered in one guard block and pushed to
   `window.customCards`: `axium-source-card`; `axium-hub-card` (compact amp status:
   model/fw/zones-on/temp/clipping + all-off; tap opens the hub device page); and
-  `axium-matrix-card` (zones × sources routing grid, tap a cell to route, Off column).
+  `axium-matrix-card` (zones × sources routing grid; tap a cell to route a zone to a
+  source, tap the zone's currently-active cell to turn that zone off — no Off column).
   The hub card finds hub-owned entities via `entityHub` + the entity-registry `platform`,
   and the hub device by identifier `["axium", <hub id>]`. The matrix + hub cards reuse
   `axium-hub-card-editor` (hub + name) for their visual editor.

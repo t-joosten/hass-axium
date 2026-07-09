@@ -441,11 +441,11 @@ dropdown does this for you).
 ### Matrix card
 
 The **Axium Matrix Card** (`type: custom:axium-matrix-card`) is the whole-system
-routing grid: **zones are rows, sources are columns** (plus an *Off* column).
-Each cell shows whether that zone is on that source; tap a cell to route the
-zone there — or the *Off* cell to turn it off. It's the fastest way to see and
-change what every room is playing at once. Auto-detects the hub's zones and
-sources.
+routing grid: **zones are rows, sources are columns**. Each cell shows whether
+that zone is on that source; tap a cell to route the zone there, or tap the
+zone's currently-active (highlighted) cell to **turn that zone off**. It's the
+fastest way to see and change what every room is playing at once. Auto-detects
+the hub's zones and sources.
 
 **Show/hide** what appears: both the source card and the matrix card have
 **Zones to show** (and the matrix card, **Sources to show**) fields in the
