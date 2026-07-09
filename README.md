@@ -31,7 +31,9 @@ from a keypad or the front panel (a `local_push` integration — no polling).
 - 🎚️ Source selection with **auto-detected source names** (rename inline in HA; written back to the amp)
 - 🎵 Works with **Music Assistant** for streaming via the amplifier's AirPlay input
 - 📡 State kept in sync over a persistent local connection — HA re-reads a zone
-  right after each command (Axium amplifiers don't echo their own control changes)
+  right after each command, and polls every zone every 30s so changes made **on
+  the amp itself** (front panel, IR) also show up (Axium amplifiers don't reliably
+  push their own control changes)
 - ♻️ Automatic reconnection with backoff
 
 ## Requirements

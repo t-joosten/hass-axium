@@ -57,6 +57,11 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   models this**: a client's set updates state silently (`echo=False`); only a change
   typed at the sim console broadcasts (front-panel emulation). The sim's old
   always-broadcast-on-set behavior *hid* this whole class of bug — keep sets silent.
+- **Zone polling**: the amp broadcasts changes made by *other TCP controllers* (verified:
+  a second client's source change reaches HA), but front-panel/IR changes aren't reliably
+  pushed. `__init__` schedules `async_track_time_interval` (30s) → `controller.async_poll_zones`
+  (re-reads power/mute/volume/source for every known zone) so on-amp changes reach HA and the
+  cards. Poll re-requests are cheap and cause no state write when unchanged.
 - **Zone rename → amp**: renaming a zone's device (HA pencil) is mirrored to the amp.
   `__init__` listens for `dr.EVENT_DEVICE_REGISTRY_UPDATED`; when a zone device's
   `name_by_user` changes it calls `async_set_zone_name` (`CMD_ZONE_NAME` 0x1C, ~15-byte

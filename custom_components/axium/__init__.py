@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
@@ -13,7 +13,10 @@ from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.event import async_track_time_change
+from homeassistant.helpers.event import (
+    async_track_time_change,
+    async_track_time_interval,
+)
 
 from .const import (
     CMD_POWER,
@@ -279,6 +282,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry.async_on_unload(
         hass.bus.async_listen(dr.EVENT_DEVICE_REGISTRY_UPDATED, _handle_device_rename)
+    )
+
+    async def _poll_zones(_now: datetime | None = None) -> None:
+        """Periodically re-read zones so on-amp changes reach HA and the cards."""
+        await controller.async_poll_zones()
+
+    entry.async_on_unload(
+        async_track_time_interval(hass, _poll_zones, timedelta(seconds=30))
     )
     return True
 

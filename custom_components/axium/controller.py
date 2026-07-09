@@ -931,6 +931,18 @@ class AxiumController:
         for command in (CMD_POWER, CMD_MUTE, CMD_VOLUME, CMD_SOURCE):
             await self.async_send(command, zone)
 
+    async def async_poll_zones(self) -> None:
+        """Re-read every known zone's state.
+
+        Changes made on the amplifier itself (front panel, IR, or another
+        controller that we miss) are not always pushed to us, so a periodic
+        poll keeps HA — and the cards — in sync with the hardware.
+        """
+        if not self.available:
+            return
+        for zone in list(self._zone_entity_ids):
+            await self.async_request_zone_state(zone)
+
     async def async_media_control(
         self, source: int, control: int, *extra: int
     ) -> None:
