@@ -377,7 +377,8 @@ class AxiumController:
             await self._request_source_names()
             await self._request_preset_names()
             await self._request_media_sources()
-            await self._request_network_config()
+            # Network config needs the unit id, so it is requested from
+            # _handle_device_info once the device-info reply has been parsed.
             # Re-read known zones' state (covers reconnects; on first connect
             # entities request it themselves as they are added).
             for zone in list(self._zone_entity_ids):
@@ -553,6 +554,7 @@ class AxiumController:
         # Now that the unit id is known, fetch unit-scoped details.
         asyncio.ensure_future(self._request_auto_power())
         asyncio.ensure_future(self.async_request_extended_info())
+        asyncio.ensure_future(self._request_network_config())
 
     def _handle_media_status(self, data: bytes) -> None:
         """Update now-playing state from a Media Status (0x3E) notification."""
