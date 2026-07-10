@@ -1355,7 +1355,7 @@ class AxiumMatrixCard extends HTMLElement {
         // master so sound actually starts.
         if (own && !own.master) {
           const ex = this._ampStreamPlayerByName(own.name);
-          if (ex && !OFF_STATES.includes(ex.state)) play(ex.entity_id, "media_pause");
+          if (ex && !OFF_STATES.includes(ex.state)) play(ex.entity_id, "media_stop");
         }
         const master = amps.find((a) => a.master);
         const mMa = master && this._ampStreamPlayerByName(master.name);
@@ -1577,8 +1577,38 @@ class AxiumMatrixCard extends HTMLElement {
   }
 
   /** Quick per-zone volume slider + mute + transport, in the popover. */
+  /** The per-zone tone (EQ) entities on a zone's device: bass/treble/balance
+   *  number entities and the loudness switch. */
+  _toneEntities(zoneId) {
+    const reg = this._hass.entities || {};
+    const devId = reg[zoneId] && reg[zoneId].device_id;
+    const out = {};
+    if (!devId) return out;
+    for (const id of Object.keys(reg)) {
+      if (reg[id].device_id !== devId || reg[id].platform !== "axium") continue;
+      if (id.startsWith("number.") && id.endsWith("_bass")) out.bass = id;
+      else if (id.startsWith("number.") && id.endsWith("_treble")) out.treble = id;
+      else if (id.startsWith("number.") && id.endsWith("_balance")) out.balance = id;
+      else if (id.startsWith("switch.") && id.endsWith("_loudness")) out.loudness = id;
+    }
+    return out;
+  }
+
   _openZonePanel(zoneId) {
     const sheet = this.shadowRoot.getElementById("sheet");
+    const tone = this._toneEntities(zoneId);
+    const row = (key, label, icon) =>
+      tone[key]
+        ? `<label class="tonerow"><ha-icon icon="${icon}"></ha-icon>` +
+          `<span class="tonelbl">${label}</span>` +
+          `<input class="toneslider" type="range" data-eid="${tone[key]}">` +
+          `<span class="toneval"></span></label>`
+        : "";
+    const loud = tone.loudness
+      ? `<label class="tonerow"><ha-icon icon="mdi:sine-wave"></ha-icon>` +
+        `<span class="tonelbl">Loudness</span>` +
+        `<input class="toneswitch" type="checkbox" data-eid="${tone.loudness}"></label>`
+      : "";
     sheet.innerHTML = `
       <div class="sheet-head">
         <span class="sheet-title"></span>
@@ -1587,22 +1617,16 @@ class AxiumMatrixCard extends HTMLElement {
           <button class="iconbtn close" title="Close"><ha-icon icon="mdi:close"></ha-icon></button>
         </span>
       </div>
-      <div class="nowplaying" hidden>
-        <div class="np-art"></div>
-        <div class="np-meta">
-          <div class="np-title"></div>
-          <div class="np-artist"></div>
-        </div>
-      </div>
       <div class="volrow">
         <button class="iconbtn mute" title="Mute"><ha-icon icon="mdi:volume-high"></ha-icon></button>
         <input class="slider" type="range" min="0" max="100" step="1" aria-label="Volume">
         <span class="volval"></span>
       </div>
-      <div class="transport">
-        <button class="iconbtn" data-t="prev" title="Previous"><ha-icon icon="mdi:skip-previous"></ha-icon></button>
-        <button class="iconbtn play" data-t="play" title="Play/Pause"><ha-icon icon="mdi:play"></ha-icon></button>
-        <button class="iconbtn" data-t="next" title="Next"><ha-icon icon="mdi:skip-next"></ha-icon></button>
+      <div class="tone">
+        ${row("bass", "Bass", "mdi:music-clef-bass")}
+        ${row("treble", "Treble", "mdi:music-note")}
+        ${row("balance", "Balance", "mdi:pan-horizontal")}
+        ${loud}
       </div>
     `;
     sheet.querySelector(".sheet-title").textContent = this._zoneName(zoneId);
@@ -1622,21 +1646,30 @@ class AxiumMatrixCard extends HTMLElement {
     sheet.querySelector(".mute").addEventListener("click", () =>
       this._toggleMute(zoneId)
     );
-    for (const b of sheet.querySelectorAll("button[data-t]")) {
-      b.addEventListener("click", () => {
-        const svc =
-          b.dataset.t === "prev"
-            ? "media_previous_track"
-            : b.dataset.t === "next"
-            ? "media_next_track"
-            : "media_play_pause";
-        this._hass.callService("media_player", svc, {
-          entity_id: this._playbackTarget(zoneId),
+    for (const el of sheet.querySelectorAll(".toneslider")) {
+      const a = (this._hass.states[el.dataset.eid] || {}).attributes || {};
+      el.min = a.min != null ? a.min : -12;
+      el.max = a.max != null ? a.max : 12;
+      el.step = a.step != null ? a.step : 1;
+      el.addEventListener("input", () => {
+        this._panel.toneDrag = el.dataset.eid;
+        el.parentElement.querySelector(".toneval").textContent = el.value;
+      });
+      el.addEventListener("change", () => {
+        this._hass.callService("number", "set_value", {
+          entity_id: el.dataset.eid,
+          value: Number(el.value),
         });
+        this._panel.toneDrag = null;
       });
     }
+    const sw = sheet.querySelector(".toneswitch");
+    if (sw)
+      sw.addEventListener("change", () =>
+        this._hass.callService("switch", "toggle", { entity_id: sw.dataset.eid })
+      );
     sheet.querySelector(".close").addEventListener("click", () => this._closePanel());
-    this._panel = { type: "zone", zoneId, dragging: false };
+    this._panel = { type: "zone", zoneId, dragging: false, toneDrag: null };
     this.shadowRoot.getElementById("overlay").hidden = false;
     this._refreshPanel();
   }
@@ -1984,20 +2017,6 @@ class AxiumMatrixCard extends HTMLElement {
     if (!sheet) return;
     const st = this._hass.states[this._panel.zoneId];
     if (!st) return;
-    const np = this._zoneNowPlaying(this._panel.zoneId);
-    const npEl = sheet.querySelector(".nowplaying");
-    if (npEl) {
-      npEl.hidden = !np;
-      if (np) {
-        const art = npEl.querySelector(".np-art");
-        if (art) {
-          art.style.backgroundImage = np.art ? `url("${np.art}")` : "";
-          art.classList.toggle("has-art", !!np.art);
-        }
-        npEl.querySelector(".np-title").textContent = np.title;
-        npEl.querySelector(".np-artist").textContent = np.artist;
-      }
-    }
     const slider = sheet.querySelector(".slider");
     const volval = sheet.querySelector(".volval");
     const lvl = st.attributes.volume_level;
@@ -2015,23 +2034,20 @@ class AxiumMatrixCard extends HTMLElement {
     }
     const powerBtn = sheet.querySelector(".power");
     if (powerBtn) powerBtn.classList.toggle("on", !OFF_STATES.includes(st.state));
-    // Transport reflects the playback target (the MA stream if one is feeding
-    // this zone), not the amp zone — the amp zone reports no transport support.
-    const tst = this._hass.states[this._playbackTarget(this._panel.zoneId)] || st;
-    const feat = tst.attributes.supported_features || 0;
-    const setT = (t, ok) => {
-      const b = sheet.querySelector(`button[data-t="${t}"]`);
-      if (b) b.toggleAttribute("disabled", !ok);
-    };
-    setT("prev", !!(feat & SUPPORT_PREVIOUS_TRACK));
-    setT("next", !!(feat & SUPPORT_NEXT_TRACK));
-    setT("play", !!(feat & (SUPPORT_PLAY | SUPPORT_PAUSE)));
-    const playIcon = sheet.querySelector('button[data-t="play"] ha-icon');
-    if (playIcon) {
-      playIcon.setAttribute(
-        "icon",
-        tst.state === "playing" ? "mdi:pause" : "mdi:play"
-      );
+    // Tone (EQ) sliders + loudness reflect their live entity values.
+    for (const el of sheet.querySelectorAll(".toneslider")) {
+      if (this._panel.toneDrag === el.dataset.eid) continue;
+      const ts = this._hass.states[el.dataset.eid];
+      if (ts && !OFF_STATES.includes(ts.state) && ts.state !== "") {
+        el.value = ts.state;
+        const v = el.parentElement.querySelector(".toneval");
+        if (v) v.textContent = ts.state;
+      }
+    }
+    const sw = sheet.querySelector(".toneswitch");
+    if (sw) {
+      const ss = this._hass.states[sw.dataset.eid];
+      sw.checked = !!ss && ss.state === "on";
     }
   }
 
@@ -2185,6 +2201,19 @@ AxiumMatrixCard.styles = `
     width: 40px; text-align: right; font-size: 0.85rem;
     color: var(--secondary-text-color);
   }
+  .tone { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+  .tonerow { display: flex; align-items: center; gap: 10px; }
+  .tonerow ha-icon { --mdc-icon-size: 20px; color: var(--secondary-text-color); }
+  .tonelbl { width: 66px; font-size: 0.9rem; color: var(--primary-text-color); }
+  .toneslider {
+    flex: 1 1 auto; min-width: 90px; height: 24px;
+    accent-color: var(--primary-color); cursor: pointer;
+  }
+  .toneval {
+    width: 34px; text-align: right; font-size: 0.85rem;
+    color: var(--secondary-text-color);
+  }
+  .toneswitch { width: 40px; height: 22px; accent-color: var(--primary-color); cursor: pointer; }
   .transport {
     display: flex; align-items: center; justify-content: center;
     gap: 8px; margin-top: 8px;

@@ -204,17 +204,14 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `axium-matrix-card` (zones × sources routing grid; tap a cell to route a zone to a
   source, tap the zone's currently-active cell to turn that zone off — no Off column).
   The matrix headers are interactive too (an in-card popover overlay, `#overlay`/`#sheet`,
-  closed by tapping the backdrop): **tap a zone name** → **now-playing** (title/artist/art via
-  `_zoneNowPlaying`: the zone's own media attributes, else a same-named `music_assistant` player
-  from `_maPlayerFor`), a **power** toggle (`_togglePower` — turn a zone off even when its source
-  isn't a column), quick volume slider + mute + prev/play-pause/next for that zone
-  (`_openZonePanel`; slider debounced via `_scheduleVolume`, live-refreshed by `_refreshPanel`
-  from `_update` unless mid-drag; `disconnectedCallback` clears the timer). **Transport routes to
-  the MA player, not the amp zone:** `_playbackTarget` returns the matched `music_assistant` player
-  when it's streaming (playing + has `media_title`), else the zone — so play/pause *resumes* the
-  DLNA stream instead of the amp's 0x3D internal player restarting the track, and `_refreshPanel`
-  reads the play-icon/supported-features from that target. **The MA player is the zone's AMP stream,
-  linked by amp — NOT by zone name** (names collide with unrelated devices, e.g. a "Woonkamer" TV):
+  closed by tapping the backdrop): **tap a zone name** → the zone popover (`_openZonePanel`): a
+  **power** toggle (`_togglePower`), a **volume** slider + mute, and the zone's **tone/EQ** controls —
+  **bass/treble/balance** sliders (`number.set_value`) + a **loudness** toggle (`switch.toggle`), found
+  on the zone's device via `_toneEntities` (matched by entity-id suffix). Now-playing and transport
+  were removed from the zone popover (they belong to the stream, not the room). Slider debounced via
+  `_scheduleVolume`, live-refreshed by `_refreshPanel` from `_update` unless mid-drag (tone sliders
+  skip refresh while `_panel.toneDrag`); `disconnectedCallback` clears the timer.
+  **Amp streams link by amp — NOT by zone name** (names collide with unrelated devices, e.g. a "Woonkamer" TV):
   `_ampNameFor` walks the device tree (zone device → `via_device` amp device → `name_by_user||name`,
   e.g. "Axium 1"); `_ampStreamPlayerFor` returns the `music_assistant` player whose friendly_name
   **equals that amp name** (so the user renames the ~2 amp-stream MA players to the amp device names in
