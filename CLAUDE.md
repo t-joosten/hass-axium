@@ -84,13 +84,15 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   So a second internal player would need enabling/assigning **on the expansion amp itself** (feature-
   unlock/setup, not in the control protocol; the expansion amp isn't even directly TCP-reachable — only
   via the master's relay). Nothing to change in code: `_request_media_sources` already probes `0x12`-`0x19`,
-  so if a 2nd player were ever enabled it'd auto-appear. **DLNA streaming is one stream PER AMP, not
-  per zone** (verified by `SetAVTransportURI` read-back: setting a URI on any amp-1 renderer overwrites
-  the others on amp 1; amp 2 stays independent). The 8 per-amp DLNA renderers (`av_transport_ctrl0-7`)
-  all **alias a single per-amp stream**, so a 2-amp stack = **2 independent streams**, not 16. (The
-  control-protocol internal Media Player 0x12 is a separate, *stack-wide* single player.) So Music
-  Assistant should drive **2 players — one per amp** (the amp's stream); zones tap in/out of their amp's
-  running stream via the Media Player source + power, and toggling a zone must NOT stop the stream.
+  so if a 2nd player were ever enabled it'd auto-appear. **The Media Player stream is STACK-WIDE, not
+  per amp** — CONFIRMED by a real-hardware listening test: pushing (SetAVTransportURI+Play) an MA stream
+  to the **master's** DLNA renderer plays on **all 16 zones** (amp 2's zone played amp 1's stream with
+  amp 2's own renderer empty). So whole-home audio via MA = **one** stream on the master (Axium 1),
+  perfectly in sync — drive **one** MA player, not two. **The `SetAVTransportURI` URI read-back is
+  misleading** (setting a URI on amp 1's renderer doesn't change amp 2's) — those are separate control
+  endpoints, but *playback* spans the stack; do not conclude "2 independent streams" from it. Zones tap
+  in/out via the Media Player source + power; toggling a zone must NOT stop the stream. **Open/untested:**
+  whether the expansion amp can override *its* zones (9-16) with a second, different stream at once.
 - **`state` must check power FIRST** (media_player `AxiumMediaPlayer.state`): while the shared internal
   Media Player plays, the amp reports **every** zone's source as `0x12` with the **turn-on bit clear**
   (verified on hardware: powered-off zones show `POWER=OFF SOURCE=0x12`). `media_state(0x12)` is global,
@@ -218,8 +220,8 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   **equals that amp name** (so the user renames the ~2 amp-stream MA players to the amp device names in
   MA; unmatched → null → falls back to the zone, never a wrong device). Turning a zone **off**
   (`_turnZoneOff`, used by both `_togglePower` and the cell-tap `_route`) **only powers off the amp zone
-  — it must NOT stop the MA stream**: each amp has ONE shared stream, so stopping it silences every
-  other zone on that amp (the reported "disable one zone → all go silent" bug). The state fix
+  — it must NOT stop the MA stream**: the Media Player stream is stack-wide (one), so stopping it
+  silences every other zone playing it (the reported "disable one zone → all go silent" bug). The state fix
   (power-first) is what makes an off zone read OFF instead of the shared stream's PLAYING. **Amps
   advertise only
   1 MediaRenderer/amp via SSDP** (the first embedded zone) so MA/HA discover only a few of the 16

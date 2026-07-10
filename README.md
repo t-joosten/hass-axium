@@ -371,13 +371,16 @@ shows **now-playing and transport** (play/pause/next/prev).
 > answers for every zone on both amps; Media Player 2–8 and AirPlay stay silent.)
 > So selecting the amp's built-in **Media Player** on a zone on amp 1 *and* a zone
 > on amp 2 plays the **same** stream (the internal player is one stack-wide source).
-> For **different audio on the two amps at the same time**, use Music Assistant's
-> DLNA renderers — each amp is its own DLNA stream. Note this is **one stream per
-> amp, not per zone**: the eight DLNA renderers on an amp all share a single stream
-> (verified — setting a track on one overwrites the others), so a two-amp stack
-> gives you **two** independent streams. Zones tap into their amp's stream via the
-> Media Player source; turning a zone off just drops it from the stream (the other
-> rooms keep playing).
+> This holds over **DLNA / Music Assistant** too (confirmed by a listening test on
+> real hardware): push an MA stream to the **master's** DLNA renderer and it plays
+> on **all 16 zones** — amp 2's zone played amp 1's stream while amp 2's own
+> renderer was empty. So whole-home audio needs just **one** MA stream on the master
+> (Axium 1), perfectly in sync. (The per-amp renderer URI read-back — setting a
+> track on one renderer not changing another — is misleading: those are separate
+> control endpoints, but playback is stack-wide.) Zones tap into the stream via the
+> Media Player source; turning a zone off just drops it (the other rooms keep
+> playing). Whether the expansion amp can override *its* zones with a second,
+> different stream at the same time is untested.
 > A second internal player would have to be enabled/assigned on the expansion amp
 > itself (a feature-unlock / setup matter on that amp, not in the TCP control
 > protocol); if that were ever done, the integration probes `0x12`–`0x19` on every
