@@ -2963,12 +2963,13 @@ AxiumAlarmsCard.styles = `
     cursor: pointer; font: inherit;
   }
   .quick { display: inline-flex; gap: 4px; margin-top: 4px; }
-  .q {
+  .q, .custom {
     padding: 3px 10px; border-radius: 14px; border: 1px solid var(--divider-color);
     background: none; cursor: pointer; font: inherit; font-size: 0.8rem;
     color: var(--primary-text-color);
   }
-  .q:hover { border-color: var(--primary-color); }
+  .custom { border-style: dashed; }
+  .q:hover, .custom:hover { border-color: var(--primary-color); }
 `;
 
 /**
@@ -3166,7 +3167,7 @@ class AxiumSleepCard extends HTMLElement {
           <div class="n">${label}</div>
           <div class="quick">${[15, 30, 60, 90]
             .map((m) => `<button class="q" data-m="${m}">${m}m</button>`)
-            .join("")}</div>
+            .join("")}<button class="custom" title="Custom minutes">Custom…</button></div>
         </div>
         <div class="cd"></div>
         <button class="x" title="Cancel" hidden>&#10005;</button>`;
@@ -3181,6 +3182,12 @@ class AxiumSleepCard extends HTMLElement {
       row.querySelectorAll(".q").forEach((b) =>
         b.addEventListener("click", () => apply(Number(b.dataset.m)))
       );
+      row.querySelector(".custom").addEventListener("click", () => {
+        const v = window.prompt("Sleep timer (minutes)", "45");
+        if (v == null) return;
+        const m = Math.round(Number(v));
+        if (Number.isFinite(m) && m > 0) apply(m);
+      });
       row.querySelector(".x").addEventListener("click", () => apply(0));
       rows.appendChild(row);
       this._rowEls[d.key] = row;
