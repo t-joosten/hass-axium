@@ -296,7 +296,10 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
 - **Alarms (wake-to-music)**: HA-side (the amp's native alarm needs clock+preset+favourite
   config — too rigid/unverified). Stored in options (`CONF_ALARMS`, helper `get_alarms`):
   `{name,time,days[0=Mon..6=Sun],zones[entity_ids],source id,volume,enabled,duration,media,media_type,media_title,media_player}`.
-  Managed via options-flow steps `add_alarm`/`remove_alarm`. Scheduler `_async_setup_alarms` in
+  Managed via options-flow steps `add_alarm`/`remove_alarm` — the `add_alarm` step also carries a
+  **`duration`** number and a **`media`** `MediaSelector` (browse to a wake song; its dict
+  `{entity_id, media_content_id, media_content_type, metadata.title}` maps to the alarm's
+  media/media_type/media_player/media_title). Scheduler `_async_setup_alarms` in
   __init__ registers `async_track_time_change(second=0)`; on a due minute it activates each
   zone via `controller.async_activate_zone(zone, source, start)` (the shared power-on + source
   `| SOURCE_FLAG_TURN_ON` + volume primitive, also used by the notification service), then fades

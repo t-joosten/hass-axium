@@ -71,7 +71,9 @@
           "days": "Days",
           "zones": "Zones",
           "source": "Source",
-          "volume": "Target volume"
+          "volume": "Target volume",
+          "duration": "Auto turn-off after (minutes, 0 = stay on)",
+          "media": "Wake to Music Assistant (optional)"
         }
       },
       "remove_alarm": {

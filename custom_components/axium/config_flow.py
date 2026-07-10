@@ -414,6 +414,12 @@ class AxiumOptionsFlow(OptionsFlow):
                 # alarm (same name); a new alarm defaults to enabled.
                 existing = next((a for a in current if a["name"] == name), None)
                 alarms = [a for a in current if a["name"] != name]
+                # A MediaSelector value is a dict {entity_id, media_content_id,
+                # media_content_type, metadata}; pull the wake-media fields out.
+                media_sel = user_input.get("media") or {}
+                if not isinstance(media_sel, dict):
+                    media_sel = {}
+                media_meta = media_sel.get("metadata") or {}
                 alarms.append(
                     {
                         "name": name,
@@ -423,6 +429,11 @@ class AxiumOptionsFlow(OptionsFlow):
                         "source": int(user_input["source"]),
                         "volume": int(user_input["volume"]),
                         "enabled": existing["enabled"] if existing else True,
+                        "duration": int(user_input.get("duration", 0) or 0),
+                        "media": media_sel.get("media_content_id", ""),
+                        "media_type": media_sel.get("media_content_type", ""),
+                        "media_title": media_meta.get("title", ""),
+                        "media_player": media_sel.get("entity_id", ""),
                     }
                 )
                 self._options[CONF_ALARMS] = alarms
@@ -460,6 +471,18 @@ class AxiumOptionsFlow(OptionsFlow):
                         min=0, max=100, step=1, unit_of_measurement="%"
                     )
                 ),
+                vol.Optional("duration", default=0): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=1440,
+                        step=1,
+                        unit_of_measurement="min",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                # Optional "wake to Music Assistant" media (browse to pick a
+                # song/album/playlist); overrides the fixed Source when set.
+                vol.Optional("media"): selector.MediaSelector(),
             }
         )
         return self.async_show_form(
