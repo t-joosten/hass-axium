@@ -128,7 +128,14 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   note:** on upgrade, existing amp entities re-parent from the old hub device to `_amp_primary`
   (unique_ids unchanged, so no data loss); the old hub keeps its `name_by_user` (rename to "Axium
   Hub"), the amp defaults to "Main", and the amp-stream MA player must be renamed to match the amp
-  device ("Main"). Zones
+  device ("Main"). **MAC-collision trap (fixed):** the amp's MAC was still registered on the OLD hub
+  device from before the split, so `_update_unit_extended` setting it on `_amp_primary` raised
+  `DeviceConnectionCollisionError` on EVERY extended-info (0xB9) reply — which unwound the read loop
+  and made the controller reconnect (a flapping connection: zones up, sources flashing then gone).
+  Setup now clears the hub's leftover `connections` (`async_update_device(hub.id, new_connections=set())`)
+  so the primary amp claims the MAC. **Defensive:** the controller wraps its device-info / extended-
+  info / stack callbacks in try/except + `LOGGER.exception` — a registry callback must NEVER take down
+  the amp link (that's what turned a one-line bug into a full outage). Zones
   nest under their owning amp (`media_player` `via_device`); per-unit temp/peak sensors
   (`AxiumSensor(unit_id=…)`, expansion ids suffixed `_unit_<uid>` so primary sensors aren't
   orphaned). Config: `CONF_UNITS=[{unit_id,primary}]` + `UNIT_KEY` on each `CONF_ZONES` entry
