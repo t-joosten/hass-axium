@@ -206,8 +206,10 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   The matrix headers are interactive too (an in-card popover overlay, `#overlay`/`#sheet`,
   closed by tapping the backdrop): **tap a zone name** → the zone popover (`_openZonePanel`): a
   **power** toggle (`_togglePower`), a **volume** slider + mute, and the zone's **tone/EQ** controls —
-  **bass/treble/balance** sliders (`number.set_value`) + a **loudness** toggle (`switch.toggle`), found
-  on the zone's device via `_toneEntities` (matched by entity-id suffix). Now-playing and transport
+  **bass/treble/balance** sliders (`number.set_value`) + **loudness** and **mono** toggles
+  (`switch.toggle`; both rendered by a generic `toggle()` and refreshed by iterating `.toneswitch`),
+  found on the zone's device via `_toneEntities` (matched by entity-id suffix `_loudness`/`_mono`).
+  Now-playing and transport
   were removed from the zone popover (they belong to the stream, not the room). Slider debounced via
   `_scheduleVolume`, live-refreshed by `_refreshPanel` from `_update` unless mid-drag (tone sliders
   skip refresh while `_panel.toneDrag`); `disconnectedCallback` clears the timer.

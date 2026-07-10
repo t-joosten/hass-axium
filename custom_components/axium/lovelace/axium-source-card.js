@@ -1661,6 +1661,7 @@ class AxiumMatrixCard extends HTMLElement {
       else if (id.startsWith("number.") && id.endsWith("_treble")) out.treble = id;
       else if (id.startsWith("number.") && id.endsWith("_balance")) out.balance = id;
       else if (id.startsWith("switch.") && id.endsWith("_loudness")) out.loudness = id;
+      else if (id.startsWith("switch.") && id.endsWith("_mono")) out.mono = id;
     }
     return out;
   }
@@ -1675,11 +1676,12 @@ class AxiumMatrixCard extends HTMLElement {
           `<input class="toneslider" type="range" data-eid="${tone[key]}">` +
           `<span class="toneval"></span></label>`
         : "";
-    const loud = tone.loudness
-      ? `<label class="tonerow"><ha-icon icon="mdi:sine-wave"></ha-icon>` +
-        `<span class="tonelbl">Loudness</span>` +
-        `<input class="toneswitch" type="checkbox" data-eid="${tone.loudness}"></label>`
-      : "";
+    const toggle = (key, label, icon) =>
+      tone[key]
+        ? `<label class="tonerow"><ha-icon icon="${icon}"></ha-icon>` +
+          `<span class="tonelbl">${label}</span>` +
+          `<input class="toneswitch" type="checkbox" data-eid="${tone[key]}"></label>`
+        : "";
     sheet.innerHTML = `
       <div class="sheet-head">
         <span class="sheet-title"></span>
@@ -1697,7 +1699,8 @@ class AxiumMatrixCard extends HTMLElement {
         ${row("bass", "Bass", "mdi:music-clef-bass")}
         ${row("treble", "Treble", "mdi:music-note")}
         ${row("balance", "Balance", "mdi:pan-horizontal")}
-        ${loud}
+        ${toggle("loudness", "Loudness", "mdi:sine-wave")}
+        ${toggle("mono", "Mono", "mdi:merge")}
       </div>
     `;
     sheet.querySelector(".sheet-title").textContent = this._zoneName(zoneId);
@@ -1734,11 +1737,11 @@ class AxiumMatrixCard extends HTMLElement {
         this._panel.toneDrag = null;
       });
     }
-    const sw = sheet.querySelector(".toneswitch");
-    if (sw)
+    for (const sw of sheet.querySelectorAll(".toneswitch")) {
       sw.addEventListener("change", () =>
         this._hass.callService("switch", "toggle", { entity_id: sw.dataset.eid })
       );
+    }
     sheet.querySelector(".close").addEventListener("click", () => this._closePanel());
     this._panel = { type: "zone", zoneId, dragging: false, toneDrag: null };
     this.shadowRoot.getElementById("overlay").hidden = false;
@@ -2134,8 +2137,7 @@ class AxiumMatrixCard extends HTMLElement {
         if (v) v.textContent = ts.state;
       }
     }
-    const sw = sheet.querySelector(".toneswitch");
-    if (sw) {
+    for (const sw of sheet.querySelectorAll(".toneswitch")) {
       const ss = this._hass.states[sw.dataset.eid];
       sw.checked = !!ss && ss.state === "on";
     }
