@@ -1566,10 +1566,30 @@ class AxiumMatrixCard extends HTMLElement {
     }
   }
 
-  /** A Music Assistant player whose name matches this zone (best-effort link). */
-  _maPlayerFor(zoneId) {
-    const name = (this._zoneName(zoneId) || "").trim().toLowerCase();
-    if (!name) return null;
+  /**
+   * The amp-device name a zone belongs to (e.g. "Axium 1"), via the device tree:
+   * a zone device nests under its amp device (`via_device`). Used to link a zone
+   * to its amp's single Music Assistant stream by amp — NOT by the zone's own
+   * name, which collides with unrelated devices (e.g. a TV also "Woonkamer").
+   */
+  _ampNameFor(zoneId) {
+    const ent = (this._hass.entities || {})[zoneId];
+    const devs = this._hass.devices || {};
+    const zdev = ent && devs[ent.device_id];
+    if (!zdev) return null;
+    const amp = devs[zdev.via_device_id] || zdev;
+    return (amp && (amp.name_by_user || amp.name)) || null;
+  }
+
+  /**
+   * The Music Assistant player that IS this zone's amp stream. Each amp has one
+   * stream; the matching MA player should be renamed (in MA) to the amp device
+   * name (e.g. "Axium 1"). Matched by exact amp name, so it never links to an
+   * unrelated same-named device. Returns null until it's renamed to match.
+   */
+  _ampStreamPlayerFor(zoneId) {
+    const ampName = (this._ampNameFor(zoneId) || "").trim().toLowerCase();
+    if (!ampName) return null;
     const reg = (this._hass && this._hass.entities) || {};
     for (const id of Object.keys(this._hass.states)) {
       if (!id.startsWith("media_player.")) continue;
@@ -1577,20 +1597,18 @@ class AxiumMatrixCard extends HTMLElement {
       if (!e || e.platform !== "music_assistant") continue;
       const st = this._hass.states[id];
       const fn = st && (st.attributes.friendly_name || "").trim().toLowerCase();
-      // Exact, or the amp's DLNA-truncated name (~15 chars) is a prefix of the
-      // zone name (e.g. "InactiefOnverst" ⊂ "InactiefOnversterkt").
-      if (fn && (fn === name || (fn.length >= 6 && name.startsWith(fn)))) return st;
+      if (fn && fn === ampName) return st;
     }
     return null;
   }
 
   /**
-   * Where transport/play controls should go for a zone. When a Music Assistant
-   * player is streaming to it, drive THAT (so play/pause resumes instead of the
-   * amp's internal player restarting the track); otherwise the amp zone itself.
+   * Where transport/play controls should go for a zone: its amp's Music Assistant
+   * stream when one is playing (so play/pause resumes it instead of the amp's
+   * internal player restarting the track); otherwise the amp zone itself.
    */
   _playbackTarget(zoneId) {
-    const ma = this._maPlayerFor(zoneId);
+    const ma = this._ampStreamPlayerFor(zoneId);
     if (ma && !OFF_STATES.includes(ma.state) && ma.attributes.media_title) {
       return ma.entity_id;
     }
@@ -1610,8 +1628,8 @@ class AxiumMatrixCard extends HTMLElement {
 
   /**
    * What's playing on a zone: prefer the amp zone's own now-playing (reported
-   * for the internal Media Player source), else a same-named Music Assistant
-   * player streaming to it. Returns null when nothing is playing.
+   * for the internal Media Player source), else its amp's Music Assistant stream
+   * (all zones on an amp share one stream). Returns null when nothing is playing.
    */
   _zoneNowPlaying(zoneId) {
     const pick = (st) => {
@@ -1624,7 +1642,7 @@ class AxiumMatrixCard extends HTMLElement {
         art: a.entity_picture || "",
       };
     };
-    return pick(this._hass.states[zoneId]) || pick(this._maPlayerFor(zoneId));
+    return pick(this._hass.states[zoneId]) || pick(this._ampStreamPlayerFor(zoneId));
   }
 
   /** Preset picker for one source column, in the popover. */

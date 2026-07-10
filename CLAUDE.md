@@ -211,16 +211,17 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   the MA player, not the amp zone:** `_playbackTarget` returns the matched `music_assistant` player
   when it's streaming (playing + has `media_title`), else the zone — so play/pause *resumes* the
   DLNA stream instead of the amp's 0x3D internal player restarting the track, and `_refreshPanel`
-  reads the play-icon/supported-features from that target. `_maPlayerFor` matches by friendly_name
-  **exactly OR the amp's ~15-char DLNA-truncated name as a prefix** of the zone name
-  (e.g. "InactiefOnverst" ⊂ "InactiefOnversterkt"). Turning a zone **off** (`_turnZoneOff`, used by
-  both `_togglePower` and the cell-tap `_route`) **only powers off the amp zone — it must NOT stop the
-  MA stream**: each amp has ONE shared stream, so stopping it silences every other zone on that amp
-  (the reported "disable one zone → all go silent" bug). The state fix (power-first) is what makes an
-  off zone read OFF instead of the shared stream's PLAYING. **NOTE `_maPlayerFor` name-matching is
-  unreliable** — MA renderers named after rooms (e.g. a "Woonkamer" TV) collide with same-named zones,
-  and the per-amp stream is named after one arbitrary zone, so `_playbackTarget`/`_zoneNowPlaying` can
-  mis-link; the clean model is 2 amp-stream players, not per-zone matching. **Amps advertise only
+  reads the play-icon/supported-features from that target. **The MA player is the zone's AMP stream,
+  linked by amp — NOT by zone name** (names collide with unrelated devices, e.g. a "Woonkamer" TV):
+  `_ampNameFor` walks the device tree (zone device → `via_device` amp device → `name_by_user||name`,
+  e.g. "Axium 1"); `_ampStreamPlayerFor` returns the `music_assistant` player whose friendly_name
+  **equals that amp name** (so the user renames the ~2 amp-stream MA players to the amp device names in
+  MA; unmatched → null → falls back to the zone, never a wrong device). Turning a zone **off**
+  (`_turnZoneOff`, used by both `_togglePower` and the cell-tap `_route`) **only powers off the amp zone
+  — it must NOT stop the MA stream**: each amp has ONE shared stream, so stopping it silences every
+  other zone on that amp (the reported "disable one zone → all go silent" bug). The state fix
+  (power-first) is what makes an off zone read OFF instead of the shared stream's PLAYING. **Amps
+  advertise only
   1 MediaRenderer/amp via SSDP** (the first embedded zone) so MA/HA discover only a few of the 16
   per-zone renderers — an amp-firmware limit, not fixable card-side. **hold a zone name** →
   open the zone device page (`_attachHold`, reused 500ms hold pattern); **tap a source name**
