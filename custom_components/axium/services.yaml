@@ -70,6 +70,18 @@ set_alarm:
       required: false
       selector:
         boolean:
+    duration:
+      name: Auto turn-off after
+      description: >-
+        Minutes after the alarm fires to automatically turn the zones back off
+        (0 = leave them on).
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 1440
+          unit_of_measurement: min
+          mode: box
     media:
       name: Music Assistant media
       description: >-

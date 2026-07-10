@@ -21,6 +21,7 @@ from homeassistant.helpers.event import (
 from homeassistant.util import slugify
 
 from .const import (
+    CMD_POWER,
     CMD_VOLUME,
     CONF_ALARMS,
     CONF_PRESETS,
@@ -31,6 +32,7 @@ from .const import (
     DATA_SLEEP_DEADLINES,
     DEFAULT_PORT,
     DOMAIN,
+    POWER_OFF,
     SIGNAL_ALARM_UPDATE,
     SOURCE_MEDIA_PLAYER_BYTE,
     UNIT_KEY,
@@ -576,6 +578,19 @@ def _async_setup_alarms(
                     CMD_VOLUME, zone, level_to_volume(level)
                 )
             await asyncio.sleep(_ALARM_FADE_SECONDS / _ALARM_FADE_STEPS)
+        # Optional auto turn-off: power the woken zones back off after `duration`
+        # minutes (0 = leave them on). A background task so it can't block others.
+        duration = alarm.get("duration") or 0
+        if duration > 0:
+
+            async def _auto_off(zone_ids: list[int]) -> None:
+                await asyncio.sleep(duration * 60)
+                for zone in zone_ids:
+                    await controller.async_send(CMD_POWER, zone, POWER_OFF)
+                for zone in zone_ids:  # read back so HA reflects the power-off
+                    await controller.async_request_zone_state(zone)
+
+            hass.async_create_task(_auto_off(list(zones)))
 
     @callback
     def _tick(now: datetime) -> None:

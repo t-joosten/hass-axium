@@ -324,6 +324,7 @@ def get_alarms(entry: ConfigEntry) -> list[dict[str, Any]]:
             days = [int(d) for d in item.get("days", []) if 0 <= int(d) <= 6]
             source = int(item["source"])
             volume = max(0, min(100, int(item.get("volume", 30))))
+            duration = max(0, int(item.get("duration", 0) or 0))
         except (KeyError, ValueError, TypeError):
             continue
         alarms.append(
@@ -335,6 +336,8 @@ def get_alarms(entry: ConfigEntry) -> list[dict[str, Any]]:
                 "source": source,
                 "volume": volume,
                 "enabled": bool(item.get("enabled", True)),
+                # Auto turn-off X minutes after firing (0 = stay on).
+                "duration": duration,
                 # Optional Music Assistant wake fields — preserved so the alarm
                 # scheduler and the card can see them (dropping them here meant a
                 # wake song was stored but never played).

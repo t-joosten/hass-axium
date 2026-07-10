@@ -290,12 +290,16 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   without this the matrix kept showing the zones (and the all-power button) as on.
 - **Alarms (wake-to-music)**: HA-side (the amp's native alarm needs clock+preset+favourite
   config — too rigid/unverified). Stored in options (`CONF_ALARMS`, helper `get_alarms`):
-  `{name,time,days[0=Mon..6=Sun],zones[entity_ids],source id,volume,enabled,media,media_type,media_player}`.
+  `{name,time,days[0=Mon..6=Sun],zones[entity_ids],source id,volume,enabled,duration,media,media_type,media_title,media_player}`.
   Managed via options-flow steps `add_alarm`/`remove_alarm`. Scheduler `_async_setup_alarms` in
   __init__ registers `async_track_time_change(second=0)`; on a due minute it activates each
   zone via `controller.async_activate_zone(zone, source, start)` (the shared power-on + source
   `| SOURCE_FLAG_TURN_ON` + volume primitive, also used by the notification service), then fades
-  up to target. **Wake to a Music Assistant playlist:** if the alarm has `media` (a MA
+  up to target. **`duration` = auto turn-off** (minutes; 0 = stay on): after the fade, `_fire`
+  spawns a background task that sleeps `duration*60`s then `CMD_POWER`/`POWER_OFF`s the woken zones
+  and re-reads them. Carried through the service schema + `get_alarms` (same must-preserve rule as
+  the media fields) + the `alarm_duration` sensor attr; the Add form has an "Auto turn-off after
+  <min>" number, and each alarm row shows "· off after Xm". **Wake to a Music Assistant playlist:** if the alarm has `media` (a MA
   media-content-id), it activates the zones on the **Media Player** source (0x12) and calls
   `media_player.play_media` on the **master** stream player (`_master_stream_player`: the MA player
   named after the hub device) — `media_player` overrides the target. **LIMITATION (per-amp reality):**
@@ -363,7 +367,9 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   it. The sleep
   card is section-configurable via its own
   editor (`axium-sleep-card-editor`): `sections` = subset of `["all","zones","presets"]`
-  (default all). "presets" rows apply a sleep timer to every zone in a `axium_presets`
+  (default all), plus a **`zones` whitelist** (sorted select) that narrows the individual-zone
+  rows (`_zoneNumberIds` filters by `_numberZone` = the media_player sharing each sleep number's
+  device). "presets" rows apply a sleep timer to every zone in a `axium_presets`
   preset (via each zone's sleep-timer number); preset countdown = furthest deadline among
   its zones. Editing an existing alarm's fields does NOT
   reload the entry — `_async_update_listener` reloads only when the alarm-name set or a

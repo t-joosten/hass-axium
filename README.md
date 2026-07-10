@@ -653,7 +653,9 @@ rooms appear (empty = all); in YAML that's `zones:`.
   Axium → Configure → Add a wake-to-music alarm**, or from the **alarms card**: a
   name, time, weekdays, zones, source and target volume. At the set time those
   zones power on, switch to the source and gently fade up to the target volume.
-  On the alarms card you can also **"Wake to Music Assistant"** — browse your
+  You can also set **Auto turn-off after N minutes** — the woken zones power back
+  off that many minutes after the alarm fires (0 = leave them on). On the alarms
+  card you can also **"Wake to Music Assistant"** — browse your
   Music Assistant library right in the add form and pick a playlist/album/radio;
   the alarm streams it to the rooms via the amp's stream (needs the amp's MA
   player named after the amplifier, e.g. `Axium 1`). The **Alarms** switch on the
@@ -675,7 +677,8 @@ the sleep-timers card lets you start a timer per zone (15/30/60/90 min, or
 cancel it — all with the live countdown. The sleep-timers card's editor has a
 **Show** option to choose which sections appear — the **all-zones timer**,
 **individual zones**, and/or **presets** (a per-preset sleep control that
-applies to that preset's zones) — in any combination.
+applies to that preset's zones) — in any combination, plus a **Zones to show**
+filter to limit the individual-zone rows to the rooms you pick (empty = all).
 Behind the scenes the alarm edits use the `axium.set_alarm` / `axium.remove_alarm`
 services (also callable from automations), and the sleep card uses each zone's
 sleep-timer number entity.

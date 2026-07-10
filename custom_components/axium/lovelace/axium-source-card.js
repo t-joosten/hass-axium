@@ -2837,6 +2837,7 @@ class AxiumAlarmsCard extends HTMLElement {
         .map((a) => `<option value="stream:${escHtml(a.player)}">${escHtml(a.name)}</option>`)
         .join("")}</select>
       <label class="f-vol">Volume <input type="range" min="0" max="100" value="30"><span class="volval">30%</span></label>
+      <label class="f-dur">Auto turn-off after <input type="number" class="f-duration" min="0" max="1440" step="1" value="0" inputmode="numeric"> min <span class="durhint">(0 = stay on)</span></label>
       <div class="f-media">
         <button type="button" class="mediabtn link">♪ Wake to Music Assistant…</button>
         <span class="mediasel"></span>
@@ -2903,6 +2904,10 @@ class AxiumAlarmsCard extends HTMLElement {
       source,
       volume: Number(form.querySelector('input[type="range"]').value),
       enabled: true,
+      duration: Math.max(
+        0,
+        Math.round(Number(form.querySelector(".f-duration").value) || 0)
+      ),
       media: form.dataset.media || "",
       media_type: form.dataset.mediaType || "",
       media_title: form.dataset.mediaTitle || "",
@@ -2947,6 +2952,7 @@ class AxiumAlarmsCard extends HTMLElement {
   /** One-line "what this alarm plays": a wake song (with its amp stream) or the
    *  configured source name — never the raw protocol byte or content id. */
   _alarmSourceLabel(a) {
+    let label;
     if (a.alarm_media) {
       const title = a.alarm_media_title || "Music Assistant";
       const mp = a.alarm_media_player || "";
@@ -2954,10 +2960,14 @@ class AxiumAlarmsCard extends HTMLElement {
       if (mp && this._hass.states[mp])
         amp = this._hass.states[mp].attributes.friendly_name || "";
       if (!amp) amp = this._hubName();
-      return "♪ " + title + (amp ? " · " + amp : "");
+      label = "♪ " + title + (amp ? " · " + amp : "");
+    } else {
+      const s = (this._sources() || []).find((x) => x.id === a.alarm_source);
+      label = s ? s.name : "";
     }
-    const s = (this._sources() || []).find((x) => x.id === a.alarm_source);
-    return s ? s.name : "";
+    const dur = Number(a.alarm_duration) || 0;
+    if (dur > 0) label = (label ? label + " · " : "") + `off after ${dur}m`;
+    return label;
   }
 
   _openMediaBrowse(form) {
@@ -3107,6 +3117,9 @@ AxiumAlarmsCard.styles = `
   }
   .zonechip.on { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
   .f-vol { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--secondary-text-color); }
+  .f-dur { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--secondary-text-color); flex-wrap: wrap; }
+  .f-dur .f-duration { width: 64px; font: inherit; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--divider-color); background: var(--secondary-background-color); color: var(--primary-text-color); }
+  .durhint { color: var(--secondary-text-color); font-size: 0.8rem; }
   .addbtn {
     align-self: flex-start; padding: 6px 16px; border-radius: 8px; border: none;
     background: var(--primary-color); color: var(--text-primary-color, #fff);
@@ -3227,8 +3240,11 @@ class AxiumSleepCard extends HTMLElement {
     );
   }
   _zoneNumberIds() {
+    const pick = this._config.zones;
+    const wl = Array.isArray(pick) && pick.length ? new Set(pick) : null;
     return this._sleepNumbers()
       .filter((id) => !this._hass.states[id].attributes.sleep_all)
+      .filter((id) => !wl || wl.has(this._numberZone(id)))
       .sort(
         (a, b) =>
           this._sleepZoneNum(a) - this._sleepZoneNum(b) ||
@@ -3240,6 +3256,22 @@ class AxiumSleepCard extends HTMLElement {
   _sleepZoneNum(id) {
     const m = /_zone_(\d+)/.exec(id);
     return m ? Number(m[1]) : 9999;
+  }
+
+  // The zone media_player entity id sharing a sleep-timer number's device.
+  _numberZone(numId) {
+    const reg = (this._hass && this._hass.entities) || {};
+    const dev = this._device(numId);
+    if (!dev) return null;
+    for (const eid of Object.keys(reg)) {
+      if (
+        eid.startsWith("media_player.") &&
+        reg[eid].device_id === dev &&
+        reg[eid].platform === "axium"
+      )
+        return eid;
+    }
+    return null;
   }
   _presets() {
     for (const id of axiumMediaPlayers(this._hass, this._hub())) {
@@ -3528,6 +3560,7 @@ class AxiumSleepCardEditor extends HTMLElement {
       ...this._config,
     };
     if (!data.hub && hubs.length) data.hub = hubs[0].id;
+    const zoneOptions = axiumZoneSelectOptions(this._hass, data.hub);
     this._form.hass = this._hass;
     this._form.data = data;
     this._form.schema = [
@@ -3550,12 +3583,19 @@ class AxiumSleepCardEditor extends HTMLElement {
           },
         },
       },
+      {
+        name: "zones",
+        selector: zoneOptions.length
+          ? { select: { multiple: true, mode: "list", options: zoneOptions } }
+          : { entity: { integration: "axium", domain: "media_player", multiple: true } },
+      },
       { name: "name", selector: { text: {} } },
     ];
     this._form.computeLabel = (s) =>
       ({
         hub: "Amplifier",
         sections: "Show",
+        zones: "Zones to show (empty = all)",
         name: "Card name (optional)",
       }[s.name] || s.name);
   }
