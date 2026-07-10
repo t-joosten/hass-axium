@@ -377,7 +377,10 @@ class AxiumController:
             )
             return
         if self._stack_callback is not None:
-            self._stack_callback(self.units(), self._primary_unit_id)
+            try:
+                self._stack_callback(self.units(), self._primary_unit_id)
+            except Exception:  # noqa: BLE001 - never let a callback break the link
+                _LOGGER.exception("Axium stack callback failed")
 
     def _find_zone_conflict(self) -> tuple[int, list[int]] | None:
         """Return (unit_id, free_zones) for a non-primary unit whose zones clash.
@@ -689,7 +692,10 @@ class AxiumController:
                 self._firmware = unit.firmware
                 self._mac = unit.mac
             if self._extended_info_callback is not None:
-                self._extended_info_callback(unit)
+                try:
+                    self._extended_info_callback(unit)
+                except Exception:  # noqa: BLE001 - never drop the link on a callback
+                    _LOGGER.exception("Axium extended-info callback failed")
             self._notify_diagnostics()
             return
         elif (
@@ -734,7 +740,10 @@ class AxiumController:
             info.zones,
         )
         if self._device_info_callback is not None:
-            self._device_info_callback(info)
+            try:
+                self._device_info_callback(info)
+            except Exception:  # noqa: BLE001 - a callback must never drop the link
+                _LOGGER.exception("Axium device-info callback failed")
         # Per-unit extended info (firmware/temp/MAC). Auto-power and network are
         # system-wide, so only the primary unit requests them.
         asyncio.ensure_future(self.async_request_extended_info(info.unit_id))
