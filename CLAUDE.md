@@ -273,8 +273,11 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   Media Player and `media_play` (resume) that amp's stream. **Tapping a stream header** opens
   `_openStreamPanel(ampId)`: now-playing + transport + volume driving that amp's MA player
   (`_ampStreamPlayerByName(amp name)`), a **preset dropdown** (`_applyPresetToStream`: start the amp's
-  stream, its own preset rooms → Media Player, drop the amp's others), and a **Browse Music Assistant**
-  button (native `hass-more-info` on the amp's MA player). Shows a "rename the MA player to <amp name>"
+  stream, its own preset rooms → Media Player, drop the amp's others), an inline **Music Assistant
+  search** (`_streamSearch` via WS `media_player/search_media`) with results **tabbed by
+  Tracks/Albums/Playlists** (`_renderSearchTabs` groups the flat hit list by `media_class`; a pick
+  `play_media`s it on the amp's MA player, enqueue replace), and a **Browse Music Assistant** button
+  (native `hass-more-info` on the amp's MA player). Shows a "rename the MA player to <amp name>"
   hint when unmatched. `_refreshPanel` dispatches to `_refreshStreamPanel` for `type:"stream"`.
   **NO "play on all amps"/whole-home** — it was built then REMOVED: the two amps can't be time-synced
   (see the media-player note), so playing the same content on both drifts badly and is useless. A single

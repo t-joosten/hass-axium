@@ -1881,6 +1881,12 @@ class AxiumMatrixCard extends HTMLElement {
         <button class="iconbtn" data-t="next" title="Next"><ha-icon icon="mdi:skip-next"></ha-icon></button>
         <button class="iconbtn" data-v="up" title="Volume up"><ha-icon icon="mdi:volume-plus"></ha-icon></button>
       </div>
+      <div class="streamsearch">
+        <input type="search" class="ssin" placeholder="Search Music Assistant…">
+        <button type="button" class="ssbtn" title="Search"><ha-icon icon="mdi:magnify"></ha-icon></button>
+      </div>
+      <div class="sstabs" hidden></div>
+      <div class="ssresults"></div>
       <button class="browse"><ha-icon icon="mdi:playlist-music"></ha-icon><span>Browse Music Assistant</span></button>
       <div class="empty" hidden></div>
     `;
@@ -1902,11 +1908,12 @@ class AxiumMatrixCard extends HTMLElement {
       );
     }
     if (!maId) {
-      // No MA player for this amp — hide transport/browse but keep the volume
-      // buttons (they act on the amp's zones, not the MA player).
-      for (const b of sheet.querySelectorAll("button[data-t]")) b.style.display = "none";
-      const browse = sheet.querySelector(".browse");
-      if (browse) browse.style.display = "none";
+      // No MA player for this amp — hide transport/search/browse but keep the
+      // volume buttons (they act on the amp's zones, not the MA player).
+      for (const el of sheet.querySelectorAll(
+        "button[data-t], .browse, .streamsearch, .sstabs, .ssresults"
+      ))
+        el.style.display = "none";
       const empty = sheet.querySelector(".empty");
       empty.hidden = false;
       empty.textContent =
@@ -1934,10 +1941,86 @@ class AxiumMatrixCard extends HTMLElement {
         );
         this._closePanel();
       });
+      // Inline Music Assistant search — results tabbed by Tracks/Albums/Playlists.
+      const ssin = sheet.querySelector(".ssin");
+      const runSearch = () => {
+        const q = ssin.value.trim();
+        if (q) this._streamSearch(maId, q);
+      };
+      sheet.querySelector(".ssbtn").addEventListener("click", runSearch);
+      ssin.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          runSearch();
+        }
+      });
     }
     this._panel = { type: "stream", ampId, maId, dragging: false };
     this.shadowRoot.getElementById("overlay").hidden = false;
     this._refreshPanel();
+  }
+
+  /** Search Music Assistant on the amp's stream player; group hits by type. */
+  async _streamSearch(maId, query) {
+    const resEl = this.shadowRoot.querySelector(".ssresults");
+    if (resEl) resEl.textContent = "Searching…";
+    let res;
+    try {
+      res = await this._hass.callWS({
+        type: "media_player/search_media",
+        entity_id: maId,
+        search_query: query,
+      });
+    } catch (err) {
+      if (resEl) resEl.textContent = "Search failed.";
+      return;
+    }
+    const groups = { track: [], album: [], playlist: [] };
+    for (const it of (res && res.result) || []) {
+      if (groups[it.media_class]) groups[it.media_class].push(it);
+    }
+    if (!this._panel) return;
+    this._panel.searchGroups = groups;
+    this._panel.searchTab =
+      ["track", "album", "playlist"].find((t) => groups[t].length) || "track";
+    this._renderSearchTabs(maId);
+  }
+
+  /** Render the Tracks/Albums/Playlists tabs + the active tab's results. */
+  _renderSearchTabs(maId) {
+    const tabsEl = this.shadowRoot.querySelector(".sstabs");
+    const resEl = this.shadowRoot.querySelector(".ssresults");
+    if (!tabsEl || !resEl || !this._panel || !this._panel.searchGroups) return;
+    const labels = { track: "Tracks", album: "Albums", playlist: "Playlists" };
+    tabsEl.hidden = false;
+    tabsEl.innerHTML = "";
+    for (const t of ["track", "album", "playlist"]) {
+      const b = document.createElement("button");
+      b.className = "sstab" + (t === this._panel.searchTab ? " on" : "");
+      b.textContent = `${labels[t]} (${this._panel.searchGroups[t].length})`;
+      b.addEventListener("click", () => {
+        this._panel.searchTab = t;
+        this._renderSearchTabs(maId);
+      });
+      tabsEl.appendChild(b);
+    }
+    resEl.innerHTML = "";
+    const items = this._panel.searchGroups[this._panel.searchTab] || [];
+    for (const it of items) {
+      const b = document.createElement("button");
+      b.className = "mitem";
+      b.textContent = "♪ " + it.title;
+      b.addEventListener("click", () =>
+        this._hass.callService("media_player", "play_media", {
+          entity_id: maId,
+          media_content_id: it.media_content_id,
+          media_content_type: it.media_content_type,
+          enqueue: "replace",
+        })
+      );
+      resEl.appendChild(b);
+    }
+    if (!items.length) resEl.innerHTML = `<div class="empty">No results.</div>`;
   }
 
   /** Keep an open amp-stream popover in step with its MA player. */
@@ -2349,6 +2432,40 @@ AxiumMatrixCard.styles = `
   }
   .browse:hover { border-color: var(--primary-color); }
   .browse ha-icon { --mdc-icon-size: 20px; }
+  .streamsearch { display: flex; gap: 6px; margin-top: 10px; }
+  .ssin {
+    flex: 1 1 auto; min-width: 0; font: inherit; padding: 7px 9px; border-radius: 8px;
+    border: 1px solid var(--divider-color); background: var(--card-background-color);
+    color: var(--primary-text-color);
+  }
+  .ssbtn {
+    display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+    border: 1px solid var(--divider-color); border-radius: 8px; padding: 0 12px;
+    background: var(--card-background-color); color: var(--primary-text-color);
+    --mdc-icon-size: 20px;
+  }
+  .ssbtn:hover { border-color: var(--primary-color); color: var(--primary-color); }
+  .sstabs { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
+  .sstabs[hidden] { display: none; }
+  .sstab {
+    font: inherit; font-size: 0.8rem; padding: 4px 10px; border-radius: 14px; cursor: pointer;
+    border: 1px solid var(--divider-color); background: none; color: var(--secondary-text-color);
+  }
+  .sstab.on {
+    border-color: var(--primary-color); color: var(--text-primary-color, #fff);
+    background: var(--primary-color);
+  }
+  .ssresults {
+    display: flex; flex-direction: column; margin-top: 6px;
+    max-height: 240px; overflow-y: auto;
+  }
+  .ssresults:empty { display: none; }
+  .mitem {
+    text-align: left; background: none; border: none; cursor: pointer; font: inherit;
+    color: var(--primary-text-color); padding: 8px 6px; border-radius: 6px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .mitem:hover { background: var(--secondary-background-color); }
   .overlay {
     position: absolute; inset: 0; z-index: 5;
     display: flex; align-items: center; justify-content: center;
