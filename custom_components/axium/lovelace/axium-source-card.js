@@ -1241,10 +1241,17 @@ class AxiumMatrixCard extends HTMLElement {
       if (!zdev) continue;
       const amp = devs[zdev.via_device_id] || zdev;
       if (!byAmp.has(amp.id)) {
+        // The master (hub) amp's device identifier has no "_unit_" suffix; its
+        // Media Player stream is stack-wide (reaches every zone). Expansion amps
+        // only reach their own zones.
+        const master = (amp.identifiers || []).some(
+          (t) => t[0] === "axium" && !String(t[1]).includes("_unit_")
+        );
         byAmp.set(amp.id, {
           id: amp.id,
           name: (amp.name_by_user || amp.name) || "Amp",
           zones: new Set(),
+          master,
         });
         order.push(amp.id);
       }
@@ -1253,9 +1260,10 @@ class AxiumMatrixCard extends HTMLElement {
     return order.map((id) => byAmp.get(id));
   }
 
-  /** Ordered matrix columns: analog sources, then one per-amp STREAM column for
-   *  the internal media player (each amp is its own stream), then any extra
-   *  media sources. Falls back to plain media-source columns if amps are unknown. */
+  /** Ordered matrix columns: analog sources, then one STREAM column per amp for
+   *  the internal media player (each amp's stream is a column). The MASTER amp's
+   *  column owns ALL zones (its stream is stack-wide); an expansion amp's column
+   *  owns only its own zones. Falls back to plain media columns if amps unknown. */
   _columns() {
     const srcs = this._sources();
     const analog = srcs.filter((s) => s.id < STREAM_SOURCE_MIN);
@@ -1264,8 +1272,15 @@ class AxiumMatrixCard extends HTMLElement {
     const amps = this._amps();
     if (streams.length && amps.length) {
       const sid = streams[0].id;
+      const allZones = new Set(this._zones());
       for (const amp of amps) {
-        cols.push({ kind: "stream", id: sid, ampId: amp.id, name: amp.name, zones: amp.zones });
+        cols.push({
+          kind: "stream",
+          id: sid,
+          ampId: amp.id,
+          name: amp.name,
+          zones: amp.master ? allZones : amp.zones,
+        });
       }
       for (const s of streams.slice(1)) cols.push({ kind: "source", id: s.id, name: s.name });
     } else {
@@ -1342,12 +1357,14 @@ class AxiumMatrixCard extends HTMLElement {
     const rows = zones
       .map((z) => {
         const cells = columns
-          .map((c) =>
-            c.kind === "stream" && !c.zones.has(z)
-              ? `<div class="cell blank"></div>`
-              : `<button class="cell" data-zone="${z}" data-src="${c.id}">` +
-                `<ha-icon icon="mdi:check"></ha-icon></button>`
-          )
+          .map((c) => {
+            if (c.kind === "stream" && !c.zones.has(z)) return `<div class="cell blank"></div>`;
+            const amp = c.kind === "stream" ? ` data-amp="${c.ampId}"` : "";
+            return (
+              `<button class="cell" data-zone="${z}" data-src="${c.id}"${amp}>` +
+              `<ha-icon icon="mdi:check"></ha-icon></button>`
+            );
+          })
           .join("");
         return (
           `<div class="rowhead" role="button" tabindex="0" data-zone="${z}"` +
@@ -1385,7 +1402,7 @@ class AxiumMatrixCard extends HTMLElement {
         () => this._openZoneDevice(rh.dataset.zone)
       );
     }
-    // Column header: a stream (amp) header opens that amp's stream panel; a
+    // Column header: an amp (stream) header opens that amp's stream panel; a
     // plain source header opens its preset picker.
     for (const ch of this.shadowRoot.querySelectorAll(".colhead")) {
       const open = ch.dataset.amp
@@ -1803,12 +1820,38 @@ class AxiumMatrixCard extends HTMLElement {
   }
 
   /**
-   * The Music Assistant player that IS this zone's amp stream. Each amp has one
-   * stream; the matching MA player should be renamed (in MA) to the amp device
-   * name (e.g. "Axium 1"). Returns null until it's renamed to match.
+   * The Music Assistant player whose stream this zone is actually hearing: its
+   * own amp's stream when that's playing, else the master's (stack-wide) stream.
+   * The MA players should be renamed (in MA) to the amp device names ("Axium 1").
    */
   _ampStreamPlayerFor(zoneId) {
-    return this._ampStreamPlayerByName(this._ampNameFor(zoneId));
+    const own = this._ampStreamPlayerByName(this._ampNameFor(zoneId));
+    if (own && own.state === "playing") return own;
+    const master = this._amps().find((a) => a.master);
+    const masterMa = master && this._ampStreamPlayerByName(master.name);
+    if (masterMa && masterMa.state === "playing") return masterMa;
+    return own || masterMa || null;
+  }
+
+  /**
+   * Whether a zone is currently hearing a given amp's stream (for stream-cell
+   * highlighting). True when the zone is on Media Player and: it's the MASTER
+   * column and the zone's own expansion amp isn't overriding, OR it's that
+   * expansion's column and it is overriding (its MA player is playing). So a
+   * zone lights up under exactly one stream column.
+   */
+  _streamCellActive(zoneId, ampId) {
+    const st = this._hass.states[zoneId];
+    if (!st || OFF_STATES.includes(st.state)) return false;
+    const cur = this._currentSourceId(st);
+    if (!(cur >= STREAM_SOURCE_MIN)) return false;
+    const amps = this._amps();
+    const col = amps.find((a) => a.id === ampId);
+    const own = amps.find((a) => a.zones.has(zoneId));
+    if (!col || !own) return false;
+    const ownMa = this._ampStreamPlayerByName(own.name);
+    const overriding = !own.master && !!ownMa && ownMa.state === "playing";
+    return col.master ? !overriding : col.id === own.id && overriding;
   }
 
   /**
@@ -1964,7 +2007,12 @@ class AxiumMatrixCard extends HTMLElement {
       const st = this._hass.states[zoneId];
       const on = st && !OFF_STATES.includes(st.state);
       const sname = this._sourceNameFor(st, sid);
-      const active = on && this._currentSourceId(st) === sid;
+      // Stream (amp) cell: active only when the zone is actually hearing THIS
+      // amp's stream — master when its own expansion isn't overriding, expansion
+      // when it is — so a zone never lights up under both stream columns.
+      const active = cell.dataset.amp
+        ? this._streamCellActive(zoneId, cell.dataset.amp)
+        : on && this._currentSourceId(st) === sid;
       const unavailable = !st || st.state === "unavailable" || sname == null;
       cell.classList.toggle("active", !!active);
       cell.classList.toggle("unavailable", !!unavailable);

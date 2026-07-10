@@ -609,14 +609,18 @@ The row and column **headers are interactive** too:
   playing that source (and any other zone currently on that source is turned off,
   so the source ends up playing in exactly the preset's rooms). Presets are
   managed in the Axium options.
-- The single **Media Player** column is shown as **one column per amplifier**
-  (e.g. `Axium 1` / `Axium 2`) — because each amp has its own stream. A zone can
-  only join its *own* amp's stream (cross‑amp cells are greyed out). **Tap a
-  stream header** → a panel with **now playing**, **transport + volume**, and a
-  **Browse Music Assistant** button that opens that stream's Music Assistant
-  player to pick playlists, albums or radio. For this the amp's MA player must be
-  **named the same as the amplifier** (e.g. rename it to `Axium 1` in Music
-  Assistant); the panel shows a reminder if it isn't.
+- The **Media Player** column is shown as **one column per amplifier stream**
+  (e.g. `Axium 1` / `Axium 2`). The **master** (`Axium 1`) stream is stack‑wide, so
+  **every** zone can play it — play there and it's whole‑home. The expansion
+  (`Axium 2`) can **break its own zones (9–16) away** to a different stream; those
+  zones then light up under `Axium 2` instead of `Axium 1` (a zone only ever shows
+  under the stream it's actually hearing). Zones on the first amp can't use the
+  expansion column, so those cells are blank. **Tap a stream header** → a panel with
+  **now playing**, **transport + volume**, and a **Browse Music Assistant** button
+  that opens that stream's Music Assistant player to pick playlists, albums or
+  radio. For this the amp's MA player must be **named the same as the amplifier**
+  (rename it to `Axium 1` / `Axium 2` in Music Assistant); the panel shows a
+  reminder if it isn't.
 
 **Show/hide** what appears: both the source card and the matrix card have
 **Zones to show** (and the matrix card, **Sources to show**) fields in the
