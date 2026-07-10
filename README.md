@@ -556,8 +556,10 @@ the hub's zones and sources.
 
 The row and column **headers are interactive** too:
 
-- **Tap a zone name** → quick controls for that room: a **volume slider**, mute,
-  and **previous / play-pause / next**.
+- **Tap a zone name** → quick controls for that room: a **power** toggle, a
+  **volume slider**, mute, and **previous / play-pause / next**. The power toggle
+  means a zone can always be turned off here, even when its current source isn't
+  shown as a column.
 - **Hold a zone name** (long-press) → open that zone's **device page** (tone,
   gains, sleep timer and other settings).
 - **Tap a source name** → pick a **preset**; its zones start playing that source

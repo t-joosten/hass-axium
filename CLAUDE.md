@@ -208,18 +208,23 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   config — too rigid/unverified). Stored in options (`CONF_ALARMS`, helper `get_alarms`):
   `{name,time,days[0=Mon..6=Sun],zones[entity_ids],source id,volume,enabled}`. Managed via
   options-flow steps `add_alarm`/`remove_alarm`. Scheduler `_async_setup_alarms` in
-  __init__ registers `async_track_time_change(second=0)`; on a due minute it powers zones
-  on, selects source (`| SOURCE_FLAG_TURN_ON`), and fades up to target. Master arm/disarm
-  = `AxiumAlarmsSwitch` (switch.py, runtime flag `hass.data[DATA_ALARMS_ENABLED]`).
+  __init__ registers `async_track_time_change(second=0)`; on a due minute it activates each
+  zone via `controller.async_activate_zone(zone, source, start)` (the shared power-on + source
+  `| SOURCE_FLAG_TURN_ON` + volume primitive, also used by the notification service), then fades
+  up to target. Master arm/disarm = `AxiumAlarmsSwitch` (switch.py, runtime flag
+  `hass.data[DATA_ALARMS_ENABLED]`).
 - **Notifications**: `axium.play_notification` service (services.py/.yaml) — plays a sound on
   `zones`/`presets`, then restores each zone **exactly** (power/source/volume/mute, or off).
   Snapshots `controller.zone_state` (inside a per-entry `asyncio.Lock` so queued calls capture
-  the *restored* state), overrides (power on, unmute, select `source` (default = detected
-  internal Media Player), set `volume`), plays the sound via `media_player.play_media` on a
-  given `renderer` (the amp's DLNA player or an MA player), waits (`_wait_media_done` polls the
-  renderer; or a fixed `duration`; or ~5s), then restores from the snapshot. Restore is in a
-  `finally` and play is skipped if the renderer entity doesn't exist (`hass.states.get`) — so a
-  missing/erroring renderer can never strand a zone on the notification source. **The amp can't
+  the *restored* state), overrides via `controller.async_activate_zone(..., unmute=True)` (the
+  shared primitive the alarm also uses), plays the sound via `media_player.play_media` on a
+  given `renderer` (the amp's DLNA player or an MA player), waits (`_wait_media_done` waits for
+  the renderer to *start* — generous budget — then for a run of confirmed non-playing samples so
+  a buffering blip doesn't cut it off; or a fixed `duration`; or ~5s), then restores from the
+  snapshot. Restore is in a `finally` and play is skipped if the renderer entity doesn't exist
+  (`hass.states.get`). Restore is state-accurate: only `power is False` powers the zone back off
+  (unknown `None` power is left on, not silenced), and an off zone's source/volume/mute are
+  restored too (source without the turn-on bit) so its next power-on is correct. **The amp can't
   mix audio** (a zone = one source), so it *overrides* the source — no true ducking; the louder
   notification volume + restore is the equivalent. Uses only existing commands (no sim change);
   restore is exact because `level_to_volume(volume_to_level(b)) == b`. Needs the amp on the main

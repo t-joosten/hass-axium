@@ -19,8 +19,6 @@ from homeassistant.helpers.event import (
 )
 
 from .const import (
-    CMD_POWER,
-    CMD_SOURCE,
     CMD_VOLUME,
     CONF_ALARMS,
     CONF_UNITS,
@@ -30,9 +28,7 @@ from .const import (
     DATA_SLEEP_DEADLINES,
     DEFAULT_PORT,
     DOMAIN,
-    POWER_ON,
     SIGNAL_ALARM_UPDATE,
-    SOURCE_FLAG_TURN_ON,
     UNIT_KEY,
     ZONE_KEY,
 )
@@ -451,11 +447,7 @@ def _async_setup_alarms(
         # Power on, select the source (turn-on flag, as the media_player does)
         # and start quiet.
         for zone in zones:
-            await controller.async_send(CMD_POWER, zone, POWER_ON)
-            await controller.async_send(
-                CMD_SOURCE, zone, source | SOURCE_FLAG_TURN_ON
-            )
-            await controller.async_send(CMD_VOLUME, zone, level_to_volume(start))
+            await controller.async_activate_zone(zone, source, start)
         # Gently fade up to the target volume (wake-to-music).
         for step in range(1, _ALARM_FADE_STEPS + 1):
             level = start + (target - start) * step / _ALARM_FADE_STEPS

@@ -57,7 +57,6 @@ from .const import (
     CMD_ZONE_GAIN,
     CMD_ZONE_NAME,
     DEVICE_INFO_LIST_ZONES,
-    DEVICE_INFO_NO_EXPANSION_REPLY,
     DEVICE_INFO_REPLY_ON_PORT_ONLY,
     DEVICE_MODELS,
     DEVICE_TYPES,
@@ -78,7 +77,9 @@ from .const import (
     MS_LENGTH,
     MS_POSITION,
     MS_TITLE,
+    MUTE_OFF,
     POWER_OFF_VALUES,
+    POWER_ON,
     POWER_ON_VALUES,
     PRESET_COUNT,
     REPEAT_ALL,
@@ -86,6 +87,7 @@ from .const import (
     REPEAT_TRACK,
     RESP_DEVICE_INFO,
     RESP_EXTENDED_DEVICE_INFO,
+    SOURCE_FLAG_TURN_ON,
     SOURCE_ID_MASK,
     SOURCE_NAME_FLAG_DISABLED,
     SPECIAL_LOUDNESS_BIT,
@@ -302,6 +304,7 @@ class AxiumController:
         # newly-stacked amp's zones/device.
         self._stack_callback: StackCallback | None = None
         self._stack_check_handle: asyncio.TimerHandle | None = None
+        self._resolve_task: asyncio.Task | None = None
         # Primary unit's values, mirrored for the legacy single-value accessors.
         self._firmware: str | None = None
         self._mac: str | None = None
@@ -364,7 +367,14 @@ class AxiumController:
         # re-discovering. Only surface the stack once it's clean.
         conflict = self._find_zone_conflict()
         if conflict is not None:
-            asyncio.ensure_future(self._resolve_zone_conflict(*conflict))
+            # Keep a reference — asyncio holds only a weak one, so a bare task
+            # could be GC'd mid-reassignment.
+            self._resolve_task = asyncio.ensure_future(
+                self._resolve_zone_conflict(*conflict)
+            )
+            self._resolve_task.add_done_callback(
+                lambda _t: setattr(self, "_resolve_task", None)
+            )
             return
         if self._stack_callback is not None:
             self._stack_callback(self.units(), self._primary_unit_id)
@@ -404,6 +414,18 @@ class AxiumController:
             self._units[unit_id].zones = []  # drop stale cache before re-reading
         await asyncio.sleep(1.0)  # let the amp apply and settle
         await self._request_device_info()
+        # The unit stays in _resolved_units (so a non-persisting 0x2E can't loop);
+        # if the amp ignored it the clash persists, but zones_from_units de-dups so
+        # no duplicate entity is created. Surface it once state settles.
+        await asyncio.sleep(0.5)
+        unit = self._units.get(unit_id)
+        if unit and unit.zones and set(unit.zones) != set(zones):
+            _LOGGER.error(
+                "Axium: expansion amp 0x%04X did not accept the zone reassignment "
+                "(still %s); zones will be de-duplicated",
+                unit_id,
+                sorted(unit.zones),
+            )
 
     async def async_set_zone_assignment(self, unit_id: int, zones: list[int]) -> None:
         """Set which zones a unit owns (command 0x2E); relayed across the stack."""
@@ -672,7 +694,7 @@ class AxiumController:
             return
         elif (
             command == CMD_NETWORK_SETTINGS
-            and len(data) >= 4
+            and len(data) >= 20
             and data[2] == NET_SETTING_IP_FLAGS
         ):
             self._handle_network_settings(data)
@@ -1090,11 +1112,19 @@ class AxiumController:
     # -- auto power / standby (0x16, per unit) ---------------------------
 
     def _unit_bytes(self) -> tuple[int, int] | None:
-        """Return the directly-connected unit id as two bytes, if known."""
-        if self._device_info is None or self._device_info.unit_id is None:
+        """Return the primary (connected) unit id as two bytes, if known.
+
+        Prefer ``_primary_unit_id`` over ``_device_info`` — in a stack every unit
+        answers device-info, so ``_device_info`` holds whichever reply arrived
+        last (often an expansion amp), which must not be the target for hub-level
+        writes like auto power/standby.
+        """
+        uid = self._primary_unit_id
+        if uid is None and self._device_info is not None:
+            uid = self._device_info.unit_id
+        if uid is None:
             return None
-        unit = self._device_info.unit_id
-        return (unit >> 8) & 0xFF, unit & 0xFF
+        return (uid >> 8) & 0xFF, uid & 0xFF
 
     async def _write_auto_power(self) -> None:
         """Write the cached auto power options + standby time to the amp."""
@@ -1265,6 +1295,26 @@ class AxiumController:
         """Read a zone's power, mute, volume and source (no data = request)."""
         for command in (CMD_POWER, CMD_MUTE, CMD_VOLUME, CMD_SOURCE):
             await self.async_send(command, zone)
+
+    async def async_activate_zone(
+        self,
+        zone: int,
+        source: int,
+        level: float | None = None,
+        unmute: bool = False,
+    ) -> None:
+        """Power a zone on and route it to ``source`` (optionally set volume/unmute).
+
+        The shared 'activate a zone onto a source' primitive used by the
+        wake-to-music alarm and the notification service, so the turn-on flag,
+        command order and volume conversion live in one place.
+        """
+        await self.async_send(CMD_POWER, zone, POWER_ON)
+        if unmute:
+            await self.async_send(CMD_MUTE, zone, MUTE_OFF)
+        await self.async_send(CMD_SOURCE, zone, source | SOURCE_FLAG_TURN_ON)
+        if level is not None:
+            await self.async_send(CMD_VOLUME, zone, protocol.level_to_volume(level))
 
     async def async_poll_zones(self) -> None:
         """Re-read every known zone's state and the source names.

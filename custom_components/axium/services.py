@@ -26,10 +26,8 @@ from .const import (
     CMD_VOLUME,
     CONF_ALARMS,
     DOMAIN,
-    MUTE_OFF,
     MUTE_ON,
     POWER_OFF,
-    POWER_ON,
     SOURCE_FLAG_TURN_ON,
     SOURCE_MEDIA_PLAYER_BYTE,
 )
@@ -134,18 +132,46 @@ _PLAY_NOTIFICATION_SCHEMA = vol.Schema(
 _NOTIFY_LOCKS: dict[str, asyncio.Lock] = {}
 
 
-async def _wait_media_done(hass: HomeAssistant, renderer: str) -> None:
-    """Wait for a renderer to start, then finish, playing (bounded ~2min)."""
-    for _ in range(20):  # allow ~4s for playback to start
+# A renderer is "done" only after this many consecutive non-playing samples, so
+# a momentary buffering/paused blip between tracks doesn't end the wait early.
+_DONE_STATES = frozenset({"idle", "off", "standby", "unavailable", "unknown"})
+
+
+async def _wait_media_done(
+    hass: HomeAssistant,
+    renderer: str,
+    start_timeout: float = 15.0,
+    max_wait: float = 300.0,
+) -> None:
+    """Wait for a renderer to start, then finish, playing.
+
+    Gives generous time to *start* (network renderers can buffer for several
+    seconds) and only treats it as finished after a run of confirmed non-playing
+    samples, so a brief buffering/paused blip mid-playback isn't mistaken for the
+    end (which would restore the zones and cut the sound off).
+    """
+    waited = 0.0
+    while waited < start_timeout:
         state = hass.states.get(renderer)
         if state and state.state == "playing":
             break
-        await asyncio.sleep(0.2)
-    for _ in range(300):  # then wait for it to stop (~120s cap)
+        await asyncio.sleep(0.3)
+        waited += 0.3
+    else:
+        return  # never started — nothing to wait for
+
+    idle_streak = 0
+    waited = 0.0
+    while waited < max_wait:
         state = hass.states.get(renderer)
-        if not state or state.state != "playing":
-            return
+        if state is None or state.state in _DONE_STATES:
+            idle_streak += 1
+            if idle_streak >= 3:
+                return
+        else:
+            idle_streak = 0  # playing / paused / buffering — still going
         await asyncio.sleep(0.4)
+        waited += 0.4
 
 
 async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> None:
@@ -195,15 +221,9 @@ async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> No
         try:
             # Override: power on, unmute, select the source, set the volume.
             for zone in zones:
-                await controller.async_send(CMD_POWER, zone, POWER_ON)
-                await controller.async_send(CMD_MUTE, zone, MUTE_OFF)
-                await controller.async_send(
-                    CMD_SOURCE, zone, source | SOURCE_FLAG_TURN_ON
+                await controller.async_activate_zone(
+                    zone, source, level, unmute=True
                 )
-                if level is not None:
-                    await controller.async_send(
-                        CMD_VOLUME, zone, level_to_volume(level)
-                    )
             for zone in zones:
                 await controller.async_request_zone_state(zone)
 
@@ -244,19 +264,26 @@ async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> No
             # missing renderer can never leave a zone stuck on the notification.
             for zone in zones:
                 power, prev_source, prev_level, muted = snapshot[zone]
-                if not power:
-                    await controller.async_send(CMD_POWER, zone, POWER_OFF)
-                    continue
+                # Only an explicitly-off zone (power is False) is powered back
+                # off; an unknown power (None) is left on rather than silenced.
+                was_off = power is False
+                # Restore source/volume/mute for every zone — including an
+                # originally-off one — so its cached state is correct at the next
+                # power-on. The turn-on bit is applied only when it should stay on.
                 if prev_source is not None:
-                    await controller.async_send(
-                        CMD_SOURCE, zone, prev_source | SOURCE_FLAG_TURN_ON
+                    byte = (
+                        prev_source if was_off
+                        else prev_source | SOURCE_FLAG_TURN_ON
                     )
+                    await controller.async_send(CMD_SOURCE, zone, byte)
                 if prev_level is not None:
                     await controller.async_send(
                         CMD_VOLUME, zone, level_to_volume(prev_level)
                     )
                 if muted:
                     await controller.async_send(CMD_MUTE, zone, MUTE_ON)
+                if was_off:
+                    await controller.async_send(CMD_POWER, zone, POWER_OFF)
             for zone in zones:
                 await controller.async_request_zone_state(zone)
 

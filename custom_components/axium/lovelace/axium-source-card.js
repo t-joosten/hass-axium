@@ -53,6 +53,15 @@ function entityHub(hass, id) {
   return undefined;
 }
 
+/** Escape a string for safe interpolation into innerHTML. */
+function escHtml(value) {
+  return String(value == null ? "" : value).replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
+  );
+}
+
 /**
  * Return the media_player entity_ids that belong to the Axium integration.
  * Uses the entity registry (`hass.entities[id].platform`); if the registry is
@@ -996,16 +1005,16 @@ class AxiumHubCard extends HTMLElement {
     root.getElementById("amps").innerHTML = amps
       .map((dev, i) => {
         const parts = [];
-        if (dev.model && dev.model !== "Amplifier") parts.push(dev.model);
-        if (dev.sw_version) parts.push(dev.sw_version);
+        if (dev.model && dev.model !== "Amplifier") parts.push(escHtml(dev.model));
+        if (dev.sw_version) parts.push(escHtml(dev.sw_version));
         const temp = this._ampTemp(dev.id);
         if (temp && temp.state && !isNaN(Number(temp.state))) {
           const u = temp.attributes.unit_of_measurement || "°C";
-          parts.push(`${Math.round(Number(temp.state))}${u}`);
+          parts.push(`${Math.round(Number(temp.state))}${escHtml(u)}`);
         }
         const label = multi
           ? `<span class="alabel">${
-              i === 0 ? "Main" : dev.name_by_user || dev.name || "Amp"
+              i === 0 ? "Main" : escHtml(dev.name_by_user || dev.name || "Amp")
             }</span> `
           : "";
         return `<div class="amprow">${label}${parts.join(" · ") || "—"}</div>`;
@@ -1159,6 +1168,16 @@ class AxiumMatrixCard extends HTMLElement {
 
   getCardSize() {
     return 3;
+  }
+
+  disconnectedCallback() {
+    // Cancel a pending debounced volume_set and drop the open popover so a stale
+    // service call can't fire after the card is removed.
+    if (this._volTimer) {
+      clearTimeout(this._volTimer);
+      this._volTimer = null;
+    }
+    this._panel = null;
   }
 
   static getConfigElement() {
@@ -1449,7 +1468,10 @@ class AxiumMatrixCard extends HTMLElement {
     sheet.innerHTML = `
       <div class="sheet-head">
         <span class="sheet-title"></span>
-        <button class="iconbtn close" title="Close"><ha-icon icon="mdi:close"></ha-icon></button>
+        <span class="sheet-actions">
+          <button class="iconbtn power" title="Power on/off"><ha-icon icon="mdi:power"></ha-icon></button>
+          <button class="iconbtn close" title="Close"><ha-icon icon="mdi:close"></ha-icon></button>
+        </span>
       </div>
       <div class="volrow">
         <button class="iconbtn mute" title="Mute"><ha-icon icon="mdi:volume-high"></ha-icon></button>
@@ -1463,6 +1485,9 @@ class AxiumMatrixCard extends HTMLElement {
       </div>
     `;
     sheet.querySelector(".sheet-title").textContent = this._zoneName(zoneId);
+    sheet.querySelector(".power").addEventListener("click", () =>
+      this._togglePower(zoneId)
+    );
     const slider = sheet.querySelector(".slider");
     slider.addEventListener("input", () => {
       this._panel.dragging = true;
@@ -1515,6 +1540,18 @@ class AxiumMatrixCard extends HTMLElement {
     this._hass.callService("media_player", "volume_mute", {
       entity_id: zoneId,
       is_volume_muted: !st.attributes.is_volume_muted,
+    });
+  }
+
+  /**
+   * Toggle a zone on/off. Reachable from the popover so a zone can always be
+   * turned off, even when its current source isn't shown as a matrix column.
+   */
+  _togglePower(zoneId) {
+    const st = this._hass.states[zoneId];
+    const on = st && !OFF_STATES.includes(st.state);
+    this._hass.callService("media_player", on ? "turn_off" : "turn_on", {
+      entity_id: zoneId,
     });
   }
 
@@ -1579,6 +1616,8 @@ class AxiumMatrixCard extends HTMLElement {
         st.attributes.is_volume_muted ? "mdi:volume-off" : "mdi:volume-high"
       );
     }
+    const powerBtn = sheet.querySelector(".power");
+    if (powerBtn) powerBtn.classList.toggle("on", !OFF_STATES.includes(st.state));
     const feat = st.attributes.supported_features || 0;
     const setT = (t, ok) => {
       const b = sheet.querySelector(`button[data-t="${t}"]`);
@@ -1697,6 +1736,9 @@ AxiumMatrixCard.styles = `
     font-weight: 600; color: var(--primary-text-color);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
+  .sheet-actions { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+  .iconbtn.power { width: 36px; height: 36px; color: var(--secondary-text-color); }
+  .iconbtn.power.on { color: var(--primary-color); }
   .volrow { display: flex; align-items: center; gap: 10px; }
   .slider {
     flex: 1 1 auto; min-width: 120px; height: 24px;

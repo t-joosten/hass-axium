@@ -45,9 +45,9 @@ from .const import (
     NAME_KEY,
     RESP_DEVICE_INFO,
     ZONE_ALL,
+    ZONE_KEY,
 )
 from .controller import (
-    AxiumDeviceInfo,
     UnitInfo,
     parse_device_info,
     parse_source_name,
@@ -61,6 +61,7 @@ from .helpers import (
     get_zones,
     sources_from_detection,
     units_config,
+    zones_from_numbers,
     zones_from_units,
 )
 
@@ -104,6 +105,7 @@ async def _async_probe_amplifier(
         units: dict[int, UnitInfo] = {}
         primary_unit_id: int | None = None
         sources: list[dict] = []
+        saw_amp = False
         end = loop.time() + _PROBE_TIMEOUT
         while True:
             remaining = end - loop.time()
@@ -120,7 +122,10 @@ async def _async_probe_amplifier(
                 continue
             if frame[0] == RESP_DEVICE_INFO:
                 info = parse_device_info(frame[2:])
-                if info is None or info.unit_id is None:
+                if info is None:
+                    continue
+                saw_amp = True
+                if info.unit_id is None:
                     continue
                 if primary_unit_id is None:
                     # First reply is the directly-connected/primary amp; wait a
@@ -141,7 +146,9 @@ async def _async_probe_amplifier(
                     sources.append(parsed)
 
         if not units:
-            return None
+            # An amp answered but reported no unit id: add it as a legacy single
+            # amp (default zones, no per-unit config) rather than failing.
+            return ([], None, sources) if saw_amp else None
         return list(units.values()), primary_unit_id, sources
     finally:
         writer.close()
@@ -251,9 +258,13 @@ class AxiumConfigFlow(ConfigFlow, domain=DOMAIN):
                     if hub_dev and not hub_dev.name_by_user:
                         dev_reg.async_update_device(hub_dev.id, name=name)
                 # Re-detect the stack so a newly-stacked expansion amp's zones
-                # and unit are added, preserving existing zone names.
+                # and unit are added, preserving existing zone names. Grow only —
+                # never drop zones because an expansion amp was powered off or
+                # slow to answer during this re-probe (mirrors _handle_stack).
                 zones = zones_from_units(units, get_zones(entry))
-                if zones:
+                existing = {z[ZONE_KEY] for z in get_zones(entry)}
+                discovered = {z[ZONE_KEY] for z in zones}
+                if zones and discovered >= existing:
                     updates[CONF_ZONES] = zones
                     updates[CONF_UNITS] = units_config(units, primary_unit_id)
                 return self.async_update_reload_and_abort(

@@ -114,10 +114,15 @@ def zones_from_units(
         int(z[ZONE_KEY]): z.get(NAME_KEY) for z in (existing_zones or [])
     }
     result: list[dict[str, Any]] = []
+    seen: set[int] = set()
     for unit in units:
         for zone in sorted(unit.zones):
-            if not ZONE_MIN <= zone <= ZONE_MAX:
+            # Never emit the same zone number twice — a still-clashing stacked amp
+            # would otherwise produce two entities with the same unique_id and HA
+            # would drop one. Units are primary-first, so the primary's claim wins.
+            if not ZONE_MIN <= zone <= ZONE_MAX or zone in seen:
                 continue
+            seen.add(zone)
             result.append(
                 {
                     ZONE_KEY: zone,
@@ -141,8 +146,12 @@ def amp_zone_positions(zones: list[dict[str, Any]]) -> dict[int, int]:
         by_unit.setdefault(item.get(UNIT_KEY), []).append(item[ZONE_KEY])
     positions: dict[int, int] = {}
     for nums in by_unit.values():
-        for index, zone in enumerate(sorted(nums)):
-            positions[zone] = index + 1
+        # Physical channel = the zone's offset from its amp's lowest zone, so a
+        # gap in the configured zones doesn't shift the mapping (a sorted index
+        # would mislabel e.g. channel 7 when zone 4 is absent).
+        base = min(nums)
+        for zone in nums:
+            positions[zone] = zone - base + 1
     return positions
 
 
