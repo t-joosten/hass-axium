@@ -1598,16 +1598,13 @@ class AxiumMatrixCard extends HTMLElement {
   }
 
   /**
-   * Turn a zone off, first stopping any Music Assistant stream feeding it so MA
-   * can't immediately re-power the zone (which made "off" look like it failed).
+   * Turn a zone off — only powers off the amp zone, never the Music Assistant
+   * stream. Each amp has ONE shared media stream (verified: its 8 per-amp DLNA
+   * renderers all alias a single stream), so stopping it would silence every
+   * other zone on that amp. Toggling a zone just adds/removes it from its amp's
+   * still-running stream.
    */
   _turnZoneOff(zoneId) {
-    const ma = this._maPlayerFor(zoneId);
-    if (ma && !OFF_STATES.includes(ma.state)) {
-      this._hass.callService("media_player", "media_stop", {
-        entity_id: ma.entity_id,
-      });
-    }
     this._hass.callService("media_player", "turn_off", { entity_id: zoneId });
   }
 
