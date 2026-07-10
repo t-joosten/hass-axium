@@ -2528,7 +2528,15 @@ class AxiumAlarmsCard extends HTMLElement {
         .map((s) => `<option value="${s.id}">${s.name}</option>`)
         .join("")}</select>
       <label class="f-vol">Volume <input type="range" min="0" max="100" value="30"><span class="volval">30%</span></label>
+      <div class="f-media">
+        <button type="button" class="mediabtn link">♪ Wake to Music Assistant…</button>
+        <span class="mediasel"></span>
+        <div class="mediabrowse" hidden></div>
+      </div>
       <button class="addbtn">Add</button>`;
+    form.querySelector(".mediabtn").addEventListener("click", () =>
+      this._openMediaBrowse(form)
+    );
     _DAY_ABBR.forEach((lbl, idx) => {
       const c = document.createElement("button");
       c.className = "daychip on";
@@ -2577,9 +2585,107 @@ class AxiumAlarmsCard extends HTMLElement {
       source: Number(form.querySelector(".f-source").value),
       volume: Number(form.querySelector('input[type="range"]').value),
       enabled: true,
+      media: form.dataset.media || "",
+      media_type: form.dataset.mediaType || "",
     });
     nameEl.value = "";
     this._toggleAdd();
+  }
+
+  /** The Music Assistant player named after the hub (master) amp — the stream a
+   *  wake playlist plays on (stack-wide). Null until it's renamed to match. */
+  _masterStreamPlayer() {
+    const hubId = this._hub();
+    const devs = this._hass.devices || {};
+    const hub = Object.values(devs).find((d) =>
+      (d.identifiers || []).some((t) => t[0] === "axium" && t[1] === hubId)
+    );
+    const name = hub && (hub.name_by_user || hub.name);
+    if (!name) return null;
+    const want = name.trim().toLowerCase();
+    const reg = this._hass.entities || {};
+    for (const id of Object.keys(this._hass.states)) {
+      if (!id.startsWith("media_player.")) continue;
+      const e = reg[id];
+      if (!e || e.platform !== "music_assistant") continue;
+      const st = this._hass.states[id];
+      const fn = st && (st.attributes.friendly_name || "").trim().toLowerCase();
+      if (fn === want) return id;
+    }
+    return null;
+  }
+
+  _openMediaBrowse(form) {
+    const box = form.querySelector(".mediabrowse");
+    const player = this._masterStreamPlayer();
+    if (!player) {
+      box.hidden = false;
+      box.innerHTML = `<div class="empty">No Music Assistant stream player found — rename the amp's MA player to the amp's name first.</div>`;
+      return;
+    }
+    form._maPlayer = player;
+    box.hidden = false;
+    this._browseTo(form, undefined, undefined, []);
+  }
+
+  async _browseTo(form, id, type, crumbs) {
+    const box = form.querySelector(".mediabrowse");
+    box.innerHTML = `<div class="crumbs"></div><div class="mlist">Loading…</div>`;
+    let res;
+    try {
+      res = await this._hass.callWS({
+        type: "media_player/browse_media",
+        entity_id: form._maPlayer,
+        ...(id ? { media_content_id: id, media_content_type: type } : {}),
+      });
+    } catch (err) {
+      box.querySelector(".mlist").textContent = "Couldn't browse Music Assistant.";
+      return;
+    }
+    const cr = box.querySelector(".crumbs");
+    cr.innerHTML = "";
+    const home = document.createElement("button");
+    home.className = "crumb";
+    home.textContent = "⌂";
+    home.addEventListener("click", () => this._browseTo(form, undefined, undefined, []));
+    cr.appendChild(home);
+    crumbs.forEach((c, i) => {
+      const b = document.createElement("button");
+      b.className = "crumb";
+      b.textContent = "› " + c.title;
+      b.addEventListener("click", () =>
+        this._browseTo(form, c.id, c.type, crumbs.slice(0, i))
+      );
+      cr.appendChild(b);
+    });
+    const list = box.querySelector(".mlist");
+    list.innerHTML = "";
+    for (const ch of res.children || []) {
+      const it = document.createElement("button");
+      it.className = "mitem";
+      it.textContent = (ch.can_play ? "♪ " : "📁 ") + ch.title;
+      it.addEventListener("click", () => {
+        if (ch.can_play) {
+          this._pickMedia(form, ch);
+        } else if (ch.can_expand) {
+          this._browseTo(form, ch.media_content_id, ch.media_content_type, [
+            ...crumbs,
+            { title: ch.title, id: ch.media_content_id, type: ch.media_content_type },
+          ]);
+        }
+      });
+      list.appendChild(it);
+    }
+    if (!(res.children || []).length)
+      list.innerHTML = `<div class="empty">Nothing here.</div>`;
+  }
+
+  _pickMedia(form, ch) {
+    form.dataset.media = ch.media_content_id;
+    form.dataset.mediaType = ch.media_content_type || "playlist";
+    form.querySelector(".mediasel").textContent = "♪ " + ch.title;
+    form.querySelector(".mediabrowse").hidden = true;
+    form.querySelector(".mediabtn").textContent = "♪ Change music…";
   }
 }
 
@@ -2587,6 +2693,26 @@ AxiumAlarmsCard.styles = `
   ha-card { padding: 12px 16px; }
   .title { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: var(--primary-text-color); }
   .empty { color: var(--secondary-text-color); padding: 4px 0; }
+  .f-media { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
+  .mediabtn { align-self: flex-start; }
+  .mediasel { color: var(--primary-color); font-size: 0.9rem; }
+  .mediabrowse {
+    border: 1px solid var(--divider-color); border-radius: 8px; padding: 6px;
+    max-height: 240px; overflow-y: auto; background: var(--secondary-background-color);
+  }
+  .crumbs { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 4px; }
+  .crumb {
+    background: none; border: none; color: var(--secondary-text-color);
+    cursor: pointer; font-size: 0.85rem; padding: 2px 4px;
+  }
+  .crumb:hover { color: var(--primary-color); }
+  .mlist { display: flex; flex-direction: column; }
+  .mitem {
+    text-align: left; background: none; border: none; cursor: pointer;
+    color: var(--primary-text-color); padding: 6px 4px; border-radius: 6px;
+    font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .mitem:hover { background: var(--card-background-color); }
   .rows { display: flex; flex-direction: column; gap: 10px; }
   .row { display: flex; align-items: center; gap: 10px; }
   .mid { flex: 1 1 auto; min-width: 0; }

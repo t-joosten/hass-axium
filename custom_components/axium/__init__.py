@@ -32,6 +32,7 @@ from .const import (
     DEFAULT_PORT,
     DOMAIN,
     SIGNAL_ALARM_UPDATE,
+    SOURCE_MEDIA_PLAYER_BYTE,
     UNIT_KEY,
     ZONE_KEY,
 )
@@ -495,6 +496,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 @callback
+def _master_stream_player(hass: HomeAssistant, entry: ConfigEntry) -> str | None:
+    """The Music Assistant player named after the hub (master) amp device.
+
+    The master's Media Player stream is stack-wide, so playing a wake playlist on
+    it reaches every zone the alarm activated. Matched by the hub device's name
+    (the user renames the MA player to e.g. "Axium 1").
+    """
+    hub = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+    name = hub and (hub.name_by_user or hub.name)
+    if not name:
+        return None
+    want = name.strip().lower()
+    registry = er.async_get(hass)
+    for ent in registry.entities.values():
+        if ent.domain != "media_player" or ent.platform != "music_assistant":
+            continue
+        state = hass.states.get(ent.entity_id)
+        fn = state and (state.attributes.get("friendly_name") or "").strip().lower()
+        if fn == want:
+            return ent.entity_id
+    return None
+
+
 def _async_setup_alarms(
     hass: HomeAssistant, entry: ConfigEntry, controller: AxiumController
 ) -> None:
@@ -508,13 +532,39 @@ def _async_setup_alarms(
         ]
         if not zones:
             return
-        source = alarm["source"]
+        media = (alarm.get("media") or "").strip()
+        # A Music Assistant wake plays on the internal Media Player source; a
+        # classic alarm uses its configured (analog/media) source.
+        source = SOURCE_MEDIA_PLAYER_BYTE if media else alarm["source"]
         target = alarm["volume"] / 100
         start = min(target, 0.1)
         # Power on, select the source (turn-on flag, as the media_player does)
         # and start quiet.
         for zone in zones:
             await controller.async_activate_zone(zone, source, start)
+        # Wake to a Music Assistant playlist: start it on the master stream player
+        # (stack-wide, so the activated zones hear it) before fading the volume up.
+        if media:
+            player = (alarm.get("media_player") or "").strip() or _master_stream_player(
+                hass, entry
+            )
+            if player and hass.states.get(player) is not None:
+                await hass.services.async_call(
+                    "media_player",
+                    "play_media",
+                    {
+                        "entity_id": player,
+                        "media_content_id": media,
+                        "media_content_type": alarm.get("media_type") or "playlist",
+                    },
+                    blocking=True,
+                )
+            else:
+                _LOGGER.warning(
+                    "Axium alarm '%s': no Music Assistant stream player found for "
+                    "the wake media (rename the amp's MA player to the amp name)",
+                    alarm.get("name"),
+                )
         # Gently fade up to the target volume (wake-to-music).
         for step in range(1, _ALARM_FADE_STEPS + 1):
             level = start + (target - start) * step / _ALARM_FADE_STEPS

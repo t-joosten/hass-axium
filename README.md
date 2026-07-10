@@ -642,9 +642,13 @@ volume lives on each zone's device page.
   *every* zone at once (the amp then idles into standby per its Auto standby
   setting); it appears as the top **All zones** row in the Sleep Timers card.
 - **Alarms (wake-to-music)** — add them under **Settings → Devices & services →
-  Axium → Configure → Add a wake-to-music alarm**: a name, time, weekdays, zones,
-  source and target volume. At the set time those zones power on, switch to the
-  source and gently fade up to the target volume. The **Alarms** switch on the
+  Axium → Configure → Add a wake-to-music alarm**, or from the **alarms card**: a
+  name, time, weekdays, zones, source and target volume. At the set time those
+  zones power on, switch to the source and gently fade up to the target volume.
+  On the alarms card you can also **"Wake to Music Assistant"** — browse your
+  Music Assistant library right in the add form and pick a playlist/album/radio;
+  the alarm streams it to the rooms via the amp's stream (needs the amp's MA
+  player named after the amplifier, e.g. `Axium 1`). The **Alarms** switch on the
   amplifier device arms/disarms them all at once (e.g. while you're away).
 
 Each alarm also gets a **next-fire timestamp sensor** (`sensor.axium_alarm_<name>`)

@@ -70,6 +70,30 @@ set_alarm:
       required: false
       selector:
         boolean:
+    media:
+      name: Music Assistant media
+      description: >-
+        Media content id of a Music Assistant playlist/album/radio to wake to.
+        When set, the alarm plays it on the amp's Media Player stream instead of
+        the fixed Source.
+      required: false
+      selector:
+        text:
+    media_type:
+      name: Media type
+      description: Content type for the wake media (default "playlist").
+      required: false
+      selector:
+        text:
+    media_player:
+      name: Stream player
+      description: >-
+        The Music Assistant player to play the wake media on (defaults to the
+        master amp's stream player, matched by the amp's name).
+      required: false
+      selector:
+        entity:
+          domain: media_player
 
 remove_alarm:
   name: Remove alarm

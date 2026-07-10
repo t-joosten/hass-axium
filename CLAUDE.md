@@ -263,13 +263,19 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   first, labels it "All zones").
 - **Alarms (wake-to-music)**: HA-side (the amp's native alarm needs clock+preset+favourite
   config — too rigid/unverified). Stored in options (`CONF_ALARMS`, helper `get_alarms`):
-  `{name,time,days[0=Mon..6=Sun],zones[entity_ids],source id,volume,enabled}`. Managed via
-  options-flow steps `add_alarm`/`remove_alarm`. Scheduler `_async_setup_alarms` in
+  `{name,time,days[0=Mon..6=Sun],zones[entity_ids],source id,volume,enabled,media,media_type,media_player}`.
+  Managed via options-flow steps `add_alarm`/`remove_alarm`. Scheduler `_async_setup_alarms` in
   __init__ registers `async_track_time_change(second=0)`; on a due minute it activates each
   zone via `controller.async_activate_zone(zone, source, start)` (the shared power-on + source
   `| SOURCE_FLAG_TURN_ON` + volume primitive, also used by the notification service), then fades
-  up to target. Master arm/disarm = `AxiumAlarmsSwitch` (switch.py, runtime flag
-  `hass.data[DATA_ALARMS_ENABLED]`).
+  up to target. **Wake to a Music Assistant playlist:** if the alarm has `media` (a MA
+  media-content-id), it activates the zones on the **Media Player** source (0x12) and calls
+  `media_player.play_media` on the **master** stream player (`_master_stream_player`: the MA player
+  named after the hub device — stack-wide, so all activated zones hear it) — `media_player` overrides
+  the target. The alarms card's Add form has an inline MA browser (`_openMediaBrowse`/`_browseTo`/
+  `_pickMedia` via WS `media_player/browse_media` on the master player; drill folders, pick a playable
+  item) that stores `media`/`media_type` through `axium.set_alarm`. Master arm/disarm =
+  `AxiumAlarmsSwitch` (switch.py, runtime flag `hass.data[DATA_ALARMS_ENABLED]`).
 - **Notifications**: `axium.play_notification` service (services.py/.yaml) — plays a sound on
   `zones`/`presets`, then restores each zone **exactly** (power/source/volume/mute, or off). A
   spoken **`message`** (opt. `tts_engine`/`language`) is turned into a `media-source://tts/<engine>`
