@@ -1258,7 +1258,7 @@ class AxiumMatrixCard extends HTMLElement {
     // Tapping the zone's currently-active source turns the zone off (toggle).
     const on = st && !OFF_STATES.includes(st.state);
     if (on && this._currentSourceId(st) === sid) {
-      this._hass.callService("media_player", "turn_off", { entity_id: zoneId });
+      this._turnZoneOff(zoneId);
       return;
     }
     const name = this._sourceNameFor(st, sid);
@@ -1516,7 +1516,9 @@ class AxiumMatrixCard extends HTMLElement {
             : b.dataset.t === "next"
             ? "media_next_track"
             : "media_play_pause";
-        this._hass.callService("media_player", svc, { entity_id: zoneId });
+        this._hass.callService("media_player", svc, {
+          entity_id: this._playbackTarget(zoneId),
+        });
       });
     }
     sheet.querySelector(".close").addEventListener("click", () => this._closePanel());
@@ -1557,9 +1559,11 @@ class AxiumMatrixCard extends HTMLElement {
   _togglePower(zoneId) {
     const st = this._hass.states[zoneId];
     const on = st && !OFF_STATES.includes(st.state);
-    this._hass.callService("media_player", on ? "turn_off" : "turn_on", {
-      entity_id: zoneId,
-    });
+    if (on) {
+      this._turnZoneOff(zoneId);
+    } else {
+      this._hass.callService("media_player", "turn_on", { entity_id: zoneId });
+    }
   }
 
   /** A Music Assistant player whose name matches this zone (best-effort link). */
@@ -1573,9 +1577,38 @@ class AxiumMatrixCard extends HTMLElement {
       if (!e || e.platform !== "music_assistant") continue;
       const st = this._hass.states[id];
       const fn = st && (st.attributes.friendly_name || "").trim().toLowerCase();
-      if (fn === name) return st;
+      // Exact, or the amp's DLNA-truncated name (~15 chars) is a prefix of the
+      // zone name (e.g. "InactiefOnverst" ⊂ "InactiefOnversterkt").
+      if (fn && (fn === name || (fn.length >= 6 && name.startsWith(fn)))) return st;
     }
     return null;
+  }
+
+  /**
+   * Where transport/play controls should go for a zone. When a Music Assistant
+   * player is streaming to it, drive THAT (so play/pause resumes instead of the
+   * amp's internal player restarting the track); otherwise the amp zone itself.
+   */
+  _playbackTarget(zoneId) {
+    const ma = this._maPlayerFor(zoneId);
+    if (ma && !OFF_STATES.includes(ma.state) && ma.attributes.media_title) {
+      return ma.entity_id;
+    }
+    return zoneId;
+  }
+
+  /**
+   * Turn a zone off, first stopping any Music Assistant stream feeding it so MA
+   * can't immediately re-power the zone (which made "off" look like it failed).
+   */
+  _turnZoneOff(zoneId) {
+    const ma = this._maPlayerFor(zoneId);
+    if (ma && !OFF_STATES.includes(ma.state)) {
+      this._hass.callService("media_player", "media_stop", {
+        entity_id: ma.entity_id,
+      });
+    }
+    this._hass.callService("media_player", "turn_off", { entity_id: zoneId });
   }
 
   /**
@@ -1674,7 +1707,10 @@ class AxiumMatrixCard extends HTMLElement {
     }
     const powerBtn = sheet.querySelector(".power");
     if (powerBtn) powerBtn.classList.toggle("on", !OFF_STATES.includes(st.state));
-    const feat = st.attributes.supported_features || 0;
+    // Transport reflects the playback target (the MA stream if one is feeding
+    // this zone), not the amp zone — the amp zone reports no transport support.
+    const tst = this._hass.states[this._playbackTarget(this._panel.zoneId)] || st;
+    const feat = tst.attributes.supported_features || 0;
     const setT = (t, ok) => {
       const b = sheet.querySelector(`button[data-t="${t}"]`);
       if (b) b.toggleAttribute("disabled", !ok);
@@ -1686,7 +1722,7 @@ class AxiumMatrixCard extends HTMLElement {
     if (playIcon) {
       playIcon.setAttribute(
         "icon",
-        st.state === "playing" ? "mdi:pause" : "mdi:play"
+        tst.state === "playing" ? "mdi:pause" : "mdi:play"
       );
     }
   }

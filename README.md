@@ -574,6 +574,10 @@ The row and column **headers are interactive** too:
   means a zone can always be turned off here, even when its current source isn't
   shown as a column. Now-playing comes from the zone's own Media Player source, or
   from a **Music Assistant player of the same name** if one is streaming to it.
+  When a Music Assistant player *is* feeding the zone, the **transport buttons
+  drive that player** — so play/pause resumes the stream instead of restarting
+  the amp's internal player, and next/previous act on the queue. Turning the zone
+  **off** stops that stream first, so it can't immediately re-power the room.
 - **Hold a zone name** (long-press) → open that zone's **device page** (tone,
   gains, sleep timer and other settings).
 - **Tap a source name** → pick a **preset**; its zones start playing that source

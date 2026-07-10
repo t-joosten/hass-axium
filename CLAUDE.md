@@ -196,7 +196,17 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   from `_maPlayerFor`), a **power** toggle (`_togglePower` — turn a zone off even when its source
   isn't a column), quick volume slider + mute + prev/play-pause/next for that zone
   (`_openZonePanel`; slider debounced via `_scheduleVolume`, live-refreshed by `_refreshPanel`
-  from `_update` unless mid-drag; `disconnectedCallback` clears the timer); **hold a zone name** →
+  from `_update` unless mid-drag; `disconnectedCallback` clears the timer). **Transport routes to
+  the MA player, not the amp zone:** `_playbackTarget` returns the matched `music_assistant` player
+  when it's streaming (playing + has `media_title`), else the zone — so play/pause *resumes* the
+  DLNA stream instead of the amp's 0x3D internal player restarting the track, and `_refreshPanel`
+  reads the play-icon/supported-features from that target. `_maPlayerFor` matches by friendly_name
+  **exactly OR the amp's ~15-char DLNA-truncated name as a prefix** of the zone name
+  (e.g. "InactiefOnverst" ⊂ "InactiefOnversterkt"). Turning a zone **off** (`_turnZoneOff`, used by
+  both `_togglePower` and the cell-tap `_route`) **stops the matched MA stream first** so MA can't
+  re-power the zone (which made "off" look like it failed while music played). **Amps advertise only
+  1 MediaRenderer/amp via SSDP** (the first embedded zone) so MA/HA discover only a few of the 16
+  per-zone renderers — an amp-firmware limit, not fixable card-side. **hold a zone name** →
   open the zone device page (`_attachHold`, reused 500ms hold pattern); **tap a source name**
   → preset picker (`_openPresetPanel`) that applies a preset onto that column set-exactly
   (`_applyPresetToSource`: preset zones → that source, other zones on it → off), mirroring the
