@@ -127,8 +127,7 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   renaming the **primary amp** device (or an expansion) pushes the amp network name. **Migration
   note:** on upgrade, existing amp entities re-parent from the old hub device to `_amp_primary`
   (unique_ids unchanged, so no data loss); the old hub keeps its `name_by_user` (rename to "Axium
-  Hub"), the amp defaults to "Main", and the amp-stream MA player must be renamed to match the amp
-  device ("Main"). **MAC-collision trap (fixed):** the amp's MAC was still registered on the OLD hub
+  Hub"), the amp defaults to "Axium 1" (matching the amp-stream MA player name), and expansion amps keep their own names. **MAC-collision trap (fixed):** the amp's MAC was still registered on the OLD hub
   device from before the split, so `_update_unit_extended` setting it on `_amp_primary` raised
   `DeviceConnectionCollisionError` on EVERY extended-info (0xB9) reply — which unwound the read loop
   and made the controller reconnect (a flapping connection: zones up, sources flashing then gone).

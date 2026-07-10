@@ -297,15 +297,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # ("Main") can carry independent names. Its identifier has no "_unit_" so the
     # dashboard still treats it as the master stream. Model/firmware/temp land on
     # it (via `_amp_identifier`), leaving the hub a pure logical container.
-    device_registry.async_get_or_create(
+    primary_amp = device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, f"{entry.entry_id}_amp_primary")},
         via_device=(DOMAIN, entry.entry_id),
         manufacturer="Axium",
-        name="Main",
+        name="Axium 1",
         model="Amplifier",
         configuration_url=f"http://{host}",
     )
+    # Follow the "Axium 1" default even for an existing device (async_get_or_create
+    # doesn't rename an existing one, and the split first shipped it as "Main"); a
+    # user's own name_by_user still wins for display.
+    if primary_amp.name != "Axium 1" and not primary_amp.name_by_user:
+        device_registry.async_update_device(primary_amp.id, name="Axium 1")
     # NOTE: we deliberately do NOT force the config-entry title from the hub
     # device's name here. Doing so reverted a user's own entry-title edit back to
     # the device name on every reload ("Axium Hub" → "Axium 1"). The title and the
