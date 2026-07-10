@@ -556,6 +556,9 @@ def _async_setup_alarms(
                         "entity_id": player,
                         "media_content_id": media,
                         "media_content_type": alarm.get("media_type") or "playlist",
+                        # Replace whatever's playing so the wake media starts now
+                        # (without this, MA may enqueue behind current playback).
+                        "enqueue": "replace",
                     },
                     blocking=True,
                 )

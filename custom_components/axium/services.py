@@ -59,6 +59,7 @@ _SET_ALARM_SCHEMA = vol.Schema(
         vol.Optional("enabled"): cv.boolean,
         vol.Optional("media"): cv.string,
         vol.Optional("media_type"): cv.string,
+        vol.Optional("media_title"): cv.string,
         vol.Optional("media_player"): cv.string,
     }
 )
@@ -103,11 +104,12 @@ async def _async_set_alarm(hass: HomeAssistant, call: ServiceCall) -> None:
         "enabled": True,
         "media": "",
         "media_type": "",
+        "media_title": "",
         "media_player": "",
     }
     for key in (
         "time", "days", "zones", "source", "volume", "enabled",
-        "media", "media_type", "media_player",
+        "media", "media_type", "media_title", "media_player",
     ):
         if key in call.data:
             alarm[key] = call.data[key]

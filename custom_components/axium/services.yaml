@@ -85,6 +85,12 @@ set_alarm:
       required: false
       selector:
         text:
+    media_title:
+      name: Media title
+      description: Human-readable name of the wake media (shown on the alarm card).
+      required: false
+      selector:
+        text:
     media_player:
       name: Stream player
       description: >-

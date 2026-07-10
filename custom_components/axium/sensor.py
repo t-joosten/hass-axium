@@ -230,6 +230,9 @@ class AxiumAlarmSensor(SensorEntity):
             "alarm_source": alarm["source"],
             "alarm_volume": alarm["volume"],
             "alarm_enabled": alarm.get("enabled", True),
+            "alarm_media": alarm.get("media", ""),
+            "alarm_media_title": alarm.get("media_title", ""),
+            "alarm_media_player": alarm.get("media_player", ""),
             "armed": self._armed(alarm),
         }
 

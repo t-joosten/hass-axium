@@ -616,11 +616,14 @@ The row and column **headers are interactive** too:
   zones then light up under `Axium 2` instead of `Axium 1` (a zone only ever shows
   under the stream it's actually hearing). Zones on the first amp can't use the
   expansion column, so those cells are blank. **Tap a stream header** → a panel with
-  **now playing**, **transport + volume**, and a **Browse Music Assistant** button
-  that opens that stream's Music Assistant player to pick playlists, albums or
-  radio. For this the amp's MA player must be **named the same as the amplifier**
+  **now playing**, a **preset** picker, **volume**, transport, and a **Browse Music
+  Assistant** button that opens that stream's Music Assistant player to pick playlists,
+  albums or radio. For this the amp's MA player must be **named the same as the amplifier**
   (rename it to `Axium 1` / `Axium 2` in Music Assistant); the panel shows a
-  reminder if it isn't.
+  reminder if it isn't. *Transport (play/pause/next/previous) only works while the
+  stream is playing **through Music Assistant** — the amp's DLNA renderer ignores
+  pause/skip for playback started another way; control it from Music Assistant itself
+  in that case.*
 
 **Show/hide** what appears: both the source card and the matrix card have
 **Zones to show** (and the matrix card, **Sources to show**) fields in the
@@ -633,6 +636,14 @@ The `+`/`−` volume buttons on the **source** card send a relative step
 by the same amount from its own level, so relative differences between rooms are
 preserved (it does not force them to one absolute level). Absolute per-zone
 volume lives on each zone's device page.
+
+### Volumes card
+
+The **Axium Volumes Card** (`type: custom:axium-volumes-card`) shows a **vertical
+volume slider per zone** (plus a mute button and the live level) — a quick way to
+balance the whole house at a glance. Drag a slider to set that room's absolute
+volume. Its visual editor has a **Zones to show** field to pick exactly which
+rooms appear (empty = all); in YAML that's `zones:`.
 
 ## Sleep timer & alarms
 
@@ -657,10 +668,13 @@ are `device_class: timestamp`, so the time left is usable in automations, e.g.
 `{{ (states('sensor.axium_alarm_wake') | as_datetime - now()).total_seconds() }}`.
 The **Axium Alarms Card** and **Axium Sleep Timers Card** are **interactive**:
 the alarms card lets you enable/disable each alarm, edit its time and days,
-remove it, and add new ones inline (and it shows each alarm's target zones);
+remove it, and add new ones inline (and each alarm row shows its target zones plus
+a one-line **what it plays** — the wake song `♪ <title> · <amp>` when set to Music
+Assistant, otherwise the source name);
 its editor also restricts which **zones** and **sources** are offered in the
 Add form (empty = all), like the matrix card;
-the sleep-timers card lets you start a timer per zone (15/30/60/90 min) and
+the sleep-timers card lets you start a timer per zone (15/30/60/90 min, or
+**Custom…** for any number of minutes) and
 cancel it — all with the live countdown. The sleep-timers card's editor has a
 **Show** option to choose which sections appear — the **all-zones timer**,
 **individual zones**, and/or **presets** (a per-preset sleep control that

@@ -138,6 +138,30 @@ const TOKEN_SEP = "|";
  * present ("[hub] [name]"). Source ids come from each media_player's
  * `source_ids` attribute (parallel to `source_list`).
  */
+// The amp device names on a hub (master first), e.g. ["Axium 1", "Axium 2"].
+// Used to show the stack-wide internal Media Player source under the amp/stream
+// names the matrix uses as columns, rather than the bare "Media Player".
+function axiumAmpNames(hass, hubId) {
+  const devs = (hass && hass.devices) || {};
+  const ents = (hass && hass.entities) || {};
+  const out = [];
+  const seen = new Set();
+  for (const id of axiumMediaPlayers(hass, hubId)) {
+    const ent = ents[id];
+    const zdev = ent && devs[ent.device_id];
+    if (!zdev) continue;
+    const amp = devs[zdev.via_device_id] || zdev;
+    if (seen.has(amp.id)) continue;
+    seen.add(amp.id);
+    const master = (amp.identifiers || []).some(
+      (t) => t[0] === "axium" && t[1] === hubId
+    );
+    out.push({ name: amp.name_by_user || amp.name || "", master });
+  }
+  out.sort((a, b) => (a.master === b.master ? 0 : a.master ? -1 : 1));
+  return out.map((a) => a.name).filter(Boolean);
+}
+
 function axiumSourceChoices(hass) {
   const hubs = axiumHubs(hass);
   const multi = hubs.length > 1;
@@ -155,9 +179,16 @@ function axiumSourceChoices(hass) {
         });
       }
     }
+    const ampNames = axiumAmpNames(hass, hub.id);
     [...byId.entries()]
       .sort((a, b) => String(a[1]).localeCompare(String(b[1])))
-      .forEach(([sid, name]) => {
+      .forEach(([sid, rawName]) => {
+        // The internal Media Player is stack-wide and shown per amp as the
+        // "Axium 1"/"Axium 2" stream columns — label it that way everywhere.
+        const name =
+          sid >= STREAM_SOURCE_MIN && ampNames.length
+            ? ampNames.join(" / ")
+            : rawName;
         out.push({
           hub: hub.id,
           hubName: hub.name,
@@ -2571,6 +2602,7 @@ class AxiumAlarmsCard extends HTMLElement {
           <div class="n"></div>
           <div class="sub"><input type="time" class="time"><span class="days"></span></div>
           <div class="zn"></div>
+          <div class="src"></div>
         </div>
         <div class="cd" data-id="${id}"></div>
         <button class="x" title="Remove">&#10005;</button>`;
@@ -2638,6 +2670,7 @@ class AxiumAlarmsCard extends HTMLElement {
             })
             .join(", ")
         : "";
+      row.querySelector(".src").textContent = this._alarmSourceLabel(a);
     }
     this._tickCountdowns();
   }
@@ -2784,6 +2817,7 @@ class AxiumAlarmsCard extends HTMLElement {
       enabled: true,
       media: form.dataset.media || "",
       media_type: form.dataset.mediaType || "",
+      media_title: form.dataset.mediaTitle || "",
       media_player: mediaPlayer,
     });
     nameEl.value = "";
@@ -2811,6 +2845,31 @@ class AxiumAlarmsCard extends HTMLElement {
       if (fn === want) return id;
     }
     return null;
+  }
+
+  /** The hub (master) amp device's display name. */
+  _hubName() {
+    const hubId = this._hub();
+    const hub = Object.values(this._hass.devices || {}).find((d) =>
+      (d.identifiers || []).some((t) => t[0] === "axium" && t[1] === hubId)
+    );
+    return (hub && (hub.name_by_user || hub.name)) || "";
+  }
+
+  /** One-line "what this alarm plays": a wake song (with its amp stream) or the
+   *  configured source name — never the raw protocol byte or content id. */
+  _alarmSourceLabel(a) {
+    if (a.alarm_media) {
+      const title = a.alarm_media_title || "Music Assistant";
+      const mp = a.alarm_media_player || "";
+      let amp = "";
+      if (mp && this._hass.states[mp])
+        amp = this._hass.states[mp].attributes.friendly_name || "";
+      if (!amp) amp = this._hubName();
+      return "♪ " + title + (amp ? " · " + amp : "");
+    }
+    const s = (this._sources() || []).find((x) => x.id === a.alarm_source);
+    return s ? s.name : "";
   }
 
   _openMediaBrowse(form) {
@@ -2881,6 +2940,7 @@ class AxiumAlarmsCard extends HTMLElement {
   _pickMedia(form, ch) {
     form.dataset.media = ch.media_content_id;
     form.dataset.mediaType = ch.media_content_type || "playlist";
+    form.dataset.mediaTitle = ch.title || "";
     form.querySelector(".mediasel").textContent = "♪ " + ch.title;
     form.querySelector(".mediabrowse").hidden = true;
     form.querySelector(".mediabtn").textContent = "♪ Change music…";
@@ -2917,6 +2977,8 @@ AxiumAlarmsCard.styles = `
   .n { font-weight: 600; color: var(--primary-text-color); }
   .sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
   .zn { font-size: 0.78rem; color: var(--secondary-text-color); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .src { font-size: 0.78rem; color: var(--primary-color); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .src:empty { display: none; }
   .cd { flex: 0 0 auto; text-align: right; font-size: 0.85rem; }
   .in { font-weight: 600; color: var(--primary-color); }
   .off { color: var(--secondary-text-color); }
@@ -3320,6 +3382,277 @@ class AxiumSleepCardEditor extends HTMLElement {
 
 // Guard against the module being loaded twice (e.g. a manually-added resource
 // plus the integration's auto-registration), which would otherwise throw.
+/**
+ * Axium Volumes Card — a vertical volume slider per zone (plus a mute button),
+ * for quick whole-house level balancing. Reads/writes only the zones'
+ * media_player state; nothing is stored on the card.
+ *
+ * Config:
+ *   type: custom:axium-volumes-card
+ *   hub: <config_entry_id>   # optional — defaults to the only Axium hub
+ *   name: Volumes            # optional — header text
+ *   zones: [...]             # optional — zone media_players to show; auto if omitted
+ */
+class AxiumVolumesCard extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._sig = "";
+    this._drag = {};
+    this._timers = {};
+  }
+
+  setConfig(config) {
+    this._config = config || {};
+    this._sig = "";
+    this.shadowRoot.innerHTML = "";
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!hass || !this._config) return;
+    this._render();
+  }
+
+  getCardSize() {
+    return 4;
+  }
+
+  disconnectedCallback() {
+    for (const t of Object.values(this._timers)) if (t) clearTimeout(t);
+    this._timers = {};
+  }
+
+  static getConfigElement() {
+    return document.createElement("axium-volumes-card-editor");
+  }
+
+  static getStubConfig(hass) {
+    const hubs = axiumHubs(hass);
+    return hubs.length ? { hub: hubs[0].id } : {};
+  }
+
+  _hubId() {
+    return this._config.hub || (axiumHubs(this._hass)[0] || {}).id;
+  }
+
+  _name(id) {
+    const st = this._hass.states[id];
+    const n = st && st.attributes.friendly_name;
+    return n || id.split(".")[1].replace(/_/g, " ");
+  }
+
+  _zones() {
+    const auto = axiumMediaPlayers(this._hass, this._hubId()).sort((a, b) =>
+      this._name(a).localeCompare(this._name(b))
+    );
+    const pick = this._config.zones || this._config.entities;
+    if (Array.isArray(pick) && pick.length) {
+      return pick.filter((id) => auto.includes(id));
+    }
+    return auto;
+  }
+
+  _render() {
+    const zones = this._zones();
+    const sig = zones.join(",") + "|" + (this._config.name || "");
+    if (sig !== this._sig) {
+      this._sig = sig;
+      this._build(zones);
+    }
+    this._update(zones);
+  }
+
+  _build(zones) {
+    const title = this._config.name || "Volumes";
+    this.shadowRoot.innerHTML = `
+      <style>${AxiumVolumesCard.styles}</style>
+      <ha-card>
+        <div class="title">${escHtml(title)}</div>
+        ${
+          zones.length
+            ? `<div class="cols"></div>`
+            : `<div class="empty">No Axium zones.</div>`
+        }
+      </ha-card>`;
+    const cols = this.shadowRoot.querySelector(".cols");
+    this._cells = {};
+    if (!cols) return;
+    for (const z of zones) {
+      const col = document.createElement("div");
+      col.className = "col";
+      col.innerHTML = `
+        <div class="pct"></div>
+        <input type="range" class="vol" min="0" max="100" step="1" orient="vertical">
+        <button class="mute iconbtn" title="Mute"><ha-icon icon="mdi:volume-high"></ha-icon></button>
+        <div class="zn"></div>`;
+      const slider = col.querySelector(".vol");
+      slider.addEventListener("input", () => {
+        this._drag[z] = true;
+        col.querySelector(".pct").textContent = slider.value + "%";
+        this._scheduleVolume(z, Number(slider.value) / 100);
+      });
+      slider.addEventListener("change", () => {
+        this._drag[z] = false;
+        this._setVolume(z, Number(slider.value) / 100);
+      });
+      col.querySelector(".mute").addEventListener("click", () => {
+        const st = this._hass.states[z];
+        this._hass.callService("media_player", "volume_mute", {
+          entity_id: z,
+          is_volume_muted: !(st && st.attributes.is_volume_muted),
+        });
+      });
+      cols.appendChild(col);
+      this._cells[z] = col;
+    }
+  }
+
+  // Debounce live drags so we don't flood the amp; the final `change` still fires.
+  _scheduleVolume(z, level) {
+    if (this._timers[z]) clearTimeout(this._timers[z]);
+    this._timers[z] = setTimeout(() => {
+      this._timers[z] = null;
+      this._setVolume(z, level);
+    }, 200);
+  }
+
+  _setVolume(z, level) {
+    if (this._timers[z]) {
+      clearTimeout(this._timers[z]);
+      this._timers[z] = null;
+    }
+    this._hass.callService("media_player", "volume_set", {
+      entity_id: z,
+      volume_level: Math.max(0, Math.min(1, level)),
+    });
+  }
+
+  _update(zones) {
+    for (const z of zones) {
+      const col = this._cells[z];
+      if (!col) continue;
+      const st = this._hass.states[z];
+      const off = !st || OFF_STATES.includes(st.state);
+      const muted = !!(st && st.attributes.is_volume_muted);
+      const lvl =
+        st && typeof st.attributes.volume_level === "number"
+          ? st.attributes.volume_level
+          : 0;
+      const pctv = Math.round(lvl * 100);
+      col.classList.toggle("off", off);
+      const slider = col.querySelector(".vol");
+      if (!this._drag[z] && this.shadowRoot.activeElement !== slider) {
+        slider.value = pctv;
+        col.querySelector(".pct").textContent = pctv + "%";
+      }
+      const zn = col.querySelector(".zn");
+      zn.textContent = this._name(z);
+      zn.title = this._name(z);
+      const mi = col.querySelector(".mute ha-icon");
+      if (mi) mi.setAttribute("icon", muted ? "mdi:volume-off" : "mdi:volume-high");
+      col.querySelector(".mute").classList.toggle("on", muted);
+    }
+  }
+}
+
+AxiumVolumesCard.styles = `
+  ha-card { padding: 12px 16px; }
+  .title { font-size: 1.1rem; font-weight: 600; margin-bottom: 12px; color: var(--primary-text-color); }
+  .empty { color: var(--secondary-text-color); padding: 4px 0; }
+  .cols { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+  .col { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 58px; }
+  .pct { font-size: 0.8rem; color: var(--secondary-text-color); min-height: 1em; }
+  .vol {
+    writing-mode: vertical-lr; direction: rtl;
+    -webkit-appearance: slider-vertical; appearance: slider-vertical;
+    width: 28px; height: 150px; accent-color: var(--primary-color); cursor: pointer;
+  }
+  .col.off .vol { opacity: 0.45; }
+  .zn {
+    font-size: 0.78rem; color: var(--primary-text-color); text-align: center;
+    max-width: 58px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .iconbtn {
+    background: none; border: none; cursor: pointer; color: var(--secondary-text-color);
+    padding: 2px; --mdc-icon-size: 20px;
+  }
+  .mute.on { color: var(--primary-color); }
+`;
+
+/** Visual editor for the volumes card: amplifier, zone whitelist, card name. */
+class AxiumVolumesCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = { ...config };
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+
+  async _ensureHaForm() {
+    if (customElements.get("ha-form")) return;
+    try {
+      const helpers = await window.loadCardHelpers();
+      const card = await helpers.createCardElement({ type: "entities", entities: [] });
+      await card.constructor.getConfigElement();
+    } catch (err) {
+      /* ha-form will still upgrade once available */
+    }
+  }
+
+  _render() {
+    if (!this._hass || !this._config) return;
+    if (!this._form) {
+      this._form = document.createElement("ha-form");
+      this._form.addEventListener("value-changed", (ev) => this._changed(ev));
+      this.appendChild(this._form);
+      this._ensureHaForm();
+    }
+    const hubs = axiumHubs(this._hass);
+    const hubOptions = hubs.map((h) => ({ value: h.id, label: h.name }));
+    const data = { ...this._config };
+    if (!data.hub && hubs.length) data.hub = hubs[0].id;
+    this._form.hass = this._hass;
+    this._form.data = data;
+    this._form.schema = [
+      {
+        name: "hub",
+        selector: hubOptions.length
+          ? { select: { mode: "dropdown", options: hubOptions } }
+          : { text: {} },
+      },
+      {
+        name: "zones",
+        selector: {
+          entity: { integration: "axium", domain: "media_player", multiple: true },
+        },
+      },
+      { name: "name", selector: { text: {} } },
+    ];
+    this._form.computeLabel = (s) =>
+      ({
+        hub: "Amplifier",
+        zones: "Zones to show (empty = all)",
+        name: "Card name (optional)",
+      }[s.name] || s.name);
+  }
+
+  _changed(ev) {
+    ev.stopPropagation();
+    this._config = { ...ev.detail.value };
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail: { config: this._config },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+}
+
 if (!customElements.get("axium-source-card")) {
   customElements.define("axium-source-card", AxiumSourceCard);
   customElements.define("axium-source-card-editor", AxiumSourceCardEditor);
@@ -3330,6 +3663,8 @@ if (!customElements.get("axium-source-card")) {
   customElements.define("axium-alarms-card", AxiumAlarmsCard);
   customElements.define("axium-sleep-card", AxiumSleepCard);
   customElements.define("axium-sleep-card-editor", AxiumSleepCardEditor);
+  customElements.define("axium-volumes-card", AxiumVolumesCard);
+  customElements.define("axium-volumes-card-editor", AxiumVolumesCardEditor);
 
   window.customCards = window.customCards || [];
   window.customCards.push(
@@ -3361,6 +3696,12 @@ if (!customElements.get("axium-source-card")) {
       type: "axium-sleep-card",
       name: "Axium Sleep Timers Card",
       description: "Running sleep timers with time left per zone (hass-axium).",
+      documentationURL: "https://github.com/t-joosten/hass-axium",
+    },
+    {
+      type: "axium-volumes-card",
+      name: "Axium Volumes Card",
+      description: "A vertical volume slider per zone for quick balancing (hass-axium).",
       documentationURL: "https://github.com/t-joosten/hass-axium",
     }
   );

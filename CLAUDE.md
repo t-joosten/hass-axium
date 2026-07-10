@@ -320,7 +320,7 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   minute tick + `SIGNAL_ALARM_UPDATE` from the switch) and `AxiumSleepSensor` (per zone,
   reads `DATA_SLEEP_DEADLINES` written by the sleep-timer number, updated via
   `SIGNAL_SLEEP_UPDATE`). Both carry an `axium_kind` attribute ("alarm"/"sleep").
-- Cards `axium-alarms-card` / `axium-sleep-card` (bundle now has FIVE cards) find those
+- Cards `axium-alarms-card` / `axium-sleep-card` (bundle now has SIX cards) find those
   sensors via `axiumKindSensors(hass, hub, kind)` and render a live countdown
   (`axiumCountdown`, `setInterval` in connectedCallback, cleared in disconnectedCallback);
   reuse `axium-hub-card-editor`. Don't compute time-left only in the card — it must also
@@ -332,7 +332,13 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   the entity set changes (signature check) so in-progress inputs aren't clobbered; per-tick
   updates only the countdown/toggle/time. The alarms card also renders each alarm's target
   zones (from the `alarm_zones` attr) and reuses `axium-matrix-card-editor` so its
-  `zones`/`sources` config whitelist what the Add form offers (empty = all). The sleep
+  `zones`/`sources` config whitelist what the Add form offers (empty = all). Each alarm row
+  also shows a one-line **source/media label** (`_alarmSourceLabel`): a wake song `♪ <title> ·
+  <amp>` when the alarm has `media`, else the configured source name — never the raw protocol
+  byte or content id. This needs the alarm sensor to expose `alarm_media`/`alarm_media_title`/
+  `alarm_media_player` (the picker stores `media_title` alongside `media`; `set_alarm`
+  service + config carry it). The alarm scheduler plays the wake media with
+  `enqueue: "replace"` so it interrupts current playback instead of queueing behind it. The sleep
   card is section-configurable via its own
   editor (`axium-sleep-card-editor`): `sections` = subset of `["all","zones","presets"]`
   (default all). "presets" rows apply a sleep timer to every zone in a `axium_presets`
@@ -341,7 +347,27 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   reload the entry — `_async_update_listener` reloads only when the alarm-name set or a
   non-alarm option changes (else dispatches `SIGNAL_ALARM_UPDATE`); the alarm sensor reads
   its config fresh by name so edits reflect without a reload.
-- Show/hide: card config `zones` (zone entity_ids; source + matrix cards) and `sources`
+- **Volumes card** (`axium-volumes-card`, sixth card): one **vertical** volume slider per zone
+  (native range via `writing-mode: vertical-lr; direction: rtl` + `-webkit-appearance:
+  slider-vertical` for WebKit) plus a mute button; drags are debounced (`_scheduleVolume`, 200ms)
+  and the final `change` still fires. Filterable via its own editor (`axium-volumes-card-editor`:
+  hub/zones/name) — the `zones` whitelist (empty = all). Reads/writes only the zones'
+  media_player state.
+- **"Media Player" source is shown as the amp streams everywhere**: `axiumSourceChoices`
+  relabels the internal Media Player source (id ≥ `STREAM_SOURCE_MIN`) to the amp device names
+  joined (`axiumAmpNames`, master first → e.g. "Axium 1 / Axium 2"), matching the matrix's
+  per-amp stream columns. So the matrix editor's Sources filter and the source-card editor's
+  source dropdown no longer say "Media Player".
+- **Stream-panel transport is a hardware limitation**: the amp's DLNA renderer only honours
+  play/pause/next/prev when Music Assistant *owns the queue* (started via `play_media`); for
+  externally-started or direct-push playback pause is a no-op and next *stops* the stream, and
+  the renderer reports `idle` even while playing (verified on real hardware). The card calls the
+  right services (`media_play_pause`/`media_next_track` on the amp's MA player) — nothing to fix
+  card-side. Playback is reliably controlled from Music Assistant itself.
+- **Sleep card Custom… button**: each sleep row (zone and preset) has a "Custom…" button beside
+  the 15/30/60/90m presets that `window.prompt`s for a minutes value and applies it via the same
+  `apply()` path.
+- Show/hide: card config `zones` (zone entity_ids; source + matrix + volumes cards) and `sources`
   (source ids; matrix card) are optional whitelists — empty/unset = show all. Editors use
   an axium-scoped entity selector for zones and a source-id select for sources. Matrix has
   its own editor (`axium-matrix-card-editor`: hub/zones/sources/name); the source editor
