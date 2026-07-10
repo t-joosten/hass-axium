@@ -1380,7 +1380,8 @@ class AxiumMatrixCard extends HTMLElement {
     const zones = this._zones();
     const columns = this._columns();
     const head =
-      `<div class="corner"></div>` +
+      `<div class="corner"><button class="allpower" title="All zones on/off">` +
+      `<ha-icon icon="mdi:power"></ha-icon></button></div>` +
       columns
         .map((c) =>
           c.kind === "stream"
@@ -1452,12 +1453,27 @@ class AxiumMatrixCard extends HTMLElement {
         }
       });
     }
+    const allpwr = this.shadowRoot.querySelector(".allpower");
+    if (allpwr)
+      allpwr.addEventListener("click", () => this._toggleAllPower());
     const overlay = this.shadowRoot.getElementById("overlay");
     overlay.addEventListener("click", (ev) => {
       if (ev.target === overlay) this._closePanel();
     });
     this._panel = null;
     this._built = true;
+  }
+
+  /** Corner power button: if any zone is on, turn them all off; else all on. */
+  _toggleAllPower() {
+    const zones = this._zones();
+    const anyOn = zones.some((z) => {
+      const st = this._hass.states[z];
+      return st && !OFF_STATES.includes(st.state);
+    });
+    this._hass.callService("media_player", anyOn ? "turn_off" : "turn_on", {
+      entity_id: zones,
+    });
   }
 
   /**
@@ -1562,6 +1578,30 @@ class AxiumMatrixCard extends HTMLElement {
       const on = st && !OFF_STATES.includes(st.state);
       if (on && this._currentSourceId(st) === sid) {
         this._hass.callService("media_player", "turn_off", { entity_id: z });
+      }
+    }
+  }
+
+  /** Play an amp's stream in exactly a preset's rooms: start/resume the amp's MA
+   *  stream, put the preset's rooms (within the amp's reach — all for the master,
+   *  its own for an expansion) on Media Player, and drop the amp's other rooms. */
+  _applyPresetToStream(idx, ampId) {
+    const preset = this._presets()[Number(idx)];
+    const amp = this._amps().find((a) => a.id === ampId);
+    const streamCol = this._columns().find((c) => c.kind === "stream");
+    if (!preset || !amp || !streamCol) return;
+    const sid = streamCol.id;
+    const ma = this._ampStreamPlayerByName(amp.name);
+    if (ma) this._hass.callService("media_player", "media_play", { entity_id: ma.entity_id });
+    const scope = amp.master ? this._zones() : [...amp.zones];
+    const target = new Set(preset.zones || []);
+    for (const z of scope) {
+      if (target.has(z)) {
+        const name = this._sourceNameFor(this._hass.states[z], sid);
+        if (name != null)
+          this._hass.callService("media_player", "select_source", { entity_id: z, source: name });
+      } else if (this._streamCellActive(z, ampId)) {
+        this._turnZoneOff(z);
       }
     }
   }
@@ -1682,11 +1722,19 @@ class AxiumMatrixCard extends HTMLElement {
     const ma = this._ampStreamPlayerByName(amp.name);
     const maId = ma ? ma.entity_id : null;
     const sheet = this.shadowRoot.getElementById("sheet");
+    const presets = this._presets();
     sheet.innerHTML = `
       <div class="sheet-head">
         <span class="sheet-title"></span>
         <button class="iconbtn close" title="Close"><ha-icon icon="mdi:close"></ha-icon></button>
       </div>
+      ${
+        presets.length
+          ? `<select class="presetsel"><option value="">Play in preset…</option>` +
+            presets.map((p, i) => `<option value="${i}">${escHtml(p.name)}</option>`).join("") +
+            `</select>`
+          : ""
+      }
       <div class="nowplaying" hidden>
         <div class="np-art"></div>
         <div class="np-meta">
@@ -1709,6 +1757,14 @@ class AxiumMatrixCard extends HTMLElement {
     `;
     sheet.querySelector(".sheet-title").textContent = amp.name;
     sheet.querySelector(".close").addEventListener("click", () => this._closePanel());
+    const psel = sheet.querySelector(".presetsel");
+    if (psel)
+      psel.addEventListener("change", () => {
+        if (psel.value !== "") {
+          this._applyPresetToStream(Number(psel.value), ampId);
+          psel.value = "";
+        }
+      });
     if (!maId) {
       for (const sel of [".volrow", ".transport", ".browse"]) {
         const el = sheet.querySelector(sel);
@@ -2090,6 +2146,14 @@ class AxiumMatrixCard extends HTMLElement {
       h.title = name;
       h.textContent = name;
     }
+    const allpwr = this.shadowRoot.querySelector(".allpower");
+    if (allpwr) {
+      const anyOn = this._zones().some((z) => {
+        const st = this._hass.states[z];
+        return st && !OFF_STATES.includes(st.state);
+      });
+      allpwr.classList.toggle("on", anyOn);
+    }
     this._refreshPanel();
   }
 }
@@ -2099,7 +2163,22 @@ AxiumMatrixCard.styles = `
   .title { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: var(--primary-text-color); }
   .scroll { overflow-x: auto; }
   .matrix { display: grid; gap: 4px; align-items: stretch; min-width: min-content; }
-  .corner { }
+  .corner { display: flex; align-items: center; justify-content: center; }
+  .allpower {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; border-radius: 50%; cursor: pointer;
+    border: 1px solid var(--divider-color); background: var(--card-background-color);
+    color: var(--secondary-text-color);
+  }
+  .allpower:hover { border-color: var(--primary-color); color: var(--primary-color); }
+  .allpower.on { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .allpower ha-icon { --mdc-icon-size: 20px; }
+  .presetsel {
+    font: inherit; padding: 6px 8px; border-radius: 8px; width: 100%;
+    box-sizing: border-box; margin-bottom: 8px;
+    border: 1px solid var(--divider-color);
+    background: var(--secondary-background-color); color: var(--primary-text-color);
+  }
   .colhead, .rowhead {
     font-size: 0.8rem; color: var(--secondary-text-color);
     display: flex; align-items: center; overflow: hidden;
@@ -2581,16 +2660,55 @@ class AxiumAlarmsCard extends HTMLElement {
     this.shadowRoot.getElementById("addform").hidden = !this._addOpen;
   }
 
+  /** Amp stream options for the alarm source select: each amp device by name
+   *  (Axium 1 / Axium 2) with its Music Assistant stream player, if found. */
+  _ampStreams() {
+    const hubId = this._hub();
+    const devs = this._hass.devices || {};
+    const out = [];
+    for (const d of Object.values(devs)) {
+      const isAmp = (d.identifiers || []).some(
+        (t) =>
+          t[0] === "axium" &&
+          (t[1] === hubId || String(t[1]).startsWith(`${hubId}_unit_`))
+      );
+      if (!isAmp) continue;
+      const name = d.name_by_user || d.name;
+      if (name) out.push({ name, player: this._maByName(name) || "" });
+    }
+    return out;
+  }
+
+  _maByName(name) {
+    const want = (name || "").trim().toLowerCase();
+    if (!want) return null;
+    const reg = this._hass.entities || {};
+    for (const id of Object.keys(this._hass.states)) {
+      if (!id.startsWith("media_player.")) continue;
+      const e = reg[id];
+      if (!e || e.platform !== "music_assistant") continue;
+      const fn = (this._hass.states[id].attributes.friendly_name || "").trim().toLowerCase();
+      if (fn === want) return id;
+    }
+    return null;
+  }
+
   _buildAddForm() {
     const form = this.shadowRoot.getElementById("addform");
     const sources = this._sources();
+    const analog = sources.filter((s) => s.id < STREAM_SOURCE_MIN);
+    const mediaSid = (sources.find((s) => s.id >= STREAM_SOURCE_MIN) || {}).id;
+    const streams = mediaSid != null ? this._ampStreams() : [];
+    form.dataset.mediaSid = mediaSid != null ? String(mediaSid) : "";
     form.innerHTML = `
       <input type="text" class="f-name" placeholder="Name">
       <input type="time" class="f-time" value="07:00">
       <div class="chips f-days"></div>
       <div class="chips f-zones"></div>
-      <select class="f-source">${sources
-        .map((s) => `<option value="${s.id}">${s.name}</option>`)
+      <select class="f-source">${analog
+        .map((s) => `<option value="src:${s.id}">${escHtml(s.name)}</option>`)
+        .join("")}${streams
+        .map((a) => `<option value="stream:${escHtml(a.player)}">${escHtml(a.name)}</option>`)
         .join("")}</select>
       <label class="f-vol">Volume <input type="range" min="0" max="100" value="30"><span class="volval">30%</span></label>
       <div class="f-media">
@@ -2642,16 +2760,26 @@ class AxiumAlarmsCard extends HTMLElement {
     const days = [...form.querySelectorAll(".f-days .daychip.on")].map((c) =>
       Number(c.dataset.d)
     );
+    const sv = form.querySelector(".f-source").value || "";
+    let source = 0;
+    let mediaPlayer = "";
+    if (sv.startsWith("stream:")) {
+      source = Number(form.dataset.mediaSid || 0);
+      mediaPlayer = sv.slice(7);
+    } else if (sv.startsWith("src:")) {
+      source = Number(sv.slice(4));
+    }
     this._svc("set_alarm", {
       name,
       time: form.querySelector(".f-time").value || "07:00",
       days,
       zones,
-      source: Number(form.querySelector(".f-source").value),
+      source,
       volume: Number(form.querySelector('input[type="range"]').value),
       enabled: true,
       media: form.dataset.media || "",
       media_type: form.dataset.mediaType || "",
+      media_player: mediaPlayer,
     });
     nameEl.value = "";
     this._toggleAdd();
@@ -2810,6 +2938,7 @@ AxiumAlarmsCard.styles = `
   .addbar { margin-top: 10px; }
   .link { border: none; background: none; color: var(--primary-color); cursor: pointer; font: inherit; padding: 0; }
   .addform { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--divider-color); }
+  .addform[hidden] { display: none; }
   .addform input[type="text"], .addform select {
     font: inherit; padding: 6px 8px; border-radius: 6px;
     border: 1px solid var(--divider-color);

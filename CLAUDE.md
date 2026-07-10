@@ -244,10 +244,17 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   opens `_openStreamPanel(ampId)`:
   now-playing + transport + volume driving that amp's MA player (`_ampStreamPlayerByName(amp name)`) + a
   **Browse Music Assistant** button (fires `hass-more-info` → HA media browser). Shows a "rename the MA
-  player to <amp name>" hint when unmatched. `_refreshPanel` dispatches to `_refreshStreamPanel` for
-  `type:"stream"`; `_ampStreamPlayerFor` (zone popover) also falls back master→own so a 9-16 zone's
-  now-playing is right whether or not its amp is overriding. Playing on `Axium 1` = whole-home (all 16);
-  also playing `Axium 2` = split (9-16 break away). Verified on hardware.
+  player to <amp name>" hint when unmatched. The stream panel also has a **preset dropdown**
+  (`_applyPresetToStream`: start the amp's MA stream, put the preset's rooms — all for the master, its
+  own for an expansion — on Media Player, drop the amp's others). `_refreshPanel` dispatches to
+  `_refreshStreamPanel` for `type:"stream"`. Playing on `Axium 1` = whole-home (all 16); also playing
+  `Axium 2` = split (9-16 break away). Verified on hardware.
+  Matrix **corner power button** (`.allpower`, `_toggleAllPower`): if any zone is on → `turn_off` all,
+  else `turn_on` all; highlighted `.on` when any is on. The **alarms card** Add form (collapsed until
+  `+ Add alarm`; `.addform[hidden]` needs its own display:none rule since `.addform{display:flex}` beats
+  the UA `[hidden]`) lists **amp streams** (`_ampStreams`/`_maByName`) in its source select — a `stream:`
+  option sets `source`=media-player-byte + `media_player`=that amp's MA player; `src:` options are the
+  analog sources.
   The hub card finds hub-owned entities via `entityHub` + the entity-registry `platform`,
   and the hub device by identifier `["axium", <hub id>]`. The matrix + hub cards reuse
   `axium-hub-card-editor` (hub + name) for their visual editor.
