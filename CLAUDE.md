@@ -185,8 +185,13 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   (nothing reflects the amp's own name; it just mirrors the HA name). The **reconfigure flow**
   also carries a **Name** field (the whole stack is one TCP connection — a single host/port —
   so there's no per-amp connection to configure; renaming there updates the title *and* the hub
-  device name unless it has a `name_by_user` override). `async_setup_entry` also syncs an
-  existing hub `name_by_user` → title at start.
+  device name unless it has a `name_by_user` override). **`async_setup_entry` NO LONGER forces the
+  title from the hub device's `name_by_user`** — that was reverting a user's own entry-title edit
+  back to the device name on every reload ("Axium Hub" → "Axium 1"). The config-entry **title** and
+  the hub **device name** are now independent HA names; renaming the hub *device* (pencil) still
+  syncs the title via `_handle_device_rename` + pushes the amp network name, and the hub card shows
+  the hub device name (`_hub().name` = `name_by_user||name`). (Note: the hub device IS the primary
+  amp device — one device, one name; a separate hub-vs-"Main"-amp split would need re-parenting.)
   A title-only update does **not** reload the entry (`_async_update_listener` compares only
   `entry.options`). Expansion amps are separate devices renamed via their own pencils.
 

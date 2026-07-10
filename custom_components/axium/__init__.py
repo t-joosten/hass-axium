@@ -285,10 +285,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         model="Amplifier",
         configuration_url=f"http://{host}",
     )
-    # If the user has renamed the hub device, keep the config-entry title in
-    # sync so the integrations page shows that name (not the default).
-    if hub.name_by_user and hub.name_by_user != entry.title:
-        hass.config_entries.async_update_entry(entry, title=hub.name_by_user)
+    # NOTE: we deliberately do NOT force the config-entry title from the hub
+    # device's name here. Doing so reverted a user's own entry-title edit back to
+    # the device name on every reload ("Axium Hub" → "Axium 1"). The title and the
+    # hub device name are now independent HA names — each sticks on its own.
     for unit in get_units(entry):
         if unit.get("primary"):
             continue
