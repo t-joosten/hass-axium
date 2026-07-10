@@ -267,8 +267,9 @@ class AxiumSensor(SensorEntity):
         self._attr_name = desc.name
         suffix = "" if unit_id is None else f"_unit_{unit_id}"
         self._attr_unique_id = f"{entry.entry_id}_{desc.key}{suffix}"
+        # Primary amp diagnostics live on the primary amp device, not the hub.
         self._attr_device_info = DeviceInfo(
-            identifiers={device_ident or (DOMAIN, entry.entry_id)}
+            identifiers={device_ident or (DOMAIN, f"{entry.entry_id}_amp_primary")}
         )
 
     async def async_added_to_hass(self) -> None:

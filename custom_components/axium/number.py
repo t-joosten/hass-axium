@@ -399,7 +399,9 @@ class AxiumSourceGain(NumberEntity):
         label = SOURCE_BYTE_TO_NAME.get(source_id, f"Source {source_id}")
         self._attr_name = f"{label} gain"
         self._attr_unique_id = f"{entry.entry_id}_source_{source_id}_gain"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_amp_primary")}
+        )
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to updates and request the current gain."""
@@ -446,7 +448,9 @@ class AxiumStandbyTime(NumberEntity):
         """Initialise the standby-time number."""
         self._controller = controller
         self._attr_unique_id = f"{entry.entry_id}_standby_time"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_amp_primary")}
+        )
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to diagnostic updates."""

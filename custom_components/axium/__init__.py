@@ -282,6 +282,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         identifiers={(DOMAIN, entry.entry_id)},
         manufacturer="Axium",
         name=entry.title,
+        model="Hub",
+        configuration_url=f"http://{host}",
+    )
+    # The primary amp is its OWN device ("…_amp_primary"), nested under the hub,
+    # just like the expansion amps — so the hub ("Axium Hub") and the primary amp
+    # ("Main") can carry independent names. Its identifier has no "_unit_" so the
+    # dashboard still treats it as the master stream. Model/firmware/temp land on
+    # it (via `_amp_identifier`), leaving the hub a pure logical container.
+    device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, f"{entry.entry_id}_amp_primary")},
+        via_device=(DOMAIN, entry.entry_id),
+        manufacturer="Axium",
+        name="Main",
         model="Amplifier",
         configuration_url=f"http://{host}",
     )
@@ -303,9 +317,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     def _amp_identifier(unit_id: int | None) -> tuple[str, str]:
-        """Device identifier for the amp hosting a unit (primary = the hub)."""
+        """Device identifier for the amp hosting a unit. The primary amp is its
+        own device ("…_amp_primary"), separate from the logical hub (entry id)."""
         if unit_id is None or unit_id == controller.primary_unit_id:
-            return (DOMAIN, entry.entry_id)
+            return (DOMAIN, f"{entry.entry_id}_amp_primary")
         return (DOMAIN, f"{entry.entry_id}_unit_{unit_id}")
 
     def _enrich_zone_models(unit_id: int | None, model_code: int | None) -> None:
@@ -447,11 +462,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if device is None:
             return
         new_name = device.name_by_user or device.name
-        # Hub device rename -> sync the config-entry title and push the amp's own
-        # network name to the primary unit.
+        # Hub device rename -> sync the config-entry title (the hub name). The hub
+        # is a logical container now, so no amp network name is pushed from here.
         if (DOMAIN, entry.entry_id) in device.identifiers:
             if new_name and new_name != entry.title:
                 hass.config_entries.async_update_entry(entry, title=new_name)
+            return
+        # Primary amp device rename -> push its own network name to the primary unit.
+        if (DOMAIN, f"{entry.entry_id}_amp_primary") in device.identifiers:
             if new_name:
                 hass.async_create_task(controller.async_set_amp_name(new_name))
             return

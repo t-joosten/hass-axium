@@ -115,8 +115,20 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   (`controller._units`, keyed by unit id; `units()`, `unit(id)`, `primary_unit_id`). Device
   info (0x14) accumulates one unit per reply; extended info (0xB9) is keyed by the unit id at
   `data[2:4]` and requested **per unit** (`async_request_extended_info(unit_id)`). Legacy
-  single-value props (`temperature`/`_firmware`/`_mac`) mirror the **primary**. Each amp is a
-  device: primary = the hub, expansion = `(<entry>_unit_<uid>)` `via_device` the hub; zones
+  single-value props (`temperature`/`_firmware`/`_mac`) mirror the **primary**. **Device model:
+  the logical HUB and the PRIMARY AMP are SEPARATE devices** (so they carry independent names —
+  hub "Axium Hub" vs primary amp "Main"): the hub is `(<entry>)` (model "Hub", a container), the
+  primary amp is `(<entry>_amp_primary)` (`via_device` the hub) — its identifier has NO `_unit_`
+  so the dashboard still treats it as the master stream; expansions are `(<entry>_unit_<uid>)`
+  `via_device` the hub. `_amp_identifier(primary)` → `_amp_primary`. ALL amp-hardware entities go on
+  the amp device (zones' `via_device`, temp/peak, static-IP, auto-power/gain switches, source-gain +
+  standby numbers); only the stack-wide/system entities stay on the hub (alarm switch + alarm
+  sensors, all-zones sleep number + sensor). Renaming the **hub** device syncs the entry title only;
+  renaming the **primary amp** device (or an expansion) pushes the amp network name. **Migration
+  note:** on upgrade, existing amp entities re-parent from the old hub device to `_amp_primary`
+  (unique_ids unchanged, so no data loss); the old hub keeps its `name_by_user` (rename to "Axium
+  Hub"), the amp defaults to "Main", and the amp-stream MA player must be renamed to match the amp
+  device ("Main"). Zones
   nest under their owning amp (`media_player` `via_device`); per-unit temp/peak sensors
   (`AxiumSensor(unit_id=…)`, expansion ids suffixed `_unit_<uid>` so primary sensors aren't
   orphaned). Config: `CONF_UNITS=[{unit_id,primary}]` + `UNIT_KEY` on each `CONF_ZONES` entry

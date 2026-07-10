@@ -105,9 +105,10 @@ async def async_setup_entry(
     positions = amp_zone_positions(zones_cfg)
 
     def _via(unit_id: int | None) -> tuple[str, str]:
-        """The device a zone nests under — its owning amp (primary = the hub)."""
+        """The device a zone nests under — its owning amp. The primary amp is its
+        own device ("…_amp_primary"), separate from the logical hub."""
         if unit_id is None or not units or unit_id == primary_uid:
-            return (DOMAIN, entry.entry_id)
+            return (DOMAIN, f"{entry.entry_id}_amp_primary")
         return (DOMAIN, f"{entry.entry_id}_unit_{unit_id}")
 
     def _model_code(unit_id: int | None) -> int | None:
@@ -174,7 +175,7 @@ class AxiumZone(MediaPlayerEntity):
             name=name,
             manufacturer="Axium",
             model=model or "Zone",
-            via_device=via_device or (DOMAIN, entry.entry_id),
+            via_device=via_device or (DOMAIN, f"{entry.entry_id}_amp_primary"),
         )
 
     async def async_added_to_hass(self) -> None:
