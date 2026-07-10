@@ -86,6 +86,12 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   via the master's relay). Nothing to change in code: `_request_media_sources` already probes `0x12`-`0x19`,
   so if a 2nd player were ever enabled it'd auto-appear. Independent per-zone streams → Music Assistant
   (the amp is a per-zone DLNA renderer), not the single internal player.
+- **`state` must check power FIRST** (media_player `AxiumMediaPlayer.state`): while the shared internal
+  Media Player plays, the amp reports **every** zone's source as `0x12` with the **turn-on bit clear**
+  (verified on hardware: powered-off zones show `POWER=OFF SOURCE=0x12`). `media_state(0x12)` is global,
+  so reading it before power made those off zones report `PLAYING` — which lit up every zone's Media
+  Player cell in the matrix. So: `power is None`→None, `not power`→OFF, else check the media source. An
+  off zone is OFF regardless of the shared player.
 - **What the control protocol can/can't do** (AxiumCommsProtocol.pdf, 25pp): network config IS
   settable — `0x3A`: setting `01h` = amp network name, `02h` = NTP time server, `03h` = flags
   (bit0 0=DHCP/1=Static) + 16 bytes IP/subnet/DNS/router; `83h` reads the IP config back;

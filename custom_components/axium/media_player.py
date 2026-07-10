@@ -219,7 +219,20 @@ class AxiumZone(MediaPlayerEntity):
 
     @property
     def state(self) -> MediaPlayerState | None:
-        """Return the playback/power state of the zone."""
+        """Return the playback/power state of the zone.
+
+        Power is checked first: the amp's single internal Media Player is a
+        *shared* source, and while it plays the amp reports every zone's source
+        as that player (turn-on bit clear, so they stay off). Reading the global
+        media state before power would make those powered-off zones show PLAYING
+        — which lit up every zone's Media Player cell in the matrix. An off zone
+        is OFF regardless of what the shared player is doing.
+        """
+        power = self._controller.zone_state(self._zone).power
+        if power is None:
+            return None
+        if not power:
+            return MediaPlayerState.OFF
         source = self._media_source
         if source is not None:
             media = self._controller.media_state(source)
@@ -227,10 +240,7 @@ class AxiumZone(MediaPlayerEntity):
                 return MediaPlayerState.PLAYING
             if media.paused:
                 return MediaPlayerState.PAUSED
-        power = self._controller.zone_state(self._zone).power
-        if power is None:
-            return None
-        return MediaPlayerState.ON if power else MediaPlayerState.OFF
+        return MediaPlayerState.ON
 
     @property
     def volume_level(self) -> float | None:
