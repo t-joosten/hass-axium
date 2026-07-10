@@ -1024,12 +1024,19 @@ class AxiumHubCard extends HTMLElement {
   // stacked expansion amp (identifier "<hub id>_unit_<uid>", nested via_device).
   _amps() {
     const hubId = this._hubId();
-    const hubDev = this._hubDevice();
-    if (!hubId || !hubDev) return [];
-    const amps = [hubDev];
+    if (!hubId) return [];
     const devices = (this._hass && this._hass.devices) || {};
+    // The primary amp is its own device ("…_amp_primary") since the hub/amp split;
+    // fall back to the hub device on a pre-split integration.
+    const primary =
+      Object.values(devices).find((d) =>
+        (d.identifiers || []).some(
+          (t) => t[0] === "axium" && t[1] === `${hubId}_amp_primary`
+        )
+      ) || this._hubDevice();
+    const amps = primary ? [primary] : [];
     for (const dev of Object.values(devices)) {
-      if (dev.id === hubDev.id) continue;
+      if (primary && dev.id === primary.id) continue;
       if (
         (dev.identifiers || []).some(
           (t) => t[0] === "axium" && String(t[1]).startsWith(`${hubId}_unit_`)
@@ -1129,9 +1136,9 @@ class AxiumHubCard extends HTMLElement {
           parts.push(`${Math.round(Number(temp.state))}${escHtml(u)}`);
         }
         const label = multi
-          ? `<span class="alabel">${
-              i === 0 ? "Main" : escHtml(dev.name_by_user || dev.name || "Amp")
-            }</span> `
+          ? `<span class="alabel">${escHtml(
+              dev.name_by_user || dev.name || "Amp"
+            )}</span> `
           : "";
         return `<div class="amprow">${label}${parts.join(" · ") || "—"}</div>`;
       })
