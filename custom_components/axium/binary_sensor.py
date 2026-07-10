@@ -14,6 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .controller import AxiumController
+from .helpers import primary_amp_identifier
 
 
 async def async_setup_entry(
@@ -39,7 +40,11 @@ class AxiumClipping(BinarySensorEntity):
         """Initialise the clipping sensor."""
         self._controller = controller
         self._attr_unique_id = f"{entry.entry_id}_clipping"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
+        # Clipping is an amp-hardware diagnostic — it lives on the primary amp
+        # device, not the logical hub container.
+        self._attr_device_info = DeviceInfo(
+            identifiers={primary_amp_identifier(entry.entry_id)}
+        )
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to diagnostic updates."""

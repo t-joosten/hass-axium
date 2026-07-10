@@ -55,7 +55,7 @@ from .const import (
 )
 from .controller import AxiumController, ZoneState
 from .protocol import level_to_volume, to_signed_byte
-from .helpers import get_advanced, get_sources, get_zones
+from .helpers import get_advanced, get_sources, get_zones, primary_amp_identifier
 
 # Sleep-timer fade: ramp the volume down over the final part of the countdown
 # (capped) before turning the zone off, so it doesn't cut out abruptly.
@@ -400,7 +400,7 @@ class AxiumSourceGain(NumberEntity):
         self._attr_name = f"{label} gain"
         self._attr_unique_id = f"{entry.entry_id}_source_{source_id}_gain"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry.entry_id}_amp_primary")}
+            identifiers={primary_amp_identifier(entry.entry_id)}
         )
 
     async def async_added_to_hass(self) -> None:
@@ -449,7 +449,7 @@ class AxiumStandbyTime(NumberEntity):
         self._controller = controller
         self._attr_unique_id = f"{entry.entry_id}_standby_time"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry.entry_id}_amp_primary")}
+            identifiers={primary_amp_identifier(entry.entry_id)}
         )
 
     async def async_added_to_hass(self) -> None:

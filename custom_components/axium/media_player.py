@@ -58,6 +58,7 @@ from .helpers import (
     get_sources,
     get_units,
     get_zones,
+    primary_amp_identifier,
     zone_device_model,
 )
 from .protocol import level_to_volume
@@ -108,7 +109,7 @@ async def async_setup_entry(
         """The device a zone nests under — its owning amp. The primary amp is its
         own device ("…_amp_primary"), separate from the logical hub."""
         if unit_id is None or not units or unit_id == primary_uid:
-            return (DOMAIN, f"{entry.entry_id}_amp_primary")
+            return primary_amp_identifier(entry.entry_id)
         return (DOMAIN, f"{entry.entry_id}_unit_{unit_id}")
 
     def _model_code(unit_id: int | None) -> int | None:
@@ -175,7 +176,7 @@ class AxiumZone(MediaPlayerEntity):
             name=name,
             manufacturer="Axium",
             model=model or "Zone",
-            via_device=via_device or (DOMAIN, f"{entry.entry_id}_amp_primary"),
+            via_device=via_device or primary_amp_identifier(entry.entry_id),
         )
 
     async def async_added_to_hass(self) -> None:

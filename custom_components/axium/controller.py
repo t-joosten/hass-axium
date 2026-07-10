@@ -879,7 +879,12 @@ class AxiumController:
     def _notify(self, zone: int) -> None:
         """Invoke listeners registered for ``zone``."""
         for callback in list(self._listeners.get(zone, [])):
-            callback()
+            # A raising entity listener must never unwind the read loop (that
+            # flaps the whole amp connection) — log and carry on.
+            try:
+                callback()
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("Axium zone %s listener failed", zone)
 
     def _notify_all(self) -> None:
         """Invoke every registered listener (e.g. on (dis)connect)."""
@@ -902,7 +907,11 @@ class AxiumController:
     def _notify_diagnostics(self) -> None:
         """Invoke diagnostic listeners."""
         for callback in list(self._diag_listeners):
-            callback()
+            # As in _notify: a listener failure must not drop the read loop.
+            try:
+                callback()
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("Axium diagnostic listener failed")
 
     # -- diagnostic / preset / auto-power accessors ----------------------
 

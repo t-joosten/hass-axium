@@ -10,6 +10,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .controller import AxiumController
+from .helpers import primary_amp_identifier
 
 STANDARD = "Standard"
 
@@ -36,7 +37,10 @@ class AxiumPresetSelect(SelectEntity):
         """Initialise the preset select."""
         self._controller = controller
         self._attr_unique_id = f"{entry.entry_id}_preset"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
+        # Preset/scene recall is amp hardware — it lives on the primary amp device.
+        self._attr_device_info = DeviceInfo(
+            identifiers={primary_amp_identifier(entry.entry_id)}
+        )
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to diagnostic updates."""

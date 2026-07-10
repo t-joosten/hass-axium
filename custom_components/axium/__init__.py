@@ -44,6 +44,7 @@ from .helpers import (
     get_alarms,
     get_units,
     get_zones,
+    primary_amp_identifier,
     units_config,
     zone_device_model,
     zones_from_units,
@@ -299,7 +300,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # it (via `_amp_identifier`), leaving the hub a pure logical container.
     primary_amp = device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, f"{entry.entry_id}_amp_primary")},
+        identifiers={primary_amp_identifier(entry.entry_id)},
         via_device=(DOMAIN, entry.entry_id),
         manufacturer="Axium",
         name="Axium 1",
@@ -347,7 +348,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         """Device identifier for the amp hosting a unit. The primary amp is its
         own device ("…_amp_primary"), separate from the logical hub (entry id)."""
         if unit_id is None or unit_id == controller.primary_unit_id:
-            return (DOMAIN, f"{entry.entry_id}_amp_primary")
+            return primary_amp_identifier(entry.entry_id)
         return (DOMAIN, f"{entry.entry_id}_unit_{unit_id}")
 
     def _enrich_zone_models(unit_id: int | None, model_code: int | None) -> None:
@@ -496,7 +497,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 hass.config_entries.async_update_entry(entry, title=new_name)
             return
         # Primary amp device rename -> push its own network name to the primary unit.
-        if (DOMAIN, f"{entry.entry_id}_amp_primary") in device.identifiers:
+        if primary_amp_identifier(entry.entry_id) in device.identifiers:
             if new_name:
                 hass.async_create_task(controller.async_set_amp_name(new_name))
             return
@@ -548,25 +549,41 @@ def _master_stream_player(hass: HomeAssistant, entry: ConfigEntry) -> str | None
 
     Wake media plays on the primary amp's Media Player stream. Matched by that
     device's name (the user renames the MA player to e.g. "Axium 1"). Since the
-    hub/amp split the primary amp is its own "…_amp_primary" device, not the hub;
-    fall back to the hub identifier for a pre-split entry.
+    hub/amp split the primary amp is its own "…_amp_primary" device, not the hub.
+
+    Tried in priority order: the amp device name, then — for entries that
+    upgraded from before the split, where the match key used to be the hub's
+    display name / entry title — the hub device name and the entry title. Without
+    that fallback, an upgrader who named their MA player after the old title would
+    silently match nothing and the wake song would never play.
     """
     reg = dr.async_get(hass)
-    amp = reg.async_get_device(
-        identifiers={(DOMAIN, f"{entry.entry_id}_amp_primary")}
-    ) or reg.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
-    name = amp and (amp.name_by_user or amp.name)
-    if not name:
-        return None
-    want = name.strip().lower()
+    amp = reg.async_get_device(identifiers={primary_amp_identifier(entry.entry_id)})
+    hub = reg.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+    candidates = [
+        amp and (amp.name_by_user or amp.name),
+        hub and (hub.name_by_user or hub.name),
+        entry.title,
+    ]
     registry = er.async_get(hass)
-    for ent in registry.entities.values():
-        if ent.domain != "media_player" or ent.platform != "music_assistant":
+    ma_players = [
+        ent.entity_id
+        for ent in registry.entities.values()
+        if ent.domain == "media_player" and ent.platform == "music_assistant"
+    ]
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate:
             continue
-        state = hass.states.get(ent.entity_id)
-        fn = state and (state.attributes.get("friendly_name") or "").strip().lower()
-        if fn == want:
-            return ent.entity_id
+        want = candidate.strip().lower()
+        if not want or want in seen:
+            continue
+        seen.add(want)
+        for eid in ma_players:
+            state = hass.states.get(eid)
+            fn = state and (state.attributes.get("friendly_name") or "").strip().lower()
+            if fn == want:
+                return eid
     return None
 
 

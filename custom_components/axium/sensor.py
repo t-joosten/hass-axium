@@ -31,7 +31,13 @@ from .const import (
     ZONE_KEY,
 )
 from .controller import AxiumController
-from .helpers import get_alarms, get_units, get_zones, next_alarm_fire
+from .helpers import (
+    get_alarms,
+    get_units,
+    get_zones,
+    next_alarm_fire,
+    primary_amp_identifier,
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -269,7 +275,7 @@ class AxiumSensor(SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_{desc.key}{suffix}"
         # Primary amp diagnostics live on the primary amp device, not the hub.
         self._attr_device_info = DeviceInfo(
-            identifiers={device_ident or (DOMAIN, f"{entry.entry_id}_amp_primary")}
+            identifiers={device_ident or primary_amp_identifier(entry.entry_id)}
         )
 
     async def async_added_to_hass(self) -> None:

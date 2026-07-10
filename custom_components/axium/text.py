@@ -11,7 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, ID_KEY, NAME_KEY, SOURCE_BYTE_TO_NAME
 from .controller import AxiumController
-from .helpers import get_sources
+from .helpers import get_sources, primary_amp_identifier
 
 
 async def async_setup_entry(
@@ -54,7 +54,10 @@ class AxiumSourceName(TextEntity):
         # Label the field by the physical input (e.g. "Source 1", "AirPlay").
         self._attr_name = SOURCE_BYTE_TO_NAME.get(source_id, f"Source {source_id}")
         self._attr_unique_id = f"{entry.entry_id}_source_{source_id}_name"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
+        # Source names are amp hardware — they live on the primary amp device.
+        self._attr_device_info = DeviceInfo(
+            identifiers={primary_amp_identifier(entry.entry_id)}
+        )
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to amp-wide updates (source names arrive as diagnostics)."""

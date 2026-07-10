@@ -26,7 +26,7 @@ from .const import (
     ZONE_KEY,
 )
 from .controller import AxiumController
-from .helpers import get_units, get_zones
+from .helpers import get_units, get_zones, primary_amp_identifier
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -159,7 +159,7 @@ class AxiumStaticIPSwitch(SwitchEntity):
         suffix = "" if unit_id is None else f"_unit_{unit_id}"
         self._attr_unique_id = f"{entry.entry_id}_static_ip{suffix}"
         self._attr_device_info = DeviceInfo(
-            identifiers={device_ident or (DOMAIN, f"{entry.entry_id}_amp_primary")}
+            identifiers={device_ident or primary_amp_identifier(entry.entry_id)}
         )
 
     async def async_added_to_hass(self) -> None:
@@ -285,7 +285,7 @@ class AxiumSwitch(SwitchEntity):
         self._attr_unique_id = f"{entry.entry_id}_{desc.key}"
         # Amp-level control lives on the primary amp device, not the logical hub.
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry.entry_id}_amp_primary")}
+            identifiers={primary_amp_identifier(entry.entry_id)}
         )
 
     async def async_added_to_hass(self) -> None:

@@ -186,11 +186,18 @@ function axiumAmps(hass, hubId) {
     if (!zdev) continue;
     const amp = devs[zdev.via_device_id] || zdev;
     if (!byId.has(amp.id)) {
-      // The primary amp device identifier has no "_unit_" (the expansions do);
-      // it is the master. (Since the hub/amp split the primary amp is its own
-      // "…_amp_primary" device, not the hub, so don't match the hub id here.)
+      // The primary amp device identifier has no "_unit_" (the expansions do)
+      // and no "_zone_" (zone devices do) — it is the master. The "_zone_"
+      // exclusion matters because `amp` falls back to the zone device when the
+      // via_device amp isn't resolvable yet (a registry-sync window), and a
+      // zone id also lacks "_unit_" — without it a lone zone is mis-flagged
+      // master. (Since the split the primary amp is its own "…_amp_primary"
+      // device; the bare hub id still matches for a pre-split entry.)
       const master = (amp.identifiers || []).some(
-        (t) => t[0] === "axium" && !String(t[1]).includes("_unit_")
+        (t) =>
+          t[0] === "axium" &&
+          !String(t[1]).includes("_unit_") &&
+          !String(t[1]).includes("_zone_")
       );
       byId.set(amp.id, {
         id: amp.id,
@@ -211,6 +218,31 @@ function axiumAmpNames(hass, hubId) {
   return axiumAmps(hass, hubId)
     .map((a) => a.name)
     .filter(Boolean);
+}
+
+// Search a Music Assistant player; returns the flat result list (or []). Shared
+// by the matrix stream panel and the alarms card so the WS shape lives in one
+// place.
+async function axiumMaSearch(hass, entityId, query) {
+  const res = await hass.callWS({
+    type: "media_player/search_media",
+    entity_id: entityId,
+    search_query: query,
+  });
+  return (res && res.result) || [];
+}
+
+// Browse a Music Assistant player at an item (or its root); returns the raw
+// response ({children, …}) or {}.
+async function axiumMaBrowse(hass, entityId, contentId, contentType) {
+  const res = await hass.callWS({
+    type: "media_player/browse_media",
+    entity_id: entityId,
+    ...(contentId
+      ? { media_content_id: contentId, media_content_type: contentType }
+      : {}),
+  });
+  return res || {};
 }
 
 function axiumSourceChoices(hass) {
@@ -1375,10 +1407,14 @@ class AxiumMatrixCard extends HTMLElement {
       if (!zdev) continue;
       const amp = devs[zdev.via_device_id] || zdev;
       if (!byAmp.has(amp.id)) {
-        // The master (hub) amp's device identifier has no "_unit_" suffix. Kept
-        // only for labelling — streams are per-amp; each reaches only its own zones.
+        // The master amp's identifier has no "_unit_" (expansions) and no
+        // "_zone_" (zone devices) — see axiumAmps for why the "_zone_" guard
+        // matters (zone-device fallback during a registry-sync window).
         const master = (amp.identifiers || []).some(
-          (t) => t[0] === "axium" && !String(t[1]).includes("_unit_")
+          (t) =>
+            t[0] === "axium" &&
+            !String(t[1]).includes("_unit_") &&
+            !String(t[1]).includes("_zone_")
         );
         byAmp.set(amp.id, {
           id: amp.id,
@@ -1964,26 +2000,38 @@ class AxiumMatrixCard extends HTMLElement {
   async _streamSearch(maId, query) {
     const resEl = this.shadowRoot.querySelector(".ssresults");
     if (resEl) resEl.textContent = "Searching…";
-    let res;
+    // Race guards: only apply results if this exact panel is still open (the
+    // user may have closed it or switched amps mid-request) and this is still
+    // the latest search fired on it (a slower earlier query must not overwrite
+    // a newer one).
+    const panel = this._panel;
+    if (!panel) return;
+    const seq = (panel.searchSeq = (panel.searchSeq || 0) + 1);
+    let hits;
     try {
-      res = await this._hass.callWS({
-        type: "media_player/search_media",
-        entity_id: maId,
-        search_query: query,
-      });
+      hits = await axiumMaSearch(this._hass, maId, query);
     } catch (err) {
-      if (resEl) resEl.textContent = "Search failed.";
+      if (this._panel === panel && resEl) resEl.textContent = "Search failed.";
       return;
     }
+    if (this._panel !== panel || panel.searchSeq !== seq) return;
+    // Bucket every hit into one of the three tabs so nothing is dropped.
     const groups = { track: [], album: [], playlist: [] };
-    for (const it of (res && res.result) || []) {
-      if (groups[it.media_class]) groups[it.media_class].push(it);
-    }
-    if (!this._panel) return;
-    this._panel.searchGroups = groups;
-    this._panel.searchTab =
+    for (const it of hits) groups[this._searchBucket(it.media_class)].push(it);
+    panel.searchGroups = groups;
+    panel.searchTab =
       ["track", "album", "playlist"].find((t) => groups[t].length) || "track";
     this._renderSearchTabs(maId);
+  }
+
+  // Which of the 3 tabs a media_class belongs to: a playlist → Playlists, an
+  // album/artist (expandable collections) → Albums, everything else playable
+  // (track, radio, episode, …) → Tracks. Anything else would otherwise be
+  // silently hidden.
+  _searchBucket(mediaClass) {
+    if (mediaClass === "playlist") return "playlist";
+    if (mediaClass === "album" || mediaClass === "artist") return "album";
+    return "track";
   }
 
   /** Render the Tracks/Albums/Playlists tabs + the active tab's results. */
@@ -2125,26 +2173,31 @@ class AxiumMatrixCard extends HTMLElement {
     }
   }
 
-  /** Lazily fetch + cache an album/playlist's track count and append it. */
+  /** Lazily fetch + cache an album/playlist's children and append its count. */
   async _streamItemCount(maId, it, subEl) {
-    if (!this._panel) return;
-    this._panel.counts = this._panel.counts || {};
-    let n = this._panel.counts[it.media_content_id];
-    if (n === undefined) {
+    const panel = this._panel;
+    if (!panel) return;
+    panel.childCache = panel.childCache || {};
+    let children = panel.childCache[it.media_content_id];
+    if (children === undefined) {
       try {
-        const res = await this._hass.callWS({
-          type: "media_player/browse_media",
-          entity_id: maId,
-          media_content_id: it.media_content_id,
-          media_content_type: it.media_content_type,
-        });
-        n = (res.children || []).length;
-        this._panel.counts[it.media_content_id] = n;
+        const res = await axiumMaBrowse(
+          this._hass,
+          maId,
+          it.media_content_id,
+          it.media_content_type
+        );
+        children = res.children || [];
       } catch (err) {
         return;
       }
+      if (this._panel !== panel) return;
+      panel.childCache[it.media_content_id] = children;
     }
-    if (subEl && n && subEl.isConnected)
+    const n = children.length;
+    // Show the count even when it's 0 (an empty album/playlist) — a falsy-zero
+    // guard here would hide it and cache the omission.
+    if (subEl && subEl.isConnected)
       subEl.textContent += ` · ${n} track${n === 1 ? "" : "s"}`;
   }
 
@@ -2152,21 +2205,35 @@ class AxiumMatrixCard extends HTMLElement {
   async _streamDrillInto(maId, it) {
     const resEl = this.shadowRoot.querySelector(".ssresults");
     const tabsEl = this.shadowRoot.querySelector(".sstabs");
-    if (resEl) resEl.textContent = "Loading…";
-    let res;
-    try {
-      res = await this._hass.callWS({
-        type: "media_player/browse_media",
-        entity_id: maId,
-        media_content_id: it.media_content_id,
-        media_content_type: it.media_content_type,
-      });
-    } catch (err) {
-      if (resEl) resEl.textContent = "Couldn't open.";
-      return;
+    const panel = this._panel;
+    // Reuse the children already fetched for the track count instead of
+    // browsing the same item again.
+    let children =
+      panel && panel.childCache ? panel.childCache[it.media_content_id] : undefined;
+    if (children === undefined) {
+      if (resEl) resEl.textContent = "Loading…";
+      try {
+        const res = await axiumMaBrowse(
+          this._hass,
+          maId,
+          it.media_content_id,
+          it.media_content_type
+        );
+        children = res.children || [];
+      } catch (err) {
+        if (this._panel === panel && resEl) resEl.textContent = "Couldn't open.";
+        return;
+      }
+      if (this._panel !== panel) return;
+      if (panel) {
+        panel.childCache = panel.childCache || {};
+        panel.childCache[it.media_content_id] = children;
+      }
     }
+    // Bail if the panel changed while we resolved from cache/await.
+    if (this._panel !== panel) return;
     if (tabsEl) tabsEl.hidden = true;
-    this._renderStreamItems(maId, res.children || [], () => this._renderSearchTabs(maId));
+    this._renderStreamItems(maId, children, () => this._renderSearchTabs(maId));
   }
 
   /** Keep an open amp-stream popover in step with its MA player. */
@@ -3093,10 +3160,14 @@ class AxiumAlarmsCard extends HTMLElement {
     const devs = this._hass.devices || {};
     const out = [];
     for (const d of Object.values(devs)) {
+      // The primary amp is its own "…_amp_primary" device since the hub/amp
+      // split (NOT the bare hub id, which is now an empty logical container with
+      // no MA player); expansions are "…_unit_<uid>".
       const isAmp = (d.identifiers || []).some(
         (t) =>
           t[0] === "axium" &&
-          (t[1] === hubId || String(t[1]).startsWith(`${hubId}_unit_`))
+          (t[1] === `${hubId}_amp_primary` ||
+            String(t[1]).startsWith(`${hubId}_unit_`))
       );
       if (!isAmp) continue;
       const name = d.name_by_user || d.name;
@@ -3228,19 +3299,7 @@ class AxiumAlarmsCard extends HTMLElement {
   /** The Music Assistant player named after the primary (master) amp — the stream a
    *  wake playlist plays on. Null until the MA player is renamed to match. */
   _masterStreamPlayer() {
-    const name = this._primaryAmpName();
-    if (!name) return null;
-    const want = name.trim().toLowerCase();
-    const reg = this._hass.entities || {};
-    for (const id of Object.keys(this._hass.states)) {
-      if (!id.startsWith("media_player.")) continue;
-      const e = reg[id];
-      if (!e || e.platform !== "music_assistant") continue;
-      const st = this._hass.states[id];
-      const fn = st && (st.attributes.friendly_name || "").trim().toLowerCase();
-      if (fn === want) return id;
-    }
-    return null;
+    return this._maByName(this._primaryAmpName());
   }
 
   /** One-line "what this alarm plays": a wake song (with its amp stream) or the
@@ -3347,11 +3406,7 @@ class AxiumAlarmsCard extends HTMLElement {
     if (list) list.textContent = "Loading…";
     let res;
     try {
-      res = await this._hass.callWS({
-        type: "media_player/browse_media",
-        entity_id: form._maPlayer,
-        ...(id ? { media_content_id: id, media_content_type: type } : {}),
-      });
+      res = await axiumMaBrowse(this._hass, form._maPlayer, id, type);
     } catch (err) {
       if (list) list.textContent = "Couldn't browse Music Assistant.";
       return;
@@ -3363,19 +3418,15 @@ class AxiumAlarmsCard extends HTMLElement {
   async _searchMedia(form, query) {
     const list = form.querySelector(".mediabrowse .mlist");
     if (list) list.textContent = "Searching…";
-    let res;
+    let hits;
     try {
-      res = await this._hass.callWS({
-        type: "media_player/search_media",
-        entity_id: form._maPlayer,
-        search_query: query,
-      });
+      hits = await axiumMaSearch(this._hass, form._maPlayer, query);
     } catch (err) {
       if (list) list.textContent = "Search failed.";
       return;
     }
     this._renderCrumbs(form, []);
-    this._renderMediaItems(form, (res && res.result) || [], []);
+    this._renderMediaItems(form, hits, []);
   }
 
   _pickMedia(form, ch) {

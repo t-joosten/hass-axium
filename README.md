@@ -198,10 +198,14 @@ follows the total zone count (16 zones → up to 8 groups). Zones across the ful
 0–95 range are supported (the higher zone numbers use the protocol's extended
 zone-byte encoding).
 
-**Each amplifier is its own device.** The connected amp is the hub; every
-expansion amp appears as a **separate device nested under it**, with its own
-**firmware, model, temperature, peak temperature and MAC**, and its zones nested
-under it. So you can see each amp's health independently.
+**A logical hub, and a device per amplifier.** The integration creates a logical
+**hub** device — the container for stack-wide things (the alarms switch, the
+all-zones sleep timer) — and, nested under it, **one device per amplifier**: the
+primary amp you connect to, plus every expansion amp. Each amp device carries its
+own **firmware, model, temperature, peak temperature and MAC**, has its zones
+nested under it, and can be **named independently** of the hub (so the hub can be
+"Axium Hub" while the amps are "Axium 1" / "Axium 2"). So you can see each amp's
+health on its own device and rename each part separately.
 
 **Adding a second amp later:** stack it (both amps on the **same network** — these
 amps stack over Ethernet, not the old expansion bus) and it's picked up
@@ -612,10 +616,13 @@ The row and column **headers are interactive** too:
   toggled) only under **its own** amp's column; the other stream column is blank for
   it. Rows are ordered by zone number (1–16, and beyond for more amps). **Tap a stream
   header** → a panel with **now playing**, a **preset** picker, **volume**, transport,
-  and a **Browse Music Assistant** button to pick playlists/albums/radio for that amp's
-  stream. For this the amp's MA player must be **named the same as the
-  amplifier** (rename it to `Axium 1` / `Axium 2` in Music Assistant); the panel shows a
-  reminder if it isn't. There is intentionally **no "play on both amps"** — the two amps
+  and an inline **Music Assistant search**. Type to search that amp's stream player;
+  results are **tabbed into Tracks / Albums / Playlists**, each row showing cover art,
+  the provider (Spotify, Radio, Local…) and a track count for albums/playlists. Tap a
+  row to play it, or **›** to browse into it. There's also a **Browse Music Assistant**
+  button for the full library. For all of this the amp's MA player must be **named the
+  same as the amplifier** (rename it to `Axium 1` / `Axium 2` in Music Assistant); the
+  panel shows a reminder if it isn't. There is intentionally **no "play on both amps"** — the two amps
   can't be time‑synced, so it would drift badly; for genuine whole‑home audio feed all the
   zone inputs from **one external streamer** (e.g. a WiiM). *Transport (play/pause/next/previous) only works while the
   stream is playing **through Music Assistant** — the amp's DLNA renderer ignores

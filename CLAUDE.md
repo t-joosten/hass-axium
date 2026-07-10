@@ -120,10 +120,14 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   hub "Axium Hub" vs primary amp "Main"): the hub is `(<entry>)` (model "Hub", a container), the
   primary amp is `(<entry>_amp_primary)` (`via_device` the hub) — its identifier has NO `_unit_`
   so the dashboard still treats it as the master stream; expansions are `(<entry>_unit_<uid>)`
-  `via_device` the hub. `_amp_identifier(primary)` → `_amp_primary`. ALL amp-hardware entities go on
-  the amp device (zones' `via_device`, temp/peak, static-IP, auto-power/gain switches, source-gain +
-  standby numbers); only the stack-wide/system entities stay on the hub (alarm switch + alarm
-  sensors, all-zones sleep number + sensor). Renaming the **hub** device syncs the entry title only;
+  `via_device` the hub. `_amp_identifier(primary)` → `_amp_primary`. **The primary-amp identifier is
+  `helpers.primary_amp_identifier(entry_id)` — use it, never the raw `f"{entry_id}_amp_primary"`
+  literal** (a copy-paste of the old `(DOMAIN, entry_id)` idiom silently strands an entity on the hub;
+  that's how clipping/preset-select/source-name got left behind and later moved). ALL amp-hardware
+  entities go on the amp device (zones' `via_device`, temp/peak, **clipping binary_sensor**, static-IP,
+  auto-power/gain switches, source-gain + standby numbers, **preset select, source-name texts**); only
+  the stack-wide/system entities stay on the hub (alarm switch + alarm sensors, all-zones sleep number
+  + sensor). Renaming the **hub** device syncs the entry title only;
   renaming the **primary amp** device (or an expansion) pushes the amp network name. **Migration
   note:** on upgrade, existing amp entities re-parent from the old hub device to `_amp_primary`
   (unique_ids unchanged, so no data loss); the old hub keeps its `name_by_user` (rename to "Axium
@@ -134,7 +138,10 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   Setup now clears the hub's leftover `connections` (`async_update_device(hub.id, new_connections=set())`)
   so the primary amp claims the MAC. **Defensive:** the controller wraps its device-info / extended-
   info / stack callbacks in try/except + `LOGGER.exception` — a registry callback must NEVER take down
-  the amp link (that's what turned a one-line bug into a full outage). Zones
+  the amp link (that's what turned a one-line bug into a full outage). **The entity-listener dispatch is
+  guarded too:** `_notify` (per-zone) and `_notify_diagnostics` both wrap `callback()` in try/except —
+  they fire from the read loop just like the registry callbacks, so a raising `_handle_update` would flap
+  the connection the same way; guarding only the registry callbacks left that gap. Zones
   nest under their owning amp (`media_player` `via_device`); per-unit temp/peak sensors
   (`AxiumSensor(unit_id=…)`, expansion ids suffixed `_unit_<uid>` so primary sensors aren't
   orphaned). Config: `CONF_UNITS=[{unit_id,primary}]` + `UNIT_KEY` on each `CONF_ZONES` entry
@@ -262,7 +269,10 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   source card's preset semantics.
   **The "Media Player" source column is split into one STREAM column PER AMP** (`_columns()` +
   `_amps()`, which groups zones by their `via_device` amp → `Axium 1`/`Axium 2` and flags the **master**
-  = the hub amp whose identifier has no `_unit_`). Each stream column carries the media source id (0x12)
+  = the amp whose identifier has **neither `_unit_` nor `_zone_`**). The `_zone_` exclusion matters:
+  `_amps()`/`axiumAmps` fall back to the zone device (`|| zdev`) when the `via_device` amp isn't
+  resolvable yet (a registry-sync window, e.g. the split's re-parent) and a zone id also lacks `_unit_`,
+  so `!includes("_unit_")` alone mis-flagged a lone zone as the master amp. Each stream column carries the media source id (0x12)
   so routing/toggle is unchanged. **Ownership is per-amp (the corrected, honest model):** each stream
   column owns **only its own amp's zones** (`Axium 1` → 1-8, `Axium 2` → 9-16; `.cell.blank` for the
   rest) — an amp's stream can NEVER play another amp's zones, so there's no "master spans all". **Zones
@@ -274,13 +284,21 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `_openStreamPanel(ampId)`: now-playing + transport + volume driving that amp's MA player
   (`_ampStreamPlayerByName(amp name)`), a **preset dropdown** (`_applyPresetToStream`: start the amp's
   stream, its own preset rooms → Media Player, drop the amp's others), an inline **Music Assistant
-  search** (`_streamSearch` via WS `media_player/search_media`) with results **tabbed by
-  Tracks/Albums/Playlists** (`_renderSearchTabs` groups the flat hit list by `media_class`).
-  Each result row (`_renderStreamItems`) shows cover art (or a `_typeIcon`), title, and the
-  **provider** (Spotify/Radio/Local… parsed from the content-id prefix by `_providerLabel`), plus a
-  **lazy-loaded track count** for albums/playlists (`_streamItemCount` browses the item + caches the
-  child count). A row tap `play_media`s it (enqueue replace); a **"›"** browses into expandable items
-  (`_streamDrillInto` → children with a Back button). NB: `search_media` returns only
+  search** (`_streamSearch`) with results **tabbed by
+  Tracks/Albums/Playlists** (`_renderSearchTabs`; `_searchBucket` maps EVERY `media_class` into one of
+  the three tabs — playlist→Playlists, album/artist→Albums, everything else playable (track, radio,
+  episode…)→Tracks — so **nothing a search returns is silently dropped**; an earlier version kept only
+  literal track/album/playlist and hid radio/artist hits). Each result row (`_renderStreamItems`) shows
+  cover art (or a `_typeIcon`), title, and the **provider** (Spotify/Radio/Local… parsed from the
+  content-id prefix by `_providerLabel`), plus a **lazy-loaded track count** for albums/playlists
+  (`_streamItemCount`). A row tap `play_media`s it (enqueue replace); a **"›"** browses into expandable
+  items (`_streamDrillInto` → children with a Back button). **The MA WS calls are the shared module fns
+  `axiumMaSearch`/`axiumMaBrowse`** (both the matrix stream panel and the alarms-card browser use them —
+  one place for the request shape). **`_streamItemCount` and `_streamDrillInto` share `_panel.childCache`**
+  (keyed by content-id) so drilling into an already-counted album doesn't re-browse. **Async guards:** every
+  `await` in the search/browse/count path re-checks the panel is still the same object (`this._panel === panel`)
+  and search re-checks `panel.searchSeq` — closing the popover, switching amps, or a slower older query
+  can't render into the wrong/torn-down panel. NB: `search_media` returns only
   title/thumbnail/type/content_id/can_* — NOT duration, year, or a separate artist (baked into the
   title); MA exposes no per-item WS for the richer fields. There's also a **Browse Music Assistant** button
   (native `hass-more-info` on the amp's MA player). Shows a "rename the MA player to <amp name>"
@@ -336,16 +354,23 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   the media fields) + the `alarm_duration` sensor attr; the Add form has an "Auto turn-off after
   <min>" number, and each alarm row shows "· off after Xm". **Wake to a Music Assistant playlist:** if the alarm has `media` (a MA
   media-content-id), it activates the zones on the **Media Player** source (0x12) and calls
-  `media_player.play_media` on the **master** stream player (`_master_stream_player`: the MA player
-  named after the hub device) — `media_player` overrides the target. **LIMITATION (per-amp reality):**
+  `media_player.play_media` on the **master** stream player (`_master_stream_player`) — `media_player`
+  overrides the target. **`_master_stream_player` matches by name in priority order: the primary-amp
+  device name (the convention, e.g. "Axium 1"), then the hub device name, then the entry title** — the
+  last two are a fallback for entries that upgraded from before the hub/amp split, where the match key
+  used to be the hub's display name / title; without it an upgrader who named their MA player after the
+  old title matches nothing and the wake song silently never plays. **LIMITATION (per-amp reality):**
   the wake media plays on the master amp only, so a wake song reaches the **master amp's zones**;
   alarm zones on an expansion amp are activated + faded but won't hear the song (would need play_media
   on each activated zone's own amp — TODO if wake-on-expansion is wanted). The alarms card's Add form has an inline MA browser (`_openMediaBrowse`/`_browseTo`/
-  `_pickMedia` via WS `media_player/browse_media` on the master player; drill folders, pick a playable
-  item) that stores `media`/`media_type` through `axium.set_alarm`. It also has a **search box**
-  (`_searchMedia` via WS `media_player/search_media`, which returns browse-media-shaped items under
-  `result.result`); browse + search share `_renderMediaItems`/`_renderCrumbs`. Master arm/disarm =
-  `AxiumAlarmsSwitch` (switch.py, runtime flag `hass.data[DATA_ALARMS_ENABLED]`).
+  `_pickMedia`; drill folders, pick a playable item) that stores `media`/`media_type` through
+  `axium.set_alarm`. It also has a **search box** (`_searchMedia`); browse + search share
+  `_renderMediaItems`/`_renderCrumbs` and go through the shared `axiumMaBrowse`/`axiumMaSearch` module
+  fns. The Add form's amp-stream source options come from **`_ampStreams`, which matches the primary amp
+  by `<hub>_amp_primary` (NOT the bare hub id — that's the empty logical container with no MA player)**
+  plus expansions `<hub>_unit_*`; matching the hub id there dropped the primary amp's stream and listed
+  the empty hub instead. Master arm/disarm = `AxiumAlarmsSwitch` (switch.py, runtime flag
+  `hass.data[DATA_ALARMS_ENABLED]`).
 - **Notifications**: `axium.play_notification` service (services.py/.yaml) — plays a sound on
   `zones`/`presets`, then restores each zone **exactly** (power/source/volume/mute, or off). A
   spoken **`message`** (opt. `tts_engine`/`language`) is turned into a `media-source://tts/<engine>`

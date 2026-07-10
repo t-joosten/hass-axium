@@ -21,6 +21,7 @@ from .const import (
     CONF_UNITS,
     CONF_ZONES,
     DEFAULT_SOURCE_COUNT,
+    DOMAIN,
     ID_KEY,
     NAME_KEY,
     PREAMP_ZONES_BY_MODEL,
@@ -178,6 +179,19 @@ def units_config(units: list[Any], primary_unit_id: int | None) -> list[dict[str
         {UNIT_KEY: unit.unit_id, "primary": unit.unit_id == primary_unit_id}
         for unit in units
     ]
+
+
+def primary_amp_identifier(entry_id: str) -> tuple[str, str]:
+    """Device identifier for the PRIMARY AMP device.
+
+    Since the hub/amp split the primary amp is its own device ("…_amp_primary"),
+    separate from the logical hub (whose identifier is the bare entry id). Every
+    amp-hardware entity lives on this device; call this instead of rebuilding the
+    literal so a future scheme change touches one place (and so a copy-paste of
+    the old ``(DOMAIN, entry_id)`` idiom can't silently strand an entity on the
+    hub container).
+    """
+    return (DOMAIN, f"{entry_id}_amp_primary")
 
 
 def get_units(entry: ConfigEntry) -> list[dict[str, Any]]:
