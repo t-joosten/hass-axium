@@ -362,29 +362,25 @@ shows **now-playing and transport** (play/pause/next/prev).
   **amp-side** features, not part of the TCP control protocol, so they can't be
   enabled from Home Assistant. Once configured they play through the same Media
   Player source.
-- The internal player is a single stream fanned to whichever zones select it —
-  point a **zone group** at it to play in several rooms at once.
+- Within one amp, the internal player is a single stream fanned to whichever of
+  **that amp's** zones select it — point a **zone group** at it to play in several
+  of the amp's rooms at once.
 
-> **Stacked amplifiers share one internal player.** On a multi-amp stack the
-> internal Media Player is a **single, stack-wide source** — *not* one per amp.
-> (Verified by probing the protocol directly: only Media Player 1 answers, and it
-> answers for every zone on both amps; Media Player 2–8 and AirPlay stay silent.)
-> So selecting the amp's built-in **Media Player** on a zone on amp 1 *and* a zone
-> on amp 2 plays the **same** stream (the internal player is one stack-wide source).
-> This holds over **DLNA / Music Assistant** too (confirmed by a listening test on
-> real hardware): push an MA stream to the **master's** DLNA renderer and it plays
-> on **all 16 zones** — amp 2's zone played amp 1's stream while amp 2's own
-> renderer was empty. So whole-home audio needs just **one** MA stream on the master
-> (Axium 1), perfectly in sync. (The per-amp renderer URI read-back — setting a
-> track on one renderer not changing another — is misleading: those are separate
-> control endpoints, but playback is stack-wide.) Zones tap into the stream via the
-> Media Player source; turning a zone off just drops it (the other rooms keep
-> playing). Whether the expansion amp can override *its* zones with a second,
-> different stream at the same time is untested.
-> A second internal player would have to be enabled/assigned on the expansion amp
-> itself (a feature-unlock / setup matter on that amp, not in the TCP control
-> protocol); if that were ever done, the integration probes `0x12`–`0x19` on every
-> connect and would surface it as a second **Media Player** source automatically.
+> **Each amp has its OWN internal player (per-amp, not stack-wide).** On a multi-amp
+> stack every amplifier drives only its own zones' Media Player: **Axium 1** → zones
+> 1–8, **Axium 2** → zones 9–16, as **independent** streams. (An earlier version of
+> this doc wrongly claimed one "stack-wide" stream; direct hardware listening tests
+> disproved it — with amp 1 streaming and amp 2 idle, amp 2's zones were silent, and
+> playing on amp 2's player made its zones play *that* content, not amp 1's.)
+> Crucially the **two amps cannot be time-synced** (their DLNA renderers don't
+> support grouping, and cross-feeding one amp's live stream to the other plays it
+> from a different position). So there is **no whole-home "play on both amps"** in
+> this integration — it drifts too badly to be useful. For genuine multi-room audio,
+> feed all the zone inputs from **one external streamer** (e.g. a WiiM) so every zone
+> shares a single physical source. A second internal player would have to be enabled
+> on the expansion amp itself (a feature-unlock / setup matter on that amp, not in
+> the TCP control protocol); if that were ever done, the integration probes
+> `0x12`–`0x19` on every connect and would surface it automatically.
 
 ### AirPlay via Music Assistant (only on amps with AirPlay)
 
@@ -616,13 +612,12 @@ The row and column **headers are interactive** too:
   toggled) only under **its own** amp's column; the other stream column is blank for
   it. Rows are ordered by zone number (1–16, and beyond for more amps). **Tap a stream
   header** → a panel with **now playing**, a **preset** picker, **volume**, transport,
-  a **whole‑home scope** selector, and a **Browse Music Assistant** browser. Pick a
-  playlist/album/radio and it plays on that amp; set the scope to **"Play on all amps
-  (whole‑home)"** first and it starts on **every** amplifier at once — the same content
-  house‑wide (the amps run independently, so expect a small drift between them, and it's
-  not perfectly in sync). For this the amp's MA player must be **named the same as the
+  and a **Browse Music Assistant** button to pick playlists/albums/radio for that amp's
+  stream. For this the amp's MA player must be **named the same as the
   amplifier** (rename it to `Axium 1` / `Axium 2` in Music Assistant); the panel shows a
-  reminder if it isn't. *Transport (play/pause/next/previous) only works while the
+  reminder if it isn't. There is intentionally **no "play on both amps"** — the two amps
+  can't be time‑synced, so it would drift badly; for genuine whole‑home audio feed all the
+  zone inputs from **one external streamer** (e.g. a WiiM). *Transport (play/pause/next/previous) only works while the
   stream is playing **through Music Assistant** — the amp's DLNA renderer ignores
   pause/skip for playback started another way; control it from Music Assistant itself
   in that case.*

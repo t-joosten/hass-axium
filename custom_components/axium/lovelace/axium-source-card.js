@@ -88,6 +88,38 @@ function axiumMediaPlayers(hass, hubId) {
   });
 }
 
+// A zone media_player's physical zone number (1..16, and beyond for more amps),
+// from the `zone_number` attribute; 9999 when unknown so it sorts last.
+function axiumZoneNumber(hass, id) {
+  const st = hass && hass.states && hass.states[id];
+  const n = st && st.attributes && st.attributes.zone_number;
+  return typeof n === "number" ? n : 9999;
+}
+
+// Order zone entity_ids by physical zone number (entity id as a stable tiebreak),
+// so every card lists zones 1..16 in the same, expected order.
+function axiumSortZones(hass, ids) {
+  return [...ids].sort(
+    (a, b) =>
+      axiumZoneNumber(hass, a) - axiumZoneNumber(hass, b) ||
+      String(a).localeCompare(String(b))
+  );
+}
+
+// Zone options for a card editor's "zones to show" select — the hub's zone
+// media_players in physical zone-number order. The label carries the STACK-WIDE
+// zone number (1..16+) so it's unambiguous across amps (the entity picker's
+// per-amp "Zone 4" secondary text is confusing with multiple amps).
+function axiumZoneSelectOptions(hass, hubId) {
+  return axiumSortZones(hass, axiumMediaPlayers(hass, hubId)).map((id) => {
+    const name = (hass.states[id] && hass.states[id].attributes.friendly_name) || id;
+    const num = axiumZoneNumber(hass, id);
+    const label =
+      num >= 9999 || name === `Zone ${num}` ? name : `${name} (Zone ${num})`;
+    return { value: id, label };
+  });
+}
+
 /**
  * Enumerate the Axium amplifiers (config entries) that have media_player
  * entities, returning `{ id, name }` for each. The name is taken from the hub
@@ -141,25 +173,41 @@ const TOKEN_SEP = "|";
 // The amp device names on a hub (master first), e.g. ["Axium 1", "Axium 2"].
 // Used to show the stack-wide internal Media Player source under the amp/stream
 // names the matrix uses as columns, rather than the bare "Media Player".
-function axiumAmpNames(hass, hubId) {
+// The amps on a hub (master first), each `{id, name, master, zones:[entity_id]}`,
+// from the device tree (zone media_player → via_device amp device).
+function axiumAmps(hass, hubId) {
   const devs = (hass && hass.devices) || {};
   const ents = (hass && hass.entities) || {};
-  const out = [];
-  const seen = new Set();
+  const byId = new Map();
+  const order = [];
   for (const id of axiumMediaPlayers(hass, hubId)) {
     const ent = ents[id];
     const zdev = ent && devs[ent.device_id];
     if (!zdev) continue;
     const amp = devs[zdev.via_device_id] || zdev;
-    if (seen.has(amp.id)) continue;
-    seen.add(amp.id);
-    const master = (amp.identifiers || []).some(
-      (t) => t[0] === "axium" && t[1] === hubId
-    );
-    out.push({ name: amp.name_by_user || amp.name || "", master });
+    if (!byId.has(amp.id)) {
+      const master = (amp.identifiers || []).some(
+        (t) => t[0] === "axium" && t[1] === hubId
+      );
+      byId.set(amp.id, {
+        id: amp.id,
+        name: amp.name_by_user || amp.name || "Amp",
+        master,
+        zones: [],
+      });
+      order.push(amp.id);
+    }
+    byId.get(amp.id).zones.push(id);
   }
-  out.sort((a, b) => (a.master === b.master ? 0 : a.master ? -1 : 1));
-  return out.map((a) => a.name).filter(Boolean);
+  return order
+    .map((id) => byId.get(id))
+    .sort((a, b) => (a.master === b.master ? 0 : a.master ? -1 : 1));
+}
+
+function axiumAmpNames(hass, hubId) {
+  return axiumAmps(hass, hubId)
+    .map((a) => a.name)
+    .filter(Boolean);
 }
 
 function axiumSourceChoices(hass) {
@@ -179,24 +227,34 @@ function axiumSourceChoices(hass) {
         });
       }
     }
-    const ampNames = axiumAmpNames(hass, hub.id);
+    const amps = axiumAmps(hass, hub.id);
     [...byId.entries()]
       .sort((a, b) => String(a[1]).localeCompare(String(b[1])))
       .forEach(([sid, rawName]) => {
-        // The internal Media Player is stack-wide and shown per amp as the
-        // "Axium 1"/"Axium 2" stream columns — label it that way everywhere.
-        const name =
-          sid >= STREAM_SOURCE_MIN && ampNames.length
-            ? ampNames.join(" / ")
-            : rawName;
-        out.push({
-          hub: hub.id,
-          hubName: hub.name,
-          id: sid,
-          name,
-          token: `${hub.id}${TOKEN_SEP}${sid}`,
-          label: multi ? `${hub.name} ${name}` : name,
-        });
+        if (sid >= STREAM_SOURCE_MIN && amps.length) {
+          // The internal Media Player is a SEPARATE stream per amp — emit one
+          // choice per amp ("Axium 1", "Axium 2"), each amp-scoped by its token.
+          for (const amp of amps) {
+            out.push({
+              hub: hub.id,
+              hubName: hub.name,
+              id: sid,
+              ampId: amp.id,
+              name: amp.name,
+              token: `${hub.id}${TOKEN_SEP}${sid}${TOKEN_SEP}${amp.id}`,
+              label: multi ? `${hub.name} ${amp.name}` : amp.name,
+            });
+          }
+        } else {
+          out.push({
+            hub: hub.id,
+            hubName: hub.name,
+            id: sid,
+            name: rawName,
+            token: `${hub.id}${TOKEN_SEP}${sid}`,
+            label: multi ? `${hub.name} ${rawName}` : rawName,
+          });
+        }
       });
   }
   return out;
@@ -292,16 +350,31 @@ class AxiumSourceCard extends HTMLElement {
   }
 
   _zones() {
-    const auto = axiumMediaPlayers(this._hass, this._config.hub)
-      .filter((id) => this._sourceNameFor(this._state(id)) != null)
-      .sort();
-    // Optional whitelist (`zones`, or legacy `entities`): show only these, in
-    // the order given, dropping any that no longer offer the source.
+    let auto = axiumMediaPlayers(this._hass, this._config.hub).filter(
+      (id) => this._sourceNameFor(this._state(id)) != null
+    );
+    // A per-amp stream source (config carries `ampId`) scopes to that amp's zones.
+    if (this._config.ampId) {
+      auto = auto.filter((id) => this._zoneAmpId(id) === this._config.ampId);
+    }
+    // Optional whitelist (`zones`, or legacy `entities`): show only these,
+    // dropping any that no longer offer the source.
     const pick = this._config.zones || this._config.entities;
     if (Array.isArray(pick) && pick.length) {
-      return pick.filter((id) => auto.includes(id));
+      auto = auto.filter((id) => pick.includes(id));
     }
-    return auto;
+    // Always ordered by physical zone number (1..16+).
+    return axiumSortZones(this._hass, auto);
+  }
+
+  /** The device id of a zone's owning amp (via_device), for amp-scoping. */
+  _zoneAmpId(id) {
+    const ent = (this._hass.entities || {})[id];
+    const devs = this._hass.devices || {};
+    const zdev = ent && devs[ent.device_id];
+    if (!zdev) return null;
+    const amp = devs[zdev.via_device_id] || zdev;
+    return amp ? amp.id : null;
   }
 
   _state(id) {
@@ -723,15 +796,17 @@ class AxiumSourceCardEditor extends HTMLElement {
     this._render();
   }
 
-  /** The picker token for the currently configured (hub, source id), if any. */
+  /** The picker token for the currently configured (hub, source id, amp), if any. */
   _currentToken(choices) {
-    const { hub, source } = this._config;
+    const { hub, source, ampId } = this._config;
     if (source === undefined || source === null || source === "") return undefined;
     if (typeof source === "number") {
-      // New id-based config: match by source id (prefer the same hub).
+      // New id-based config: match by source id + amp (prefer the same hub).
+      const match = (c) =>
+        c.id === source && (ampId ? c.ampId === ampId : !c.ampId);
       return (
-        (hub && choices.find((c) => c.hub === hub && c.id === source)) ||
-        choices.find((c) => c.id === source) ||
+        (hub && choices.find((c) => c.hub === hub && match(c))) ||
+        choices.find(match) ||
         {}
       ).token;
     }
@@ -778,6 +853,9 @@ class AxiumSourceCardEditor extends HTMLElement {
         ? this._currentToken(this._choices)
         : this._config.source,
     };
+    // Zones (of the chosen source's hub) in physical zone-number order.
+    const srcHub = String((data && data.source) || "").split(TOKEN_SEP)[0];
+    const zoneOptions = axiumZoneSelectOptions(this._hass, srcHub || undefined);
 
     this._form.hass = this._hass;
     this._form.data = data;
@@ -791,9 +869,9 @@ class AxiumSourceCardEditor extends HTMLElement {
       },
       {
         name: "zones",
-        selector: {
-          entity: { integration: "axium", domain: "media_player", multiple: true },
-        },
+        selector: zoneOptions.length
+          ? { select: { multiple: true, mode: "list", options: zoneOptions } }
+          : { entity: { integration: "axium", domain: "media_player", multiple: true } },
       },
       { name: "name", selector: { text: {} } },
     ];
@@ -815,12 +893,16 @@ class AxiumSourceCardEditor extends HTMLElement {
     if (choice) {
       value.hub = choice.hub;
       value.source = choice.id;
+      // Stream sources are per-amp — scope the card to that amp's zones.
+      if (choice.ampId) value.ampId = choice.ampId;
+      else delete value.ampId;
     } else if (typeof token === "string" && token.includes(TOKEN_SEP)) {
-      const sep = token.indexOf(TOKEN_SEP);
-      value.hub = token.slice(0, sep);
-      const idStr = token.slice(sep + 1);
-      const n = Number(idStr);
-      value.source = Number.isNaN(n) ? idStr : n;
+      const parts = token.split(TOKEN_SEP);
+      value.hub = parts[0];
+      const n = Number(parts[1]);
+      value.source = Number.isNaN(n) ? parts[1] : n;
+      if (parts[2]) value.ampId = parts[2];
+      else delete value.ampId;
     }
     this._config = value;
     this.dispatchEvent(
@@ -1243,8 +1325,9 @@ class AxiumMatrixCard extends HTMLElement {
     return typeof n === "number" ? n : 9999;
   }
 
-  // Columns: every source offered across the hub's zones, as {id, name},
-  // optionally narrowed to a configured `sources` whitelist (of ids).
+  // Every source offered across the hub's zones, as {id, name} (unfiltered — the
+  // `sources` whitelist is applied per column in _columns(), since stream sources
+  // are filtered per amp, not by the single Media Player id).
   _sources() {
     const byId = new Map();
     for (const id of axiumMediaPlayers(this._hass, this._hubId())) {
@@ -1257,13 +1340,16 @@ class AxiumMatrixCard extends HTMLElement {
         });
       }
     }
-    let list = [...byId.entries()].map(([id, name]) => ({ id, name }));
-    const pick = this._config.sources;
-    if (Array.isArray(pick) && pick.length) {
-      const wanted = new Set(pick.map(Number));
-      list = list.filter((s) => wanted.has(s.id));
-    }
-    return list.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return [...byId.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }
+
+  // The configured `sources` whitelist as a Set of string values (analog ids as
+  // "5", per-amp streams as "stream:<ampId>"); null when unset (show all).
+  _sourceFilter() {
+    const wl = this._config.sources;
+    return Array.isArray(wl) && wl.length ? new Set(wl.map(String)) : null;
   }
 
   /** The amps in this card's zone set, each with the zones it owns and its
@@ -1303,26 +1389,35 @@ class AxiumMatrixCard extends HTMLElement {
    *  columns if amps unknown. */
   _columns() {
     const srcs = this._sources();
+    const filter = this._sourceFilter();
+    const analogOk = (s) => !filter || filter.has(String(s.id));
     const analog = srcs.filter((s) => s.id < STREAM_SOURCE_MIN);
     const streams = srcs.filter((s) => s.id >= STREAM_SOURCE_MIN);
-    const cols = analog.map((s) => ({ kind: "source", id: s.id, name: s.name }));
+    const cols = analog
+      .filter(analogOk)
+      .map((s) => ({ kind: "source", id: s.id, name: s.name }));
     const amps = this._amps();
     if (streams.length && amps.length) {
       const sid = streams[0].id;
       // Each amp's Media Player stream drives ONLY its own zones — the streams
-      // are independent per amp (an amp can't play another amp's zones).
+      // are independent per amp (an amp can't play another amp's zones). The
+      // `sources` whitelist targets a stream per amp ("stream:<ampId>"); a legacy
+      // numeric Media-Player id whitelists all streams (migration).
       for (const amp of amps) {
-        cols.push({
-          kind: "stream",
-          id: sid,
-          ampId: amp.id,
-          name: amp.name,
-          zones: amp.zones,
-        });
+        if (!filter || filter.has(`stream:${amp.id}`) || filter.has(String(sid)))
+          cols.push({
+            kind: "stream",
+            id: sid,
+            ampId: amp.id,
+            name: amp.name,
+            zones: amp.zones,
+          });
       }
-      for (const s of streams.slice(1)) cols.push({ kind: "source", id: s.id, name: s.name });
+      for (const s of streams.slice(1))
+        if (analogOk(s)) cols.push({ kind: "source", id: s.id, name: s.name });
     } else {
-      for (const s of streams) cols.push({ kind: "source", id: s.id, name: s.name });
+      for (const s of streams)
+        if (analogOk(s)) cols.push({ kind: "source", id: s.id, name: s.name });
     }
     return cols;
   }
@@ -1744,10 +1839,8 @@ class AxiumMatrixCard extends HTMLElement {
   /** Amp stream popover: now-playing + transport + volume for the amp's Music
    *  Assistant stream, and a button to browse MA for playlists. */
   _openStreamPanel(ampId) {
-    const amps = this._amps();
-    const amp = amps.find((a) => a.id === ampId);
+    const amp = this._amps().find((a) => a.id === ampId);
     if (!amp) return;
-    const multiAmp = amps.length > 1;
     const ma = this._ampStreamPlayerByName(amp.name);
     const maId = ma ? ma.entity_id : null;
     const sheet = this.shadowRoot.getElementById("sheet");
@@ -1778,15 +1871,7 @@ class AxiumMatrixCard extends HTMLElement {
         <button class="iconbtn" data-t="next" title="Next"><ha-icon icon="mdi:skip-next"></ha-icon></button>
         <button class="iconbtn" data-v="up" title="Volume up"><ha-icon icon="mdi:volume-plus"></ha-icon></button>
       </div>
-      ${
-        multiAmp
-          ? `<select class="scopesel">` +
-            `<option value="this">Play on ${escHtml(amp.name)} only</option>` +
-            `<option value="all">Play on all amps (whole-home)</option></select>`
-          : ""
-      }
       <button class="browse"><ha-icon icon="mdi:playlist-music"></ha-icon><span>Browse Music Assistant</span></button>
-      <div class="mediabrowse" hidden></div>
       <div class="empty" hidden></div>
     `;
     sheet.querySelector(".sheet-title").textContent = amp.name;
@@ -1807,10 +1892,11 @@ class AxiumMatrixCard extends HTMLElement {
       );
     }
     if (!maId) {
-      // No MA player for this amp — hide transport/browse/scope but keep the
-      // volume buttons (they act on the amp's zones, not the MA player).
-      for (const el of sheet.querySelectorAll("button[data-t], .browse, .scopesel"))
-        el.style.display = "none";
+      // No MA player for this amp — hide transport/browse but keep the volume
+      // buttons (they act on the amp's zones, not the MA player).
+      for (const b of sheet.querySelectorAll("button[data-t]")) b.style.display = "none";
+      const browse = sheet.querySelector(".browse");
+      if (browse) browse.style.display = "none";
       const empty = sheet.querySelector(".empty");
       empty.hidden = false;
       empty.textContent =
@@ -1828,118 +1914,20 @@ class AxiumMatrixCard extends HTMLElement {
           this._hass.callService("media_player", svc, { entity_id: maId });
         });
       }
-      // Inline Music Assistant browser so a picked item can be started on this
-      // amp only, or on all amps (whole-home) per the scope select above.
-      sheet.querySelector(".browse").addEventListener("click", () =>
-        this._streamBrowseToggle()
-      );
+      sheet.querySelector(".browse").addEventListener("click", () => {
+        this.dispatchEvent(
+          new CustomEvent("hass-more-info", {
+            detail: { entityId: maId },
+            bubbles: true,
+            composed: true,
+          })
+        );
+        this._closePanel();
+      });
     }
-    this._panel = { type: "stream", ampId, maId, dragging: false, browsePlayer: maId };
+    this._panel = { type: "stream", ampId, maId, dragging: false };
     this.shadowRoot.getElementById("overlay").hidden = false;
     this._refreshPanel();
-  }
-
-  /** Show/hide the inline Music Assistant browser in the stream panel. */
-  _streamBrowseToggle() {
-    const box = this.shadowRoot.querySelector(".mediabrowse");
-    if (!box || !this._panel) return;
-    if (!box.hidden) {
-      box.hidden = true;
-      return;
-    }
-    box.hidden = false;
-    this._streamBrowseTo(undefined, undefined, []);
-  }
-
-  async _streamBrowseTo(id, type, crumbs) {
-    const box = this.shadowRoot.querySelector(".mediabrowse");
-    if (!box || !this._panel) return;
-    box.innerHTML = `<div class="crumbs"></div><div class="mlist">Loading…</div>`;
-    let res;
-    try {
-      res = await this._hass.callWS({
-        type: "media_player/browse_media",
-        entity_id: this._panel.browsePlayer,
-        ...(id ? { media_content_id: id, media_content_type: type } : {}),
-      });
-    } catch (err) {
-      const ml = box.querySelector(".mlist");
-      if (ml) ml.textContent = "Couldn't browse Music Assistant.";
-      return;
-    }
-    const cr = box.querySelector(".crumbs");
-    cr.innerHTML = "";
-    const home = document.createElement("button");
-    home.className = "crumb";
-    home.textContent = "⌂";
-    home.addEventListener("click", () => this._streamBrowseTo(undefined, undefined, []));
-    cr.appendChild(home);
-    crumbs.forEach((c, i) => {
-      const b = document.createElement("button");
-      b.className = "crumb";
-      b.textContent = "› " + c.title;
-      b.addEventListener("click", () => this._streamBrowseTo(c.id, c.type, crumbs.slice(0, i)));
-      cr.appendChild(b);
-    });
-    const list = box.querySelector(".mlist");
-    list.innerHTML = "";
-    for (const ch of res.children || []) {
-      const it = document.createElement("button");
-      it.className = "mitem";
-      it.textContent = (ch.can_play ? "♪ " : "📁 ") + ch.title;
-      it.addEventListener("click", () => {
-        if (ch.can_play) this._streamPlay(ch);
-        else if (ch.can_expand)
-          this._streamBrowseTo(ch.media_content_id, ch.media_content_type, [
-            ...crumbs,
-            { title: ch.title, id: ch.media_content_id, type: ch.media_content_type },
-          ]);
-      });
-      list.appendChild(it);
-    }
-    if (!(res.children || []).length)
-      list.innerHTML = `<div class="empty">Nothing here.</div>`;
-  }
-
-  /** Start a picked item — on this amp only, or on every amp (whole-home) per
-   *  the scope select. Each amp plays its own copy (the amps can't be synced),
-   *  so whole-home music may drift slightly between amps. */
-  _streamPlay(ch) {
-    const scopeSel = this.shadowRoot.querySelector(".scopesel");
-    const all = scopeSel && scopeSel.value === "all";
-    const players = [];
-    if (all) {
-      for (const a of this._amps()) {
-        const m = this._ampStreamPlayerByName(a.name);
-        if (m) players.push(m.entity_id);
-      }
-    } else if (this._panel && this._panel.browsePlayer) {
-      players.push(this._panel.browsePlayer);
-    }
-    for (const p of players) {
-      this._hass.callService("media_player", "play_media", {
-        entity_id: p,
-        media_content_id: ch.media_content_id,
-        media_content_type: ch.media_content_type,
-        enqueue: "replace",
-      });
-    }
-    // Whole-home: also put every zone on the Media Player so all rooms actually
-    // hear it (an amp streaming to no on-Media-Player zone plays silently).
-    if (all) {
-      const sid = (this._columns().find((c) => c.kind === "stream") || {}).id;
-      if (sid != null)
-        for (const z of this._zones()) {
-          const name = this._sourceNameFor(this._hass.states[z], sid);
-          if (name != null)
-            this._hass.callService("media_player", "select_source", {
-              entity_id: z,
-              source: name,
-            });
-        }
-    }
-    const box = this.shadowRoot.querySelector(".mediabrowse");
-    if (box) box.hidden = true;
   }
 
   /** Keep an open amp-stream popover in step with its MA player. */
@@ -2351,32 +2339,6 @@ AxiumMatrixCard.styles = `
   }
   .browse:hover { border-color: var(--primary-color); }
   .browse ha-icon { --mdc-icon-size: 20px; }
-  .scopesel {
-    font: inherit; padding: 6px 8px; border-radius: 8px; width: 100%;
-    box-sizing: border-box; margin-top: 10px;
-    border: 1px solid var(--divider-color);
-    background: var(--secondary-background-color); color: var(--primary-text-color);
-  }
-  .scopesel + .browse { margin-top: 6px; }
-  .mediabrowse {
-    margin-top: 8px; border: 1px solid var(--divider-color); border-radius: 8px;
-    padding: 6px; max-height: 260px; overflow-y: auto;
-    background: var(--secondary-background-color);
-  }
-  .mediabrowse[hidden] { display: none; }
-  .crumbs { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 4px; }
-  .crumb {
-    background: none; border: none; color: var(--secondary-text-color);
-    cursor: pointer; font: inherit; font-size: 0.85rem; padding: 2px 4px;
-  }
-  .crumb:hover { color: var(--primary-color); }
-  .mlist { display: flex; flex-direction: column; }
-  .mitem {
-    text-align: left; background: none; border: none; cursor: pointer; font: inherit;
-    color: var(--primary-text-color); padding: 7px 6px; border-radius: 6px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .mitem:hover { background: var(--card-background-color); }
   .overlay {
     position: absolute; inset: 0; z-index: 5;
     display: flex; align-items: center; justify-content: center;
@@ -2511,10 +2473,18 @@ class AxiumMatrixCardEditor extends HTMLElement {
     const data = { ...this._config };
     if (!data.hub && hubs.length) data.hub = hubs[0].id;
 
-    // Source columns available on the selected hub.
+    // Source columns available on the selected hub. Stream sources are per-amp,
+    // so they get an amp-scoped value ("stream:<ampId>") — they are separate
+    // filter entries ("Axium 1", "Axium 2"), not one combined "Media Player".
     const sourceOptions = axiumSourceChoices(this._hass)
       .filter((c) => c.hub === data.hub)
-      .map((c) => ({ value: String(c.id), label: c.name }));
+      .map((c) => ({
+        value: c.ampId ? `stream:${c.ampId}` : String(c.id),
+        label: c.name,
+      }));
+    // Zones in physical zone-number order (a sorted select, not the entity
+    // picker, so the config lists them 1..16 like the cards do).
+    const zoneOptions = axiumZoneSelectOptions(this._hass, data.hub);
 
     this._form.hass = this._hass;
     this._form.data = data;
@@ -2527,9 +2497,9 @@ class AxiumMatrixCardEditor extends HTMLElement {
       },
       {
         name: "zones",
-        selector: {
-          entity: { integration: "axium", domain: "media_player", multiple: true },
-        },
+        selector: zoneOptions.length
+          ? { select: { multiple: true, mode: "list", options: zoneOptions } }
+          : { entity: { integration: "axium", domain: "media_player", multiple: true } },
       },
       {
         name: "sources",
@@ -2654,13 +2624,16 @@ class AxiumAlarmsCard extends HTMLElement {
   _svc(service, data) {
     this._hass.callService("axium", service, { hub: this._hub(), ...data });
   }
-  // Zones offered in the Add form (config `zones` whitelist, else all).
+  // Zones offered in the Add form (config `zones` whitelist, else all), ordered
+  // by physical zone number (1..16+).
   _addZones() {
     const all = axiumMediaPlayers(this._hass, this._hub());
     const pick = this._config.zones;
-    return Array.isArray(pick) && pick.length
-      ? all.filter((id) => pick.includes(id))
-      : all;
+    const list =
+      Array.isArray(pick) && pick.length
+        ? all.filter((id) => pick.includes(id))
+        : all;
+    return axiumSortZones(this._hass, list);
   }
   // Sources offered in the Add form (config `sources` whitelist, else all).
   _sources() {
@@ -3256,7 +3229,17 @@ class AxiumSleepCard extends HTMLElement {
   _zoneNumberIds() {
     return this._sleepNumbers()
       .filter((id) => !this._hass.states[id].attributes.sleep_all)
-      .sort((a, b) => this._zoneName(a).localeCompare(this._zoneName(b)));
+      .sort(
+        (a, b) =>
+          this._sleepZoneNum(a) - this._sleepZoneNum(b) ||
+          this._zoneName(a).localeCompare(this._zoneName(b))
+      );
+  }
+
+  // Physical zone number from a sleep-timer number's entity id (…_zone_<n>_…).
+  _sleepZoneNum(id) {
+    const m = /_zone_(\d+)/.exec(id);
+    return m ? Number(m[1]) : 9999;
   }
   _presets() {
     for (const id of axiumMediaPlayers(this._hass, this._hub())) {
@@ -3652,14 +3635,13 @@ class AxiumVolumesCard extends HTMLElement {
   }
 
   _zones() {
-    const auto = axiumMediaPlayers(this._hass, this._hubId()).sort((a, b) =>
-      this._name(a).localeCompare(this._name(b))
-    );
+    let auto = axiumMediaPlayers(this._hass, this._hubId());
     const pick = this._config.zones || this._config.entities;
     if (Array.isArray(pick) && pick.length) {
-      return pick.filter((id) => auto.includes(id));
+      auto = auto.filter((id) => pick.includes(id));
     }
-    return auto;
+    // Always ordered by physical zone number (1..16+).
+    return axiumSortZones(this._hass, auto);
   }
 
   _render() {
@@ -3824,6 +3806,7 @@ class AxiumVolumesCardEditor extends HTMLElement {
     const hubOptions = hubs.map((h) => ({ value: h.id, label: h.name }));
     const data = { ...this._config };
     if (!data.hub && hubs.length) data.hub = hubs[0].id;
+    const zoneOptions = axiumZoneSelectOptions(this._hass, data.hub);
     this._form.hass = this._hass;
     this._form.data = data;
     this._form.schema = [
@@ -3835,9 +3818,9 @@ class AxiumVolumesCardEditor extends HTMLElement {
       },
       {
         name: "zones",
-        selector: {
-          entity: { integration: "axium", domain: "media_player", multiple: true },
-        },
+        selector: zoneOptions.length
+          ? { select: { multiple: true, mode: "list", options: zoneOptions } }
+          : { entity: { integration: "axium", domain: "media_player", multiple: true } },
       },
       { name: "name", selector: { text: {} } },
     ];

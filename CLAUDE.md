@@ -243,23 +243,25 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   so routing/toggle is unchanged. **Ownership is per-amp (the corrected, honest model):** each stream
   column owns **only its own amp's zones** (`Axium 1` → 1-8, `Axium 2` → 9-16; `.cell.blank` for the
   rest) — an amp's stream can NEVER play another amp's zones, so there's no "master spans all". **Zones
-  are ordered by `zone_number`** (1..16+) via `_zoneNum`. **Highlighting** (`_streamCellActive`) is now
-  trivial: a stream cell only exists for the zone's own amp, so the zone lights there whenever it's
-  powered on and on the Media Player. **Tapping a stream cell** (`_route(zone, src, ampId)`): the room's
-  *active* cell → turn that room off; else put it on the Media Player and `media_play` (resume) that
-  amp's stream. **Tapping a stream header** opens `_openStreamPanel(ampId)`:
-  now-playing + transport + volume driving that amp's MA player (`_ampStreamPlayerByName(amp name)`), a
-  **preset dropdown** (`_applyPresetToStream`: start the amp's stream, its own preset rooms → Media
-  Player, drop the amp's others), and — for whole-home — a **scope select** (`.scopesel`: "this amp
-  only" / "all amps") above an **inline "Browse Music Assistant"** drill-down (`_streamBrowseToggle`/
-  `_streamBrowseTo`/`_streamPlay`, via WS `media_player/browse_media` on the amp's MA player). Picking a
-  playable item calls `play_media` (enqueue replace) on **this amp** or, when scope=all, on **every**
-  amp's MA player — the only whole-home mechanism possible (amps can't be synced; see the media-player
-  note above), so it starts the same content everywhere with a little drift. **scope=all also puts
-  EVERY zone on the Media Player source** (`select_source`), because an amp streaming to no
-  on-Media-Player zone plays silently — so "all amps" is truly whole-home (all rooms). Shows a "rename
-  the MA player to <amp name>" hint when unmatched. `_refreshPanel` dispatches to `_refreshStreamPanel`
-  for `type:"stream"`.
+  rest) — an amp's stream can NEVER play another amp's zones, so there's no "master spans all".
+  **Highlighting** (`_streamCellActive`) is now trivial: a stream cell only exists for the zone's own
+  amp, so the zone lights there whenever it's powered on and on the Media Player. **Tapping a stream
+  cell** (`_route(zone, src, ampId)`): the room's *active* cell → turn that room off; else put it on the
+  Media Player and `media_play` (resume) that amp's stream. **Tapping a stream header** opens
+  `_openStreamPanel(ampId)`: now-playing + transport + volume driving that amp's MA player
+  (`_ampStreamPlayerByName(amp name)`), a **preset dropdown** (`_applyPresetToStream`: start the amp's
+  stream, its own preset rooms → Media Player, drop the amp's others), and a **Browse Music Assistant**
+  button (native `hass-more-info` on the amp's MA player). Shows a "rename the MA player to <amp name>"
+  hint when unmatched. `_refreshPanel` dispatches to `_refreshStreamPanel` for `type:"stream"`.
+  **NO "play on all amps"/whole-home** — it was built then REMOVED: the two amps can't be time-synced
+  (see the media-player note), so playing the same content on both drifts badly and is useless. A single
+  external streamer (e.g. WiiM) feeding all zone inputs is the real whole-home path, not the control
+  integration.
+  **Zone ordering:** every card lists zones by physical `zone_number` (1..16+) via module helpers
+  `axiumZoneNumber`/`axiumSortZones` (matrix/source/volumes/sleep/alarm-add). Card editors' "zones to
+  show" is a **sorted `select`** (not the HA entity picker, which can't be ordered) via
+  `axiumZoneSelectOptions`, so the config lists zones 1..16 too. Sleep rows sort by the zone number
+  parsed from the timer entity id (`_sleepZoneNum`).
   Matrix **corner power button** (`.allpower`, `_toggleAllPower`): if any zone is on → `turn_off` all,
   else `turn_on` all; highlighted `.on` when any is on. The **alarms card** Add form (collapsed until
   `+ Add alarm`; `.addform[hidden]` needs its own display:none rule since `.addform{display:flex}` beats
@@ -373,11 +375,17 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   and the final `change` still fires. Filterable via its own editor (`axium-volumes-card-editor`:
   hub/zones/name) — the `zones` whitelist (empty = all). Reads/writes only the zones'
   media_player state.
-- **"Media Player" source is shown as the amp streams everywhere**: `axiumSourceChoices`
-  relabels the internal Media Player source (id ≥ `STREAM_SOURCE_MIN`) to the amp device names
-  joined (`axiumAmpNames`, master first → e.g. "Axium 1 / Axium 2"), matching the matrix's
-  per-amp stream columns. So the matrix editor's Sources filter and the source-card editor's
-  source dropdown no longer say "Media Player".
+- **The internal Media Player source is SPLIT per amp everywhere** (id ≥ `STREAM_SOURCE_MIN`):
+  `axiumSourceChoices` emits **one choice per amp** ("Axium 1", "Axium 2" — NOT one combined
+  "Media Player" or "Axium 1 / Axium 2"), each amp-scoped by a 3-part token
+  `<hub>|<sid>|<ampId>` (analog sources keep the 2-part `<hub>|<sid>`). `axiumAmps(hass, hubId)`
+  (free fn, master first, with `zones`) backs this and `axiumAmpNames`. **Matrix editor** Sources
+  filter values are `stream:<ampId>` for streams (`String(id)` for analog); `_columns()` filters
+  each per-amp stream column by `stream:<ampId>` (a legacy numeric Media-Player id whitelists all
+  streams — migration), analog by id — the whitelist is applied in `_columns()`, not `_sources()`
+  (`_sourceFilter()`). **Source-card editor**: picking a stream carries `ampId` into the config;
+  the source card's `_zones()` then scopes to that amp's zones (`_zoneAmpId`), so a source card for
+  "Axium 1" shows only zones 1-8. Editor `_changed`/`_currentToken` round-trip the `ampId`.
 - **Stream-panel transport is a hardware limitation**: the amp's DLNA renderer only honours
   play/pause/next/prev when Music Assistant *owns the queue* (started via `play_media`); for
   externally-started or direct-push playback pause is a no-op and next *stops* the stream, and
