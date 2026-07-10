@@ -311,6 +311,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # user's own name_by_user still wins for display.
     if primary_amp.name != "Axium 1" and not primary_amp.name_by_user:
         device_registry.async_update_device(primary_amp.id, name="Axium 1")
+    # One-time hub/amp split migration: before the split the hub device carried the
+    # AMP's user name (name_by_user, e.g. "Axium 1"). Move it onto the new primary
+    # amp device and clear it off the hub, so the hub shows its own name (entry
+    # title, e.g. "Axium Hub") and the amp keeps the name you gave it. Guarded by a
+    # flag so a later genuine hub rename is never clobbered.
+    if not entry.data.get("_hub_amp_split_named"):
+        if hub.name_by_user and not primary_amp.name_by_user:
+            device_registry.async_update_device(
+                primary_amp.id, name_by_user=hub.name_by_user
+            )
+        if hub.name_by_user:
+            device_registry.async_update_device(hub.id, name_by_user=None)
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, "_hub_amp_split_named": True}
+        )
     # NOTE: we deliberately do NOT force the config-entry title from the hub
     # device's name here. Doing so reverted a user's own entry-title edit back to
     # the device name on every reload ("Axium Hub" → "Axium 1"). The title and the
