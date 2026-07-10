@@ -94,9 +94,10 @@ play_notification:
     Play a sound on selected zones, then restore exactly what they were doing
     (source, volume, mute — or off). The amp can't mix audio, so this overrides
     the source for the duration; give it a louder notification volume to be
-    heard over quieter content. The sound itself is played through a renderer
-    (the amp's DLNA player or a Music Assistant player), which the amp must be
-    able to reach (it must be on your main LAN, not behind the 17037-only bridge).
+    heard over quieter content. By default the sound is pushed straight to each
+    zone's built-in amp renderer (works on every zone, no DLNA discovery needed),
+    so the amp must be able to reach Home Assistant on your main LAN. Set a
+    Renderer only to route through a specific media_player instead.
   fields:
     hub:
       name: Amplifier
@@ -132,17 +133,21 @@ play_notification:
           max: 100
           unit_of_measurement: "%"
     media_player:
-      name: Renderer
+      name: Renderer (optional override)
       description: >-
-        The media_player that plays the sound (the amp's DLNA renderer or a
-        Music Assistant player). Its zones are the Axium zones selected above.
+        Leave empty to push the sound directly to each zone's amp renderer.
+        Set a media_player (a specific DLNA renderer or Music Assistant player)
+        only to route the sound through it instead.
       required: false
       selector:
         entity:
           domain: media_player
     media_content_id:
       name: Sound
-      description: Media content id / URL of the sound (e.g. a chime or TTS).
+      description: >-
+        Media content id / URL of the sound (a chime, a media-source id, or a
+        TTS url). Home Assistant serves it to the amp, so any HA-reachable media
+        works.
       required: false
       selector:
         text:

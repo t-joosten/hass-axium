@@ -11,14 +11,18 @@ from __future__ import annotations
 import asyncio
 from functools import partial
 import logging
+import mimetypes
 
 import voluptuous as vol
 
+from homeassistant.components import media_source
+from homeassistant.components.media_player import async_process_play_media_url
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
+from . import dlna
 from .const import (
     CMD_MUTE,
     CMD_POWER,
@@ -30,8 +34,10 @@ from .const import (
     POWER_OFF,
     SOURCE_FLAG_TURN_ON,
     SOURCE_MEDIA_PLAYER_BYTE,
+    UNIT_KEY,
+    ZONE_KEY,
 )
-from .helpers import get_alarms, get_presets
+from .helpers import amp_zone_positions, get_alarms, get_presets, get_zones
 from .protocol import level_to_volume
 
 _LOGGER = logging.getLogger(__name__)
@@ -137,6 +143,87 @@ _NOTIFY_LOCKS: dict[str, asyncio.Lock] = {}
 _DONE_STATES = frozenset({"idle", "off", "standby", "unavailable", "unknown"})
 
 
+def _renderer_url_for_zone(controller, entry: ConfigEntry, zone: int) -> str | None:
+    """Return a zone's amp DLNA AVTransport control URL, or None if unknown.
+
+    Each amp serves one MediaRenderer per physical channel at
+    ``http://<amp-ip>/upnp/av_transport_ctrl<index>`` (index = channel - 1). The
+    channel comes from the per-amp zone position; the amp IP is the connected
+    host for the primary, else the expansion unit's discovered IP (0xB9).
+    """
+    zones = get_zones(entry)
+    position = amp_zone_positions(zones).get(zone)
+    if position is None:
+        return None
+    unit_id = next((z.get(UNIT_KEY) for z in zones if z[ZONE_KEY] == zone), None)
+    if unit_id is None or unit_id == controller.primary_unit_id:
+        ip = controller.host
+    else:
+        unit = controller.unit(unit_id)
+        ip = unit.ip if unit else None
+    if not ip:
+        return None
+    return f"http://{ip}/upnp/av_transport_ctrl{position - 1}"
+
+
+async def _resolve_media(
+    hass: HomeAssistant, content_id: str, content_type: str | None
+) -> tuple[str, str]:
+    """Resolve a media_content_id to an absolute (amp-reachable) URL and mime.
+
+    Media-source ids are resolved and the result signed via
+    ``async_process_play_media_url`` so the amp can fetch it from HA without a
+    session. The mime is taken from the content type if it looks like one, else
+    guessed from the URL (the DIDL needs a real mime for picky renderers).
+    """
+    if media_source.is_media_source_id(content_id):
+        item = await media_source.async_resolve_media(hass, content_id, None)
+        content_id = item.url
+        if not content_type:
+            content_type = item.mime_type
+    url = async_process_play_media_url(hass, content_id)
+    mime = content_type if content_type and "/" in content_type else None
+    if not mime:
+        mime = mimetypes.guess_type(url.split("?", 1)[0])[0] or "audio/mpeg"
+    return url, mime
+
+
+async def _wait_dlna_done(
+    hass: HomeAssistant,
+    urls: list[str],
+    start_timeout: float = 15.0,
+    max_wait: float = 300.0,
+) -> None:
+    """Wait for pushed renderers to start, then for all of them to finish.
+
+    Polls each renderer's AVTransport state directly (no HA entity exists for
+    them). Mirrors ``_wait_media_done``: a grace period to start, then end only
+    after a run of samples where none is still active.
+    """
+    waited = 0.0
+    while waited < start_timeout:
+        states = [await dlna.async_transport_state(hass, u) for u in urls]
+        if any(s in dlna.ACTIVE_STATES for s in states):
+            break
+        await asyncio.sleep(0.4)
+        waited += 0.4
+    else:
+        return  # never started
+
+    idle_streak = 0
+    waited = 0.0
+    while waited < max_wait:
+        states = [await dlna.async_transport_state(hass, u) for u in urls]
+        if any(s in dlna.ACTIVE_STATES for s in states):
+            idle_streak = 0
+        else:
+            idle_streak += 1
+            if idle_streak >= 2:
+                return
+        await asyncio.sleep(0.5)
+        waited += 0.5
+
+
 async def _wait_media_done(
     hass: HomeAssistant,
     renderer: str,
@@ -218,6 +305,9 @@ async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> No
             state = controller.zone_state(zone)
             snapshot[zone] = (state.power, state.source, state.volume, state.muted)
 
+        renderer = call.data.get("media_player")
+        content_id = call.data.get("media_content_id")
+        pushed_urls: list[str] = []
         try:
             # Override: power on, unmute, select the source, set the volume.
             for zone in zones:
@@ -227,39 +317,67 @@ async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> No
             for zone in zones:
                 await controller.async_request_zone_state(zone)
 
-            # Play the sound (only through a renderer that exists), then wait.
-            renderer = call.data.get("media_player")
-            content_id = call.data.get("media_content_id")
-            playing = False
-            if renderer and content_id:
-                if hass.states.get(renderer) is None:
-                    _LOGGER.warning(
-                        "axium.play_notification: renderer %s not found — "
-                        "overriding the zones without audio, then restoring",
-                        renderer,
-                    )
-                else:
-                    await hass.services.async_call(
-                        "media_player",
-                        "play_media",
-                        {
-                            "entity_id": renderer,
-                            "media_content_id": content_id,
-                            "media_content_type": call.data.get(
-                                "media_content_type", "music"
-                            ),
-                        },
-                        blocking=True,
-                    )
-                    playing = True
+            played_via_ha = False
+            if content_id and renderer and hass.states.get(renderer) is not None:
+                # Optional override: route through a given HA renderer / MA player.
+                await hass.services.async_call(
+                    "media_player",
+                    "play_media",
+                    {
+                        "entity_id": renderer,
+                        "media_content_id": content_id,
+                        "media_content_type": call.data.get(
+                            "media_content_type", "music"
+                        ),
+                    },
+                    blocking=True,
+                )
+                played_via_ha = True
+            elif content_id:
+                # Default: push the sound straight to each zone's amp renderer —
+                # works for every zone with no DLNA discovery needed.
+                media_url, mime = await _resolve_media(
+                    hass, content_id, call.data.get("media_content_type")
+                )
+                for zone in zones:
+                    url = _renderer_url_for_zone(controller, entry, zone)
+                    if url is None:
+                        _LOGGER.warning(
+                            "axium.play_notification: renderer URL unknown for "
+                            "zone %s (amp IP not discovered) — no audio there",
+                            zone,
+                        )
+                        continue
+                    try:
+                        await dlna.async_push(hass, url, media_url, mime=mime)
+                        pushed_urls.append(url)
+                    except Exception as err:  # noqa: BLE001 - keep the rest going
+                        _LOGGER.warning(
+                            "axium.play_notification: push to zone %s (%s) "
+                            "failed: %s",
+                            zone,
+                            url,
+                            err,
+                        )
+            else:
+                _LOGGER.warning(
+                    "axium.play_notification: no media_content_id — overriding "
+                    "the zones without audio, then restoring"
+                )
+
             duration = call.data.get("duration")
             if duration is not None:
                 await asyncio.sleep(duration)
-            elif playing:
+            elif played_via_ha:
                 await _wait_media_done(hass, renderer)
+            elif pushed_urls:
+                await _wait_dlna_done(hass, pushed_urls)
             else:
                 await asyncio.sleep(5)
         finally:
+            # Silence any renderers we pushed to before switching sources back.
+            for url in pushed_urls:
+                await dlna.async_stop(hass, url)
             # Always restore each zone, even if playback errored, so a bad or
             # missing renderer can never leave a zone stuck on the notification.
             for zone in zones:

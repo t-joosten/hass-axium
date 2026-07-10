@@ -241,18 +241,27 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `zones`/`presets`, then restores each zone **exactly** (power/source/volume/mute, or off).
   Snapshots `controller.zone_state` (inside a per-entry `asyncio.Lock` so queued calls capture
   the *restored* state), overrides via `controller.async_activate_zone(..., unmute=True)` (the
-  shared primitive the alarm also uses), plays the sound via `media_player.play_media` on a
-  given `renderer` (the amp's DLNA player or an MA player), waits (`_wait_media_done` waits for
-  the renderer to *start* — generous budget — then for a run of confirmed non-playing samples so
-  a buffering blip doesn't cut it off; or a fixed `duration`; or ~5s), then restores from the
-  snapshot. Restore is in a `finally` and play is skipped if the renderer entity doesn't exist
-  (`hass.states.get`). Restore is state-accurate: only `power is False` powers the zone back off
-  (unknown `None` power is left on, not silenced), and an off zone's source/volume/mute are
-  restored too (source without the turn-on bit) so its next power-on is correct. **The amp can't
-  mix audio** (a zone = one source), so it *overrides* the source — no true ducking; the louder
-  notification volume + restore is the equivalent. Uses only existing commands (no sim change);
-  restore is exact because `level_to_volume(volume_to_level(b)) == b`. Needs the amp on the main
-  LAN so HA can reach its DLNA renderer (the 17037-only bridge doesn't pass UPnP).
+  shared primitive the alarm also uses). **Default playback = direct UPnP push** (`dlna.py`,
+  `async_push` = `SetAVTransportURI`+`Play`) to each zone's own amp renderer at
+  `http://<amp-ip>/upnp/av_transport_ctrl<index>` (`_renderer_url_for_zone`: index = per-amp
+  channel from `amp_zone_positions` − 1; amp IP = `controller.host` for the primary else the
+  expansion `UnitInfo.ip`). **No DLNA discovery needed** — the amp only advertises one renderer per
+  amp over SSDP, so auto-discovery can't reach all 16; the push does. Media is resolved+signed via
+  `_resolve_media` (`media_source.async_resolve_media` → `async_process_play_media_url`, mime from
+  content-type-if-mimey else guessed) so the amp fetches it from HA. Waits with `_wait_dlna_done`
+  (polls each renderer's `GetTransportInfo` — start grace, then a run of non-`ACTIVE_STATES`
+  samples), or a fixed `duration`, or ~5s. **Loudness is the control protocol (0x04) on the Axium
+  zone, NOT the renderer's RenderingControl** — the amp stores a DLNA volume but doesn't apply it to
+  output (verified: `SetVolume` changes the reported value, not the sound), so notification volume
+  is set on the zone. Optional `media_player` overrides the direct push to route through a given HA
+  renderer / MA player (`_wait_media_done` for that path). Restore is in a `finally` (which also
+  `dlna.async_stop`s every pushed renderer first, so audio halts before the source switches back):
+  only `power is False` powers the zone back off (unknown `None` left on), and an off zone's
+  source/volume/mute are restored too (source without the turn-on bit) so its next power-on is
+  correct. **The amp can't mix audio** (a zone = one source), so it *overrides* — no true ducking.
+  Uses only existing control commands for override/restore (no sim change; DLNA push is real-amp
+  only — sim is control-protocol-only). Needs the amp on the main LAN so HA can reach its HTTP/UPnP
+  port (the 17037-only bridge doesn't pass UPnP). Verified push on AX-800-X fw 5.6.0.
 - **Time-left is exposed as `device_class: timestamp` sensors** (automation-usable):
   `AxiumAlarmSensor` (per alarm, next fire via `helpers.next_alarm_fire`; recomputes on a
   minute tick + `SIGNAL_ALARM_UPDATE` from the switch) and `AxiumSleepSensor` (per zone,

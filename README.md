@@ -461,11 +461,13 @@ source at a time), it **overrides** the source for the notification rather than
 ducking under it; give the notification its own (louder) volume so it's heard,
 and each zone's original volume is restored afterwards.
 
-The sound itself is played through a **renderer** — the amp's internal Media
-Player (as a DLNA device) or a Music Assistant player — so **the amp must be on a
-network Home Assistant can reach for streaming** (i.e. your main LAN, not behind
-the 17037-only bridge). This integration handles the amplifier side (which zones,
-volume, source, and the exact restore).
+The sound is **pushed straight to each zone's built-in amp renderer** over UPnP —
+no DLNA discovery, no Music Assistant, and it works on **every** zone (the amp
+only advertises one of its per-zone renderers, so auto-discovery alone can't
+reach them all). Home Assistant serves the media, so the amp just needs to reach
+HA on your **main LAN**. This integration handles the amplifier side too (which
+zones, volume, source, and the exact restore). Loudness is set on the Axium zone,
+not the renderer — the amp stores a DLNA volume but doesn't apply it to output.
 
 ```yaml
 # Doorbell → chime in the hallway + kitchen, then restore
@@ -481,14 +483,14 @@ actions:
         - media_player.hallway
         - media_player.kitchen
       volume: 55                       # notification volume (%)
-      media_player: media_player.axium_dlna   # the amp's DLNA renderer
       media_content_id: media-source://media_source/local/doorbell.mp3
-      media_content_type: music
 ```
 
 You can target `presets` (by name) instead of / in addition to `zones`, set a
-fixed `duration` instead of waiting for the renderer, or point `source` at an
-external input if the sound comes from a device wired to one of S1–S8. Overlapping
+fixed `duration` instead of waiting for the sound to finish, or point `source` at
+an external input if the sound comes from a device wired to one of S1–S8. Set the
+optional `media_player` only if you want to route the sound through a specific
+renderer / Music Assistant player instead of the direct push. Overlapping
 notifications are serialised per amplifier so the save/restore never tangles.
 
 ## Dashboard card (Axium Source Card)
