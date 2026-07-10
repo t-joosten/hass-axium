@@ -337,8 +337,12 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   <amp>` when the alarm has `media`, else the configured source name — never the raw protocol
   byte or content id. This needs the alarm sensor to expose `alarm_media`/`alarm_media_title`/
   `alarm_media_player` (the picker stores `media_title` alongside `media`; `set_alarm`
-  service + config carry it). The alarm scheduler plays the wake media with
-  `enqueue: "replace"` so it interrupts current playback instead of queueing behind it. The sleep
+  service + config carry it). **`helpers.get_alarms` must preserve the media fields** — it
+  rebuilds each alarm dict from a fixed key list, so anything omitted there is silently dropped
+  on every read (this bit us: a wake song was stored but stripped by `get_alarms` before the
+  scheduler/sensor saw it, so the alarm only changed volume). The alarm scheduler plays the wake
+  media with `enqueue: "replace"` so it interrupts current playback instead of queueing behind
+  it. The sleep
   card is section-configurable via its own
   editor (`axium-sleep-card-editor`): `sections` = subset of `["all","zones","presets"]`
   (default all). "presets" rows apply a sleep timer to every zone in a `axium_presets`

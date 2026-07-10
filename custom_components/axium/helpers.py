@@ -304,8 +304,9 @@ def get_alarms(entry: ConfigEntry) -> list[dict[str, Any]]:
     """Return the configured wake-to-music alarms.
 
     Each alarm is ``{name, time: "HH:MM", days: [0..6 Mon..Sun], zones:
-    [entity_id], source: int, volume: 0..100, enabled: bool}``. Malformed
-    entries are dropped.
+    [entity_id], source: int, volume: 0..100, enabled: bool}`` plus the optional
+    Music Assistant wake fields ``media``/``media_type``/``media_title``/
+    ``media_player`` (empty strings when unset). Malformed entries are dropped.
     """
     raw = entry.options.get(CONF_ALARMS, [])
     if not isinstance(raw, list):
@@ -334,6 +335,13 @@ def get_alarms(entry: ConfigEntry) -> list[dict[str, Any]]:
                 "source": source,
                 "volume": volume,
                 "enabled": bool(item.get("enabled", True)),
+                # Optional Music Assistant wake fields — preserved so the alarm
+                # scheduler and the card can see them (dropping them here meant a
+                # wake song was stored but never played).
+                "media": str(item.get("media", "") or ""),
+                "media_type": str(item.get("media_type", "") or ""),
+                "media_title": str(item.get("media_title", "") or ""),
+                "media_player": str(item.get("media_player", "") or ""),
             }
         )
     return alarms
