@@ -186,8 +186,11 @@ function axiumAmps(hass, hubId) {
     if (!zdev) continue;
     const amp = devs[zdev.via_device_id] || zdev;
     if (!byId.has(amp.id)) {
+      // The primary amp device identifier has no "_unit_" (the expansions do);
+      // it is the master. (Since the hub/amp split the primary amp is its own
+      // "…_amp_primary" device, not the hub, so don't match the hub id here.)
       const master = (amp.identifiers || []).some(
-        (t) => t[0] === "axium" && t[1] === hubId
+        (t) => t[0] === "axium" && !String(t[1]).includes("_unit_")
       );
       byId.set(amp.id, {
         id: amp.id,
@@ -2924,15 +2927,18 @@ class AxiumAlarmsCard extends HTMLElement {
     this._toggleAdd();
   }
 
-  /** The Music Assistant player named after the hub (master) amp — the stream a
-   *  wake playlist plays on (stack-wide). Null until it's renamed to match. */
+  /** The primary (master) amp's display name — since the hub/amp split this is the
+   *  "…_amp_primary" device, NOT the hub. Wake media plays on this amp's stream. */
+  _primaryAmpName() {
+    const amps = axiumAmps(this._hass, this._hub());
+    const master = amps.find((a) => a.master) || amps[0];
+    return (master && master.name) || "";
+  }
+
+  /** The Music Assistant player named after the primary (master) amp — the stream a
+   *  wake playlist plays on. Null until the MA player is renamed to match. */
   _masterStreamPlayer() {
-    const hubId = this._hub();
-    const devs = this._hass.devices || {};
-    const hub = Object.values(devs).find((d) =>
-      (d.identifiers || []).some((t) => t[0] === "axium" && t[1] === hubId)
-    );
-    const name = hub && (hub.name_by_user || hub.name);
+    const name = this._primaryAmpName();
     if (!name) return null;
     const want = name.trim().toLowerCase();
     const reg = this._hass.entities || {};
@@ -2947,15 +2953,6 @@ class AxiumAlarmsCard extends HTMLElement {
     return null;
   }
 
-  /** The hub (master) amp device's display name. */
-  _hubName() {
-    const hubId = this._hub();
-    const hub = Object.values(this._hass.devices || {}).find((d) =>
-      (d.identifiers || []).some((t) => t[0] === "axium" && t[1] === hubId)
-    );
-    return (hub && (hub.name_by_user || hub.name)) || "";
-  }
-
   /** One-line "what this alarm plays": a wake song (with its amp stream) or the
    *  configured source name — never the raw protocol byte or content id. */
   _alarmSourceLabel(a) {
@@ -2966,7 +2963,7 @@ class AxiumAlarmsCard extends HTMLElement {
       let amp = "";
       if (mp && this._hass.states[mp])
         amp = this._hass.states[mp].attributes.friendly_name || "";
-      if (!amp) amp = this._hubName();
+      if (!amp) amp = this._primaryAmpName();
       label = "♪ " + title + (amp ? " · " + amp : "");
     } else {
       const s = (this._sources() || []).find((x) => x.id === a.alarm_source);

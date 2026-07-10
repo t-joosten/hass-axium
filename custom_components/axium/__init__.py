@@ -544,14 +544,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 @callback
 def _master_stream_player(hass: HomeAssistant, entry: ConfigEntry) -> str | None:
-    """The Music Assistant player named after the hub (master) amp device.
+    """The Music Assistant player named after the PRIMARY AMP device.
 
-    The master's Media Player stream is stack-wide, so playing a wake playlist on
-    it reaches every zone the alarm activated. Matched by the hub device's name
-    (the user renames the MA player to e.g. "Axium 1").
+    Wake media plays on the primary amp's Media Player stream. Matched by that
+    device's name (the user renames the MA player to e.g. "Axium 1"). Since the
+    hub/amp split the primary amp is its own "…_amp_primary" device, not the hub;
+    fall back to the hub identifier for a pre-split entry.
     """
-    hub = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, entry.entry_id)})
-    name = hub and (hub.name_by_user or hub.name)
+    reg = dr.async_get(hass)
+    amp = reg.async_get_device(
+        identifiers={(DOMAIN, f"{entry.entry_id}_amp_primary")}
+    ) or reg.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+    name = amp and (amp.name_by_user or amp.name)
     if not name:
         return None
     want = name.strip().lower()
