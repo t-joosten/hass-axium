@@ -285,6 +285,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         model="Hub",
         configuration_url=f"http://{host}",
     )
+    # The hub is a logical container now; the amp's MAC/connections belong on the
+    # primary amp device. Clear any left on the hub from before the hub/amp split,
+    # so the primary amp can claim the MAC — otherwise `async_update_device` raises
+    # a DeviceConnectionCollisionError on every extended-info reply (flapping the
+    # connection until the callback guard catches it).
+    if hub.connections:
+        device_registry.async_update_device(hub.id, new_connections=set())
     # The primary amp is its OWN device ("…_amp_primary"), nested under the hub,
     # just like the expansion amps — so the hub ("Axium Hub") and the primary amp
     # ("Main") can carry independent names. Its identifier has no "_unit_" so the
