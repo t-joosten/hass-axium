@@ -312,7 +312,9 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   alarm zones on an expansion amp are activated + faded but won't hear the song (would need play_media
   on each activated zone's own amp — TODO if wake-on-expansion is wanted). The alarms card's Add form has an inline MA browser (`_openMediaBrowse`/`_browseTo`/
   `_pickMedia` via WS `media_player/browse_media` on the master player; drill folders, pick a playable
-  item) that stores `media`/`media_type` through `axium.set_alarm`. Master arm/disarm =
+  item) that stores `media`/`media_type` through `axium.set_alarm`. It also has a **search box**
+  (`_searchMedia` via WS `media_player/search_media`, which returns browse-media-shaped items under
+  `result.result`); browse + search share `_renderMediaItems`/`_renderCrumbs`. Master arm/disarm =
   `AxiumAlarmsSwitch` (switch.py, runtime flag `hass.data[DATA_ALARMS_ENABLED]`).
 - **Notifications**: `axium.play_notification` service (services.py/.yaml) — plays a sound on
   `zones`/`presets`, then restores each zone **exactly** (power/source/volume/mute, or off). A

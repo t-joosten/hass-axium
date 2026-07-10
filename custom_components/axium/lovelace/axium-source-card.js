@@ -2980,31 +2980,40 @@ class AxiumAlarmsCard extends HTMLElement {
     }
     form._maPlayer = player;
     box.hidden = false;
+    box.innerHTML = `
+      <div class="msearch">
+        <input type="search" class="msearchin" placeholder="Search Music Assistant…">
+        <button type="button" class="msearchbtn"><ha-icon icon="mdi:magnify"></ha-icon></button>
+      </div>
+      <div class="crumbs"></div>
+      <div class="mlist">Loading…</div>`;
+    const input = box.querySelector(".msearchin");
+    const run = () => {
+      const q = input.value.trim();
+      if (q) this._searchMedia(form, q);
+      else this._browseTo(form, undefined, undefined, []);
+    };
+    box.querySelector(".msearchbtn").addEventListener("click", run);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        run();
+      }
+    });
     this._browseTo(form, undefined, undefined, []);
   }
 
-  async _browseTo(form, id, type, crumbs) {
-    const box = form.querySelector(".mediabrowse");
-    box.innerHTML = `<div class="crumbs"></div><div class="mlist">Loading…</div>`;
-    let res;
-    try {
-      res = await this._hass.callWS({
-        type: "media_player/browse_media",
-        entity_id: form._maPlayer,
-        ...(id ? { media_content_id: id, media_content_type: type } : {}),
-      });
-    } catch (err) {
-      box.querySelector(".mlist").textContent = "Couldn't browse Music Assistant.";
-      return;
-    }
-    const cr = box.querySelector(".crumbs");
+  // Render the ⌂ + breadcrumb trail into the browser box.
+  _renderCrumbs(form, crumbs) {
+    const cr = form.querySelector(".mediabrowse .crumbs");
+    if (!cr) return;
     cr.innerHTML = "";
     const home = document.createElement("button");
     home.className = "crumb";
     home.textContent = "⌂";
     home.addEventListener("click", () => this._browseTo(form, undefined, undefined, []));
     cr.appendChild(home);
-    crumbs.forEach((c, i) => {
+    (crumbs || []).forEach((c, i) => {
       const b = document.createElement("button");
       b.className = "crumb";
       b.textContent = "› " + c.title;
@@ -3013,26 +3022,66 @@ class AxiumAlarmsCard extends HTMLElement {
       );
       cr.appendChild(b);
     });
-    const list = box.querySelector(".mlist");
+  }
+
+  // Render a list of media items (browse children or search hits): a playable
+  // item is picked, an expandable one drills in.
+  _renderMediaItems(form, items, crumbs) {
+    const list = form.querySelector(".mediabrowse .mlist");
+    if (!list) return;
     list.innerHTML = "";
-    for (const ch of res.children || []) {
+    for (const ch of items || []) {
       const it = document.createElement("button");
       it.className = "mitem";
       it.textContent = (ch.can_play ? "♪ " : "📁 ") + ch.title;
       it.addEventListener("click", () => {
-        if (ch.can_play) {
-          this._pickMedia(form, ch);
-        } else if (ch.can_expand) {
+        if (ch.can_play) this._pickMedia(form, ch);
+        else if (ch.can_expand)
           this._browseTo(form, ch.media_content_id, ch.media_content_type, [
-            ...crumbs,
+            ...(crumbs || []),
             { title: ch.title, id: ch.media_content_id, type: ch.media_content_type },
           ]);
-        }
       });
       list.appendChild(it);
     }
-    if (!(res.children || []).length)
+    if (!(items || []).length)
       list.innerHTML = `<div class="empty">Nothing here.</div>`;
+  }
+
+  async _browseTo(form, id, type, crumbs) {
+    const list = form.querySelector(".mediabrowse .mlist");
+    if (list) list.textContent = "Loading…";
+    let res;
+    try {
+      res = await this._hass.callWS({
+        type: "media_player/browse_media",
+        entity_id: form._maPlayer,
+        ...(id ? { media_content_id: id, media_content_type: type } : {}),
+      });
+    } catch (err) {
+      if (list) list.textContent = "Couldn't browse Music Assistant.";
+      return;
+    }
+    this._renderCrumbs(form, crumbs);
+    this._renderMediaItems(form, res.children, crumbs);
+  }
+
+  async _searchMedia(form, query) {
+    const list = form.querySelector(".mediabrowse .mlist");
+    if (list) list.textContent = "Searching…";
+    let res;
+    try {
+      res = await this._hass.callWS({
+        type: "media_player/search_media",
+        entity_id: form._maPlayer,
+        search_query: query,
+      });
+    } catch (err) {
+      if (list) list.textContent = "Search failed.";
+      return;
+    }
+    this._renderCrumbs(form, []);
+    this._renderMediaItems(form, (res && res.result) || [], []);
   }
 
   _pickMedia(form, ch) {
@@ -3054,8 +3103,21 @@ AxiumAlarmsCard.styles = `
   .mediasel { color: var(--primary-color); font-size: 0.9rem; }
   .mediabrowse {
     border: 1px solid var(--divider-color); border-radius: 8px; padding: 6px;
-    max-height: 240px; overflow-y: auto; background: var(--secondary-background-color);
+    max-height: 300px; overflow-y: auto; background: var(--secondary-background-color);
   }
+  .msearch { display: flex; gap: 6px; margin-bottom: 6px; }
+  .msearchin {
+    flex: 1 1 auto; min-width: 0; font: inherit; padding: 6px 8px; border-radius: 8px;
+    border: 1px solid var(--divider-color); background: var(--card-background-color);
+    color: var(--primary-text-color);
+  }
+  .msearchbtn {
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--divider-color); border-radius: 8px; cursor: pointer;
+    background: var(--card-background-color); color: var(--primary-text-color);
+    padding: 0 10px; --mdc-icon-size: 20px;
+  }
+  .msearchbtn:hover { border-color: var(--primary-color); color: var(--primary-color); }
   .crumbs { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 4px; }
   .crumb {
     background: none; border: none; color: var(--secondary-text-color);
