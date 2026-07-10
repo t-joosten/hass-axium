@@ -156,8 +156,20 @@ identify command, or a firewall is blocking the reply.
 >
 > To stop the IP moving at all, the amplifier device has a **Static IP address**
 > switch: turn it on to pin the amp's current address as static (so a reboot
-> can't hand it a new one). Turn it back to DHCP **before** moving the amp to a
-> different network/subnet, or its fixed address won't be valid there.
+> can't hand it a new one).
+>
+> ⚠️ **Turn Static IP back to DHCP _before_ moving an amp to a different
+> network/subnet.** A static address is only valid on the subnet it was set on —
+> move the amp to another router/subnet with static still on and it keeps the old
+> address, which is invalid there, so it becomes **unreachable** (it won't get a
+> DHCP lease and won't appear on the new network).
+>
+> **If you already moved it and it vanished:** plug the amp back into the
+> **original** network (where its static address is valid), turn the **Static IP
+> address** switch **off** (→ DHCP), then move it to the new network — it'll pull
+> a fresh DHCP lease there. (It keeps its address on a DHCP renewal, so turning
+> the switch off doesn't drop the connection while it's still on the old network.)
+> Then use **Reconfigure** to point the integration at the amp's new IP.
 
 That's it — **all of the amplifier's zones are added automatically.** On
 connection the integration asks the amplifier which zones it has and creates a

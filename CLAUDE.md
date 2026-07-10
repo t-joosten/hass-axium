@@ -144,6 +144,17 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   switch toggles `async_set_network_static` which re-writes the *current* IP/subnet/DNS/router with the
   static flag set/cleared (pins the working IP; DHCP direction can move the IP → risky over the
   portproxy). Turn back to DHCP before relocating the amp to another subnet.
+- **Static-IP-across-subnets trap** (hit on real hardware): a static address is only valid on the
+  subnet it was set on. If both amps are static on the old subnet and you move them to a new
+  router/subnet, they keep the invalid address and are **unreachable** (no DHCP lease, no mDNS/SSDP).
+  Flag byte (`0x3A/03` `data[3]`): bit0 = static (`0x03` static, `0x02` DHCP; bit1 is an always-set
+  status bit — mask with `NET_FLAG_STATIC`=0x01, don't compare the whole byte). **Recovery** (verified):
+  reconnect the amps to the original subnet, clear static (switch off → `async_set_network_static(False)`,
+  or write `0x3A/03` with bit0 cleared + current addresses directly to the amp), then move — they DHCP a
+  new lease on the new subnet. The amp keeps its address on DHCP renewal, so clearing static on the old
+  subnet doesn't drop the connection. HA's switch state can lag the amp; a `config_entries/reload`
+  re-reads the config and syncs it. The primary keeps `.137.2` on the portproxy; the expansion is cleared
+  via relay. When the HA switch write's read-back lags, verify the real state with `probe.py --send 3AFF<uid>83`.
 - **Zone rename → amp**: renaming a zone's device (HA pencil) is mirrored to the amp.
   `__init__` listens for `dr.EVENT_DEVICE_REGISTRY_UPDATED`; when a zone device's
   `name_by_user` changes it calls `async_set_zone_name` (`CMD_ZONE_NAME` 0x1C, ~15-byte
