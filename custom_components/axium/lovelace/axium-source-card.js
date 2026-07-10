@@ -1743,9 +1743,9 @@ class AxiumMatrixCard extends HTMLElement {
         </div>
       </div>
       <div class="volrow">
-        <button class="iconbtn mute" title="Mute"><ha-icon icon="mdi:volume-high"></ha-icon></button>
-        <input class="slider" type="range" min="0" max="100" step="1" aria-label="Volume">
-        <span class="volval"></span>
+        <button class="iconbtn" data-v="down" title="Volume down"><ha-icon icon="mdi:volume-minus"></ha-icon></button>
+        <span class="vollbl">Room volume</span>
+        <button class="iconbtn" data-v="up" title="Volume up"><ha-icon icon="mdi:volume-plus"></ha-icon></button>
       </div>
       <div class="transport">
         <button class="iconbtn" data-t="prev" title="Previous"><ha-icon icon="mdi:skip-previous"></ha-icon></button>
@@ -1765,8 +1765,15 @@ class AxiumMatrixCard extends HTMLElement {
           psel.value = "";
         }
       });
+    // Volume is relative across the rooms playing this stream — the amp has no
+    // master volume, and the MA renderer's own volume is decoupled from output.
+    for (const b of sheet.querySelectorAll("button[data-v]")) {
+      b.addEventListener("click", () =>
+        this._streamVolume(ampId, b.dataset.v === "up" ? 1 : -1)
+      );
+    }
     if (!maId) {
-      for (const sel of [".volrow", ".transport", ".browse"]) {
+      for (const sel of [".transport", ".browse"]) {
         const el = sheet.querySelector(sel);
         if (el) el.hidden = true;
       }
@@ -1776,19 +1783,6 @@ class AxiumMatrixCard extends HTMLElement {
         `No Music Assistant player named "${amp.name}". Rename this amp's ` +
         `MA player to "${amp.name}" to control its stream here.`;
     } else {
-      const slider = sheet.querySelector(".slider");
-      slider.addEventListener("input", () => {
-        this._panel.dragging = true;
-        sheet.querySelector(".volval").textContent = `${slider.value}%`;
-        this._scheduleVolume(maId, Number(slider.value));
-      });
-      slider.addEventListener("change", () => {
-        this._setVolume(maId, Number(slider.value));
-        this._panel.dragging = false;
-      });
-      sheet.querySelector(".mute").addEventListener("click", () =>
-        this._toggleMute(maId)
-      );
       for (const b of sheet.querySelectorAll("button[data-t]")) {
         b.addEventListener("click", () => {
           const svc =
@@ -1887,6 +1881,17 @@ class AxiumMatrixCard extends HTMLElement {
       entity_id: zoneId,
       volume_level: Math.max(0, Math.min(1, pct / 100)),
     });
+  }
+
+  /** Step the volume of every room currently playing an amp's stream. */
+  _streamVolume(ampId, dir) {
+    const zones = this._zones().filter((z) => this._streamCellActive(z, ampId));
+    if (zones.length)
+      this._hass.callService(
+        "media_player",
+        dir > 0 ? "volume_up" : "volume_down",
+        { entity_id: zones }
+      );
   }
 
   _toggleMute(zoneId) {
