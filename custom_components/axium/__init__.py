@@ -12,15 +12,18 @@ from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
     async_track_time_change,
     async_track_time_interval,
 )
+from homeassistant.util import slugify
 
 from .const import (
     CMD_VOLUME,
     CONF_ALARMS,
+    CONF_PRESETS,
     CONF_UNITS,
     CONF_ZONES,
     DATA_ALARMS_ENABLED,
@@ -191,12 +194,76 @@ async def _async_register_card_resource(hass: HomeAssistant, url: str) -> bool:
     return True
 
 
+# Bump the suffix when the entity-id scheme changes; guards the one-time rename.
+_ENTITY_ID_MIGRATION = "entity_ids_prefixed_v1"
+
+
+def _zone_refs_migrated(entry: ConfigEntry, id_map: dict[str, str]) -> dict:
+    """Return entry.options with preset/alarm zone entity_ids remapped."""
+    options = dict(entry.options)
+    for key in (CONF_PRESETS, CONF_ALARMS):
+        items = options.get(key)
+        if not items:
+            continue
+        options[key] = [
+            {**item, "zones": [id_map.get(z, z) for z in item.get("zones", [])]}
+            if item.get("zones")
+            else item
+            for item in items
+        ]
+    return options
+
+
+async def _async_migrate_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """One-time: namespace every Axium entity_id as ``axium_<primary unit id>_…``.
+
+    Runs before the platforms load, so entities come up with the new ids, and
+    rewrites the zone entity_ids stored inside presets/alarms so they keep
+    pointing at the right zones. Guarded by a flag so it runs once and never
+    fights a later manual rename. Skips (retries next load) until the primary
+    unit id is known, and never overwrites an id that is already taken.
+    """
+    if entry.data.get(_ENTITY_ID_MIGRATION):
+        return
+    primary = next((u for u in get_units(entry) if u.get("primary")), None)
+    if primary is None:
+        return
+    prefix = f"axium_{int(primary[UNIT_KEY]) & 0xFFFF:04x}_"
+    registry = er.async_get(hass)
+    id_map: dict[str, str] = {}
+    for ent in er.async_entries_for_config_entry(registry, entry.entry_id):
+        uid = ent.unique_id
+        suffix = uid[len(entry.entry_id) :] if uid.startswith(entry.entry_id) else uid
+        new_entity_id = f"{ent.domain}.{prefix}{slugify(suffix)}"
+        if ent.entity_id == new_entity_id:
+            continue
+        if registry.async_get(new_entity_id) is not None:
+            _LOGGER.warning(
+                "Axium: not renaming %s -> %s (target already exists)",
+                ent.entity_id,
+                new_entity_id,
+            )
+            continue
+        registry.async_update_entity(ent.entity_id, new_entity_id=new_entity_id)
+        id_map[ent.entity_id] = new_entity_id
+    updates: dict = {"data": {**entry.data, _ENTITY_ID_MIGRATION: True}}
+    if id_map:
+        new_options = _zone_refs_migrated(entry, id_map)
+        if new_options != dict(entry.options):
+            updates["options"] = new_options
+        _LOGGER.info(
+            "Axium: renamed %d entity ids to the '%s' prefix", len(id_map), prefix
+        )
+    hass.config_entries.async_update_entry(entry, **updates)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Axium from a config entry."""
     host = entry.data[CONF_HOST]
     port = entry.data.get(CONF_PORT, DEFAULT_PORT)
 
     await _async_register_card(hass)
+    await _async_migrate_entity_ids(hass, entry)
 
     controller = AxiumController(host, port)
 

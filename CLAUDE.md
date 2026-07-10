@@ -367,6 +367,14 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
 
 ## Other
 
+- **Entity-id prefix migration** (`__init__._async_migrate_entity_ids`, guarded by
+  `_ENTITY_ID_MIGRATION` in `entry.data`): a one-time rename of every Axium entity_id to
+  `<domain>.axium_<primary unit id hex>_<suffix>` (e.g. `media_player.axium_0681_zone_1`), derived
+  from each entity's `unique_id` (strip the entry-id prefix → `slugify`). Runs before platforms load
+  so entities come up renamed; also rewrites zone entity_ids stored in **presets/alarms** options
+  (`_zone_refs_migrated`). Skips until the primary unit id is known (from `get_units`), never
+  overwrites an existing id, runs once. It does NOT touch external references (dashboards,
+  user automations/scripts, templates) — those must be updated by hand after the rename.
 - Prefer clean, self-explanatory UI over config dialogs and comma-separated inputs —
   the user has repeatedly asked to auto-detect and to avoid burying options in the
   settings wheel / global "save" flows.
