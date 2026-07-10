@@ -1279,9 +1279,8 @@ class AxiumMatrixCard extends HTMLElement {
       if (!zdev) continue;
       const amp = devs[zdev.via_device_id] || zdev;
       if (!byAmp.has(amp.id)) {
-        // The master (hub) amp's device identifier has no "_unit_" suffix; its
-        // Media Player stream is stack-wide (reaches every zone). Expansion amps
-        // only reach their own zones.
+        // The master (hub) amp's device identifier has no "_unit_" suffix. Kept
+        // only for labelling — streams are per-amp; each reaches only its own zones.
         const master = (amp.identifiers || []).some(
           (t) => t[0] === "axium" && !String(t[1]).includes("_unit_")
         );
@@ -1299,9 +1298,9 @@ class AxiumMatrixCard extends HTMLElement {
   }
 
   /** Ordered matrix columns: analog sources, then one STREAM column per amp for
-   *  the internal media player (each amp's stream is a column). The MASTER amp's
-   *  column owns ALL zones (its stream is stack-wide); an expansion amp's column
-   *  owns only its own zones. Falls back to plain media columns if amps unknown. */
+   *  the internal media player (each amp's stream is a column). Each amp's column
+   *  owns ONLY its own zones (streams are per-amp). Falls back to plain media
+   *  columns if amps unknown. */
   _columns() {
     const srcs = this._sources();
     const analog = srcs.filter((s) => s.id < STREAM_SOURCE_MIN);
@@ -1924,6 +1923,20 @@ class AxiumMatrixCard extends HTMLElement {
         media_content_type: ch.media_content_type,
         enqueue: "replace",
       });
+    }
+    // Whole-home: also put every zone on the Media Player so all rooms actually
+    // hear it (an amp streaming to no on-Media-Player zone plays silently).
+    if (all) {
+      const sid = (this._columns().find((c) => c.kind === "stream") || {}).id;
+      if (sid != null)
+        for (const z of this._zones()) {
+          const name = this._sourceNameFor(this._hass.states[z], sid);
+          if (name != null)
+            this._hass.callService("media_player", "select_source", {
+              entity_id: z,
+              source: name,
+            });
+        }
     }
     const box = this.shadowRoot.querySelector(".mediabrowse");
     if (box) box.hidden = true;

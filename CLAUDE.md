@@ -212,6 +212,10 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   **bass/treble/balance** sliders (`number.set_value`) + **loudness** and **mono** toggles
   (`switch.toggle`; both rendered by a generic `toggle()` and refreshed by iterating `.toneswitch`),
   found on the zone's device via `_toneEntities` (matched by entity-id suffix `_loudness`/`_mono`).
+  **Mono is hardware-verified** (AX-800-X: toggling `..._mono` on/off is accepted and reflected in the
+  0x0C special-features read-back) — it's the fix for a **single-speaker zone** (sums L+R so the one
+  speaker plays the full mix; balance on such a zone only changes the connected side, which is expected,
+  not a bug — the amp accepts balance −20..+20 both ways, also verified).
   Now-playing and transport
   were removed from the zone popover (they belong to the stream, not the room). Slider debounced via
   `_scheduleVolume`, live-refreshed by `_refreshPanel` from `_update` unless mid-drag (tone sliders
@@ -251,9 +255,11 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `_streamBrowseTo`/`_streamPlay`, via WS `media_player/browse_media` on the amp's MA player). Picking a
   playable item calls `play_media` (enqueue replace) on **this amp** or, when scope=all, on **every**
   amp's MA player — the only whole-home mechanism possible (amps can't be synced; see the media-player
-  note above), so it starts the same content everywhere with a little drift. Shows a "rename the MA
-  player to <amp name>" hint when unmatched. `_refreshPanel` dispatches to `_refreshStreamPanel` for
-  `type:"stream"`.
+  note above), so it starts the same content everywhere with a little drift. **scope=all also puts
+  EVERY zone on the Media Player source** (`select_source`), because an amp streaming to no
+  on-Media-Player zone plays silently — so "all amps" is truly whole-home (all rooms). Shows a "rename
+  the MA player to <amp name>" hint when unmatched. `_refreshPanel` dispatches to `_refreshStreamPanel`
+  for `type:"stream"`.
   Matrix **corner power button** (`.allpower`, `_toggleAllPower`): if any zone is on → `turn_off` all,
   else `turn_on` all; highlighted `.on` when any is on. The **alarms card** Add form (collapsed until
   `+ Add alarm`; `.addform[hidden]` needs its own display:none rule since `.addform{display:flex}` beats
