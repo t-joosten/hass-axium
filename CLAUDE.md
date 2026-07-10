@@ -237,7 +237,14 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   **all** zones (its stream reaches everything); an expansion column owns only its own zones (`.cell.blank`
   for the rest). **Highlighting is which-stream-aware** (`_streamCellActive`): a zone lights up under
   exactly ONE stream column — the expansion column when that expansion's MA player is *playing* (it's
-  overriding its zones), else the master column. **Tapping a stream header** opens `_openStreamPanel(ampId)`:
+  overriding its zones), else the master column. **Tapping a stream cell** (`_route(zone, src, ampId)`):
+  the room's *active* cell → turn that room off; else move it to that stream — a **master** cell
+  `media_pause`s the room's overriding expansion (its siblings rejoin too, per-amp) and resumes the
+  master; an **expansion** cell `media_play`s that expansion to start the break-away — then puts the
+  room on the Media Player source. (Per-zone stream selection isn't a hardware thing — a room only
+  toggles Media Player; the switch is done by controlling the *amp's* playback. Uses `media_pause` for
+  rejoin-master; may need `media_stop` if an amp doesn't fall back on pause.) **Tapping a stream header**
+  opens `_openStreamPanel(ampId)`:
   now-playing + transport + volume driving that amp's MA player (`_ampStreamPlayerByName(amp name)`) + a
   **Browse Music Assistant** button (fires `hass-more-info` → HA media browser). Shows a "rename the MA
   player to <amp name>" hint when unmatched. `_refreshPanel` dispatches to `_refreshStreamPanel` for

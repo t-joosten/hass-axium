@@ -1322,22 +1322,58 @@ class AxiumMatrixCard extends HTMLElement {
     return n ? n : id.split(".")[1].replace(/_/g, " ");
   }
 
-  _route(zoneId, src) {
+  _route(zoneId, src, ampId) {
     const st = this._hass.states[zoneId];
     const sid = Number(src);
-    // Tapping the zone's currently-active source turns the zone off (toggle).
     const on = st && !OFF_STATES.includes(st.state);
+    const play = (id, svc) =>
+      this._hass.callService("media_player", svc, { entity_id: id });
+    const enable = () => {
+      // Put the zone on the Media Player source (select_source powers it on).
+      if (!(on && this._currentSourceId(st) === sid)) {
+        const name = this._sourceNameFor(st, sid);
+        if (name != null)
+          this._hass.callService("media_player", "select_source", {
+            entity_id: zoneId,
+            source: name,
+          });
+      }
+    };
+    if (ampId) {
+      // A stream (amp) cell. Tapping the stream a room is already hearing turns
+      // that room off; otherwise move it to this stream.
+      if (this._streamCellActive(zoneId, ampId)) {
+        this._turnZoneOff(zoneId);
+        return;
+      }
+      const amps = this._amps();
+      const col = amps.find((a) => a.id === ampId);
+      const own = amps.find((a) => a.zones.has(zoneId));
+      if (col && col.master) {
+        // Move to the master stream: end this room's expansion break-away (its
+        // amp shares one stream, so its sibling rooms rejoin too) and resume the
+        // master so sound actually starts.
+        if (own && !own.master) {
+          const ex = this._ampStreamPlayerByName(own.name);
+          if (ex && !OFF_STATES.includes(ex.state)) play(ex.entity_id, "media_pause");
+        }
+        const master = amps.find((a) => a.master);
+        const mMa = master && this._ampStreamPlayerByName(master.name);
+        if (mMa && mMa.state !== "playing") play(mMa.entity_id, "media_play");
+      } else if (col) {
+        // Move to this expansion's stream: start/resume it (its rooms break away).
+        const ex = this._ampStreamPlayerByName(col.name);
+        if (ex) play(ex.entity_id, "media_play");
+      }
+      enable();
+      return;
+    }
+    // Analog source cell: tap the active source to turn the zone off.
     if (on && this._currentSourceId(st) === sid) {
       this._turnZoneOff(zoneId);
       return;
     }
-    const name = this._sourceNameFor(st, sid);
-    if (name != null) {
-      this._hass.callService("media_player", "select_source", {
-        entity_id: zoneId,
-        source: name,
-      });
-    }
+    enable();
   }
 
   _build() {
@@ -1392,7 +1428,7 @@ class AxiumMatrixCard extends HTMLElement {
     this.shadowRoot.querySelector(".matrix").addEventListener("click", (ev) => {
       const cell = ev.target.closest("button.cell");
       if (!cell) return;
-      this._route(cell.dataset.zone, cell.dataset.src);
+      this._route(cell.dataset.zone, cell.dataset.src, cell.dataset.amp);
     });
     // Zone header: tap for quick volume/transport, hold for the device page.
     for (const rh of this.shadowRoot.querySelectorAll(".rowhead[data-zone]")) {
