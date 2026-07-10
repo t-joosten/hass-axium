@@ -226,10 +226,21 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   advertise only
   1 MediaRenderer/amp via SSDP** (the first embedded zone) so MA/HA discover only a few of the 16
   per-zone renderers — an amp-firmware limit, not fixable card-side. **hold a zone name** →
-  open the zone device page (`_attachHold`, reused 500ms hold pattern); **tap a source name**
+  open the zone device page (`_attachHold`, reused 500ms hold pattern); **tap an analog source name**
   → preset picker (`_openPresetPanel`) that applies a preset onto that column set-exactly
   (`_applyPresetToSource`: preset zones → that source, other zones on it → off), mirroring the
   source card's preset semantics.
+  **The single "Media Player" source column is split into one STREAM column per amp** (`_columns()`
+  + `_amps()`, which groups the card's zones by their `via_device` amp → name `Axium 1`/`Axium 2`):
+  each stream column carries the media source id (0x12) so routing/toggle logic is unchanged, but a
+  cell is a `.cell.blank` div (not a button) for zones on the OTHER amp (that amp can't reach them —
+  streams are per-amp). **Tapping a stream header** opens `_openStreamPanel(ampId)`: now-playing +
+  transport + volume driving that amp's MA player (`_ampStreamPlayerByName(amp name)`) plus a **Browse
+  Music Assistant** button (fires `hass-more-info` for the MA player → HA's media browser for
+  playlists). Shows a "rename the MA player to <amp name>" hint when no match. `_refreshPanel`
+  dispatches to `_refreshStreamPanel` for `type:"stream"`. `_signature()` includes amp names so a
+  rename rebuilds. Recall: DLNA is stack-wide via the master, so playing on `Axium 1` reaches all 16
+  zones while `Axium 2` is idle; playing on `Axium 2` overrides zones 9-16 (verified).
   The hub card finds hub-owned entities via `entityHub` + the entity-registry `platform`,
   and the hub device by identifier `["axium", <hub id>]`. The matrix + hub cards reuse
   `axium-hub-card-editor` (hub + name) for their visual editor.
