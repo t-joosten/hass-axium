@@ -1228,12 +1228,19 @@ class AxiumMatrixCard extends HTMLElement {
   }
 
   _zones() {
-    const auto = axiumMediaPlayers(this._hass, this._hubId()).sort();
+    let auto = axiumMediaPlayers(this._hass, this._hubId());
     const pick = this._config.zones || this._config.entities;
     if (Array.isArray(pick) && pick.length) {
-      return pick.filter((id) => auto.includes(id));
+      auto = auto.filter((id) => pick.includes(id));
     }
-    return auto;
+    // Order rows by physical zone number (1..16, and beyond for more amps).
+    return auto.sort((a, b) => this._zoneNum(a) - this._zoneNum(b));
+  }
+
+  _zoneNum(id) {
+    const st = this._hass.states[id];
+    const n = st && st.attributes.zone_number;
+    return typeof n === "number" ? n : 9999;
   }
 
   // Columns: every source offered across the hub's zones, as {id, name},
@@ -1303,14 +1310,15 @@ class AxiumMatrixCard extends HTMLElement {
     const amps = this._amps();
     if (streams.length && amps.length) {
       const sid = streams[0].id;
-      const allZones = new Set(this._zones());
+      // Each amp's Media Player stream drives ONLY its own zones — the streams
+      // are independent per amp (an amp can't play another amp's zones).
       for (const amp of amps) {
         cols.push({
           kind: "stream",
           id: sid,
           ampId: amp.id,
           name: amp.name,
-          zones: amp.master ? allZones : amp.zones,
+          zones: amp.zones,
         });
       }
       for (const s of streams.slice(1)) cols.push({ kind: "source", id: s.id, name: s.name });
@@ -1371,31 +1379,16 @@ class AxiumMatrixCard extends HTMLElement {
       }
     };
     if (ampId) {
-      // A stream (amp) cell. Tapping the stream a room is already hearing turns
-      // that room off; otherwise move it to this stream.
+      // A stream (amp) cell — each amp drives only its own zones. Tapping the
+      // stream a room is already on turns it off; otherwise put the room on the
+      // Media Player and resume that amp's stream so sound actually starts.
       if (this._streamCellActive(zoneId, ampId)) {
         this._turnZoneOff(zoneId);
         return;
       }
-      const amps = this._amps();
-      const col = amps.find((a) => a.id === ampId);
-      const own = amps.find((a) => a.zones.has(zoneId));
-      if (col && col.master) {
-        // Move to the master stream: end this room's expansion break-away (its
-        // amp shares one stream, so its sibling rooms rejoin too) and resume the
-        // master so sound actually starts.
-        if (own && !own.master) {
-          const ex = this._ampStreamPlayerByName(own.name);
-          if (ex && !OFF_STATES.includes(ex.state)) play(ex.entity_id, "media_stop");
-        }
-        const master = amps.find((a) => a.master);
-        const mMa = master && this._ampStreamPlayerByName(master.name);
-        if (mMa && mMa.state !== "playing") play(mMa.entity_id, "media_play");
-      } else if (col) {
-        // Move to this expansion's stream: start/resume it (its rooms break away).
-        const ex = this._ampStreamPlayerByName(col.name);
-        if (ex) play(ex.entity_id, "media_play");
-      }
+      const col = this._amps().find((a) => a.id === ampId);
+      const ma = col && this._ampStreamPlayerByName(col.name);
+      if (ma && ma.state !== "playing") play(ma.entity_id, "media_play");
       enable();
       return;
     }
@@ -1624,7 +1617,8 @@ class AxiumMatrixCard extends HTMLElement {
     const sid = streamCol.id;
     const ma = this._ampStreamPlayerByName(amp.name);
     if (ma) this._hass.callService("media_player", "media_play", { entity_id: ma.entity_id });
-    const scope = amp.master ? this._zones() : [...amp.zones];
+    // Per-amp streams: a preset only affects this amp's own zones.
+    const scope = [...amp.zones];
     const target = new Set(preset.zones || []);
     for (const z of scope) {
       if (target.has(z)) {
@@ -1751,8 +1745,10 @@ class AxiumMatrixCard extends HTMLElement {
   /** Amp stream popover: now-playing + transport + volume for the amp's Music
    *  Assistant stream, and a button to browse MA for playlists. */
   _openStreamPanel(ampId) {
-    const amp = this._amps().find((a) => a.id === ampId);
+    const amps = this._amps();
+    const amp = amps.find((a) => a.id === ampId);
     if (!amp) return;
+    const multiAmp = amps.length > 1;
     const ma = this._ampStreamPlayerByName(amp.name);
     const maId = ma ? ma.entity_id : null;
     const sheet = this.shadowRoot.getElementById("sheet");
@@ -1783,7 +1779,15 @@ class AxiumMatrixCard extends HTMLElement {
         <button class="iconbtn" data-t="next" title="Next"><ha-icon icon="mdi:skip-next"></ha-icon></button>
         <button class="iconbtn" data-v="up" title="Volume up"><ha-icon icon="mdi:volume-plus"></ha-icon></button>
       </div>
+      ${
+        multiAmp
+          ? `<select class="scopesel">` +
+            `<option value="this">Play on ${escHtml(amp.name)} only</option>` +
+            `<option value="all">Play on all amps (whole-home)</option></select>`
+          : ""
+      }
       <button class="browse"><ha-icon icon="mdi:playlist-music"></ha-icon><span>Browse Music Assistant</span></button>
+      <div class="mediabrowse" hidden></div>
       <div class="empty" hidden></div>
     `;
     sheet.querySelector(".sheet-title").textContent = amp.name;
@@ -1804,11 +1808,10 @@ class AxiumMatrixCard extends HTMLElement {
       );
     }
     if (!maId) {
-      // No MA player for this amp — hide transport/browse but keep the volume
-      // buttons (they act on the amp's zones, not the MA player).
-      for (const b of sheet.querySelectorAll("button[data-t]")) b.style.display = "none";
-      const browse = sheet.querySelector(".browse");
-      if (browse) browse.style.display = "none";
+      // No MA player for this amp — hide transport/browse/scope but keep the
+      // volume buttons (they act on the amp's zones, not the MA player).
+      for (const el of sheet.querySelectorAll("button[data-t], .browse, .scopesel"))
+        el.style.display = "none";
       const empty = sheet.querySelector(".empty");
       empty.hidden = false;
       empty.textContent =
@@ -1826,20 +1829,104 @@ class AxiumMatrixCard extends HTMLElement {
           this._hass.callService("media_player", svc, { entity_id: maId });
         });
       }
-      sheet.querySelector(".browse").addEventListener("click", () => {
-        this.dispatchEvent(
-          new CustomEvent("hass-more-info", {
-            detail: { entityId: maId },
-            bubbles: true,
-            composed: true,
-          })
-        );
-        this._closePanel();
-      });
+      // Inline Music Assistant browser so a picked item can be started on this
+      // amp only, or on all amps (whole-home) per the scope select above.
+      sheet.querySelector(".browse").addEventListener("click", () =>
+        this._streamBrowseToggle()
+      );
     }
-    this._panel = { type: "stream", ampId, maId, dragging: false };
+    this._panel = { type: "stream", ampId, maId, dragging: false, browsePlayer: maId };
     this.shadowRoot.getElementById("overlay").hidden = false;
     this._refreshPanel();
+  }
+
+  /** Show/hide the inline Music Assistant browser in the stream panel. */
+  _streamBrowseToggle() {
+    const box = this.shadowRoot.querySelector(".mediabrowse");
+    if (!box || !this._panel) return;
+    if (!box.hidden) {
+      box.hidden = true;
+      return;
+    }
+    box.hidden = false;
+    this._streamBrowseTo(undefined, undefined, []);
+  }
+
+  async _streamBrowseTo(id, type, crumbs) {
+    const box = this.shadowRoot.querySelector(".mediabrowse");
+    if (!box || !this._panel) return;
+    box.innerHTML = `<div class="crumbs"></div><div class="mlist">Loading…</div>`;
+    let res;
+    try {
+      res = await this._hass.callWS({
+        type: "media_player/browse_media",
+        entity_id: this._panel.browsePlayer,
+        ...(id ? { media_content_id: id, media_content_type: type } : {}),
+      });
+    } catch (err) {
+      const ml = box.querySelector(".mlist");
+      if (ml) ml.textContent = "Couldn't browse Music Assistant.";
+      return;
+    }
+    const cr = box.querySelector(".crumbs");
+    cr.innerHTML = "";
+    const home = document.createElement("button");
+    home.className = "crumb";
+    home.textContent = "⌂";
+    home.addEventListener("click", () => this._streamBrowseTo(undefined, undefined, []));
+    cr.appendChild(home);
+    crumbs.forEach((c, i) => {
+      const b = document.createElement("button");
+      b.className = "crumb";
+      b.textContent = "› " + c.title;
+      b.addEventListener("click", () => this._streamBrowseTo(c.id, c.type, crumbs.slice(0, i)));
+      cr.appendChild(b);
+    });
+    const list = box.querySelector(".mlist");
+    list.innerHTML = "";
+    for (const ch of res.children || []) {
+      const it = document.createElement("button");
+      it.className = "mitem";
+      it.textContent = (ch.can_play ? "♪ " : "📁 ") + ch.title;
+      it.addEventListener("click", () => {
+        if (ch.can_play) this._streamPlay(ch);
+        else if (ch.can_expand)
+          this._streamBrowseTo(ch.media_content_id, ch.media_content_type, [
+            ...crumbs,
+            { title: ch.title, id: ch.media_content_id, type: ch.media_content_type },
+          ]);
+      });
+      list.appendChild(it);
+    }
+    if (!(res.children || []).length)
+      list.innerHTML = `<div class="empty">Nothing here.</div>`;
+  }
+
+  /** Start a picked item — on this amp only, or on every amp (whole-home) per
+   *  the scope select. Each amp plays its own copy (the amps can't be synced),
+   *  so whole-home music may drift slightly between amps. */
+  _streamPlay(ch) {
+    const scopeSel = this.shadowRoot.querySelector(".scopesel");
+    const all = scopeSel && scopeSel.value === "all";
+    const players = [];
+    if (all) {
+      for (const a of this._amps()) {
+        const m = this._ampStreamPlayerByName(a.name);
+        if (m) players.push(m.entity_id);
+      }
+    } else if (this._panel && this._panel.browsePlayer) {
+      players.push(this._panel.browsePlayer);
+    }
+    for (const p of players) {
+      this._hass.callService("media_player", "play_media", {
+        entity_id: p,
+        media_content_id: ch.media_content_id,
+        media_content_type: ch.media_content_type,
+        enqueue: "replace",
+      });
+    }
+    const box = this.shadowRoot.querySelector(".mediabrowse");
+    if (box) box.hidden = true;
   }
 
   /** Keep an open amp-stream popover in step with its MA player. */
@@ -1982,17 +2069,12 @@ class AxiumMatrixCard extends HTMLElement {
   }
 
   /**
-   * The Music Assistant player whose stream this zone is actually hearing: its
-   * own amp's stream when that's playing, else the master's (stack-wide) stream.
+   * The Music Assistant player whose stream this zone hears — its OWN amp's
+   * stream (streams are per-amp; a zone only ever plays its amp's Media Player).
    * The MA players should be renamed (in MA) to the amp device names ("Axium 1").
    */
   _ampStreamPlayerFor(zoneId) {
-    const own = this._ampStreamPlayerByName(this._ampNameFor(zoneId));
-    if (own && own.state === "playing") return own;
-    const master = this._amps().find((a) => a.master);
-    const masterMa = master && this._ampStreamPlayerByName(master.name);
-    if (masterMa && masterMa.state === "playing") return masterMa;
-    return own || masterMa || null;
+    return this._ampStreamPlayerByName(this._ampNameFor(zoneId));
   }
 
   /**
@@ -2003,17 +2085,11 @@ class AxiumMatrixCard extends HTMLElement {
    * zone lights up under exactly one stream column.
    */
   _streamCellActive(zoneId, ampId) {
+    // Streams are per-amp: a stream cell only exists for the zone's own amp, so
+    // the zone lights there whenever it's powered on and on the Media Player.
     const st = this._hass.states[zoneId];
     if (!st || OFF_STATES.includes(st.state)) return false;
-    const cur = this._currentSourceId(st);
-    if (!(cur >= STREAM_SOURCE_MIN)) return false;
-    const amps = this._amps();
-    const col = amps.find((a) => a.id === ampId);
-    const own = amps.find((a) => a.zones.has(zoneId));
-    if (!col || !own) return false;
-    const ownMa = this._ampStreamPlayerByName(own.name);
-    const overriding = !own.master && !!ownMa && ownMa.state === "playing";
-    return col.master ? !overriding : col.id === own.id && overriding;
+    return this._currentSourceId(st) >= STREAM_SOURCE_MIN;
   }
 
   /**
@@ -2262,6 +2338,32 @@ AxiumMatrixCard.styles = `
   }
   .browse:hover { border-color: var(--primary-color); }
   .browse ha-icon { --mdc-icon-size: 20px; }
+  .scopesel {
+    font: inherit; padding: 6px 8px; border-radius: 8px; width: 100%;
+    box-sizing: border-box; margin-top: 10px;
+    border: 1px solid var(--divider-color);
+    background: var(--secondary-background-color); color: var(--primary-text-color);
+  }
+  .scopesel + .browse { margin-top: 6px; }
+  .mediabrowse {
+    margin-top: 8px; border: 1px solid var(--divider-color); border-radius: 8px;
+    padding: 6px; max-height: 260px; overflow-y: auto;
+    background: var(--secondary-background-color);
+  }
+  .mediabrowse[hidden] { display: none; }
+  .crumbs { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 4px; }
+  .crumb {
+    background: none; border: none; color: var(--secondary-text-color);
+    cursor: pointer; font: inherit; font-size: 0.85rem; padding: 2px 4px;
+  }
+  .crumb:hover { color: var(--primary-color); }
+  .mlist { display: flex; flex-direction: column; }
+  .mitem {
+    text-align: left; background: none; border: none; cursor: pointer; font: inherit;
+    color: var(--primary-text-color); padding: 7px 6px; border-radius: 6px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .mitem:hover { background: var(--card-background-color); }
   .overlay {
     position: absolute; inset: 0; z-index: 5;
     display: flex; align-items: center; justify-content: center;

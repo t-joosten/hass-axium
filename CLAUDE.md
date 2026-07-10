@@ -84,15 +84,18 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   So a second internal player would need enabling/assigning **on the expansion amp itself** (feature-
   unlock/setup, not in the control protocol; the expansion amp isn't even directly TCP-reachable — only
   via the master's relay). Nothing to change in code: `_request_media_sources` already probes `0x12`-`0x19`,
-  so if a 2nd player were ever enabled it'd auto-appear. **The Media Player stream is STACK-WIDE, not
-  per amp** — CONFIRMED by a real-hardware listening test: pushing (SetAVTransportURI+Play) an MA stream
-  to the **master's** DLNA renderer plays on **all 16 zones** (amp 2's zone played amp 1's stream with
-  amp 2's own renderer empty). So whole-home audio via MA = **one** stream on the master (Axium 1),
-  perfectly in sync — drive **one** MA player, not two. **The `SetAVTransportURI` URI read-back is
-  misleading** (setting a URI on amp 1's renderer doesn't change amp 2's) — those are separate control
-  endpoints, but *playback* spans the stack; do not conclude "2 independent streams" from it. Zones tap
-  in/out via the Media Player source + power; toggling a zone must NOT stop the stream. **Open/untested:**
-  whether the expansion amp can override *its* zones (9-16) with a second, different stream at once.
+  so if a 2nd player were ever enabled it'd auto-appear. **CORRECTION — the Media Player stream is
+  PER-AMP, NOT stack-wide** (an earlier "stack-wide" claim here was WRONG; disproved by direct
+  hardware listening tests on 2026-07-10): each amp drives only ITS OWN zones' Media Player.
+  Amp 1's MA stream → zones 1-8, amp 2's → zones 9-16; they are **independent** streams. Verified:
+  playing on amp 2's MA player (`media_player.zone_16_2`) made zone 9 play *that* content while amp 1
+  played something else; with amp 1 streaming and amp 2 idle, zone 9 was **silent**. The `0x12`
+  media-status answering for all 16 zones (above) is about *source detection*, not audio routing —
+  don't infer stack-wide playback from it. **The amps CANNOT be synced**: `media_player.join` → HTTP
+  500 (GROUPING feature bit off), and pushing amp 1's live flow URL to amp 2's renderer makes amp 2
+  play amp 1's *queue from its own start position* (different song), so there's no way to time-align
+  them. **Whole-home audio = play the same content on BOTH amp MA players** (drifts slightly, no sync).
+  Zones tap in/out via the Media Player source + power; toggling a zone must NOT stop its amp's stream.
 - **`state` must check power FIRST** (media_player `AxiumMediaPlayer.state`): while the shared internal
   Media Player plays, the amp reports **every** zone's source as `0x12` with the **turn-on bit clear**
   (verified on hardware: powered-off zones show `POWER=OFF SOURCE=0x12`). `media_state(0x12)` is global,
@@ -219,8 +222,9 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   **equals that amp name** (so the user renames the ~2 amp-stream MA players to the amp device names in
   MA; unmatched → null → falls back to the zone, never a wrong device). Turning a zone **off**
   (`_turnZoneOff`, used by both `_togglePower` and the cell-tap `_route`) **only powers off the amp zone
-  — it must NOT stop the MA stream**: the Media Player stream is stack-wide (one), so stopping it
-  silences every other zone playing it (the reported "disable one zone → all go silent" bug). The state fix
+  — it must NOT stop the MA stream**: an amp's Media Player stream is shared by all its zones (its 8
+  per-amp DLNA renderers alias one stream), so stopping it silences every other zone on that amp (the
+  reported "disable one zone → all go silent" bug). The state fix
   (power-first) is what makes an off zone read OFF instead of the shared stream's PLAYING. **Amps
   advertise only
   1 MediaRenderer/amp via SSDP** (the first embedded zone) so MA/HA discover only a few of the 16
@@ -229,28 +233,27 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   → preset picker (`_openPresetPanel`) that applies a preset onto that column set-exactly
   (`_applyPresetToSource`: preset zones → that source, other zones on it → off), mirroring the
   source card's preset semantics.
-  **The "Media Player" source column is split into one STREAM column per amp** (`_columns()` +
+  **The "Media Player" source column is split into one STREAM column PER AMP** (`_columns()` +
   `_amps()`, which groups zones by their `via_device` amp → `Axium 1`/`Axium 2` and flags the **master**
   = the hub amp whose identifier has no `_unit_`). Each stream column carries the media source id (0x12)
-  so routing/toggle is unchanged. **Ownership follows the stack-wide truth:** the MASTER column owns
-  **all** zones (its stream reaches everything); an expansion column owns only its own zones (`.cell.blank`
-  for the rest). **Highlighting is which-stream-aware** (`_streamCellActive`): a zone lights up under
-  exactly ONE stream column — the expansion column when that expansion's MA player is *playing* (it's
-  overriding its zones), else the master column. **Tapping a stream cell** (`_route(zone, src, ampId)`):
-  the room's *active* cell → turn that room off; else move it to that stream — a **master** cell
-  `media_pause`s the room's overriding expansion (its siblings rejoin too, per-amp) and resumes the
-  master; an **expansion** cell `media_play`s that expansion to start the break-away — then puts the
-  room on the Media Player source. (Per-zone stream selection isn't a hardware thing — a room only
-  toggles Media Player; the switch is done by controlling the *amp's* playback. Uses `media_pause` for
-  rejoin-master; may need `media_stop` if an amp doesn't fall back on pause.) **Tapping a stream header**
-  opens `_openStreamPanel(ampId)`:
-  now-playing + transport + volume driving that amp's MA player (`_ampStreamPlayerByName(amp name)`) + a
-  **Browse Music Assistant** button (fires `hass-more-info` → HA media browser). Shows a "rename the MA
-  player to <amp name>" hint when unmatched. The stream panel also has a **preset dropdown**
-  (`_applyPresetToStream`: start the amp's MA stream, put the preset's rooms — all for the master, its
-  own for an expansion — on Media Player, drop the amp's others). `_refreshPanel` dispatches to
-  `_refreshStreamPanel` for `type:"stream"`. Playing on `Axium 1` = whole-home (all 16); also playing
-  `Axium 2` = split (9-16 break away). Verified on hardware.
+  so routing/toggle is unchanged. **Ownership is per-amp (the corrected, honest model):** each stream
+  column owns **only its own amp's zones** (`Axium 1` → 1-8, `Axium 2` → 9-16; `.cell.blank` for the
+  rest) — an amp's stream can NEVER play another amp's zones, so there's no "master spans all". **Zones
+  are ordered by `zone_number`** (1..16+) via `_zoneNum`. **Highlighting** (`_streamCellActive`) is now
+  trivial: a stream cell only exists for the zone's own amp, so the zone lights there whenever it's
+  powered on and on the Media Player. **Tapping a stream cell** (`_route(zone, src, ampId)`): the room's
+  *active* cell → turn that room off; else put it on the Media Player and `media_play` (resume) that
+  amp's stream. **Tapping a stream header** opens `_openStreamPanel(ampId)`:
+  now-playing + transport + volume driving that amp's MA player (`_ampStreamPlayerByName(amp name)`), a
+  **preset dropdown** (`_applyPresetToStream`: start the amp's stream, its own preset rooms → Media
+  Player, drop the amp's others), and — for whole-home — a **scope select** (`.scopesel`: "this amp
+  only" / "all amps") above an **inline "Browse Music Assistant"** drill-down (`_streamBrowseToggle`/
+  `_streamBrowseTo`/`_streamPlay`, via WS `media_player/browse_media` on the amp's MA player). Picking a
+  playable item calls `play_media` (enqueue replace) on **this amp** or, when scope=all, on **every**
+  amp's MA player — the only whole-home mechanism possible (amps can't be synced; see the media-player
+  note above), so it starts the same content everywhere with a little drift. Shows a "rename the MA
+  player to <amp name>" hint when unmatched. `_refreshPanel` dispatches to `_refreshStreamPanel` for
+  `type:"stream"`.
   Matrix **corner power button** (`.allpower`, `_toggleAllPower`): if any zone is on → `turn_off` all,
   else `turn_on` all; highlighted `.on` when any is on. The **alarms card** Add form (collapsed until
   `+ Add alarm`; `.addform[hidden]` needs its own display:none rule since `.addform{display:flex}` beats
@@ -287,8 +290,10 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   up to target. **Wake to a Music Assistant playlist:** if the alarm has `media` (a MA
   media-content-id), it activates the zones on the **Media Player** source (0x12) and calls
   `media_player.play_media` on the **master** stream player (`_master_stream_player`: the MA player
-  named after the hub device — stack-wide, so all activated zones hear it) — `media_player` overrides
-  the target. The alarms card's Add form has an inline MA browser (`_openMediaBrowse`/`_browseTo`/
+  named after the hub device) — `media_player` overrides the target. **LIMITATION (per-amp reality):**
+  the wake media plays on the master amp only, so a wake song reaches the **master amp's zones**;
+  alarm zones on an expansion amp are activated + faded but won't hear the song (would need play_media
+  on each activated zone's own amp — TODO if wake-on-expansion is wanted). The alarms card's Add form has an inline MA browser (`_openMediaBrowse`/`_browseTo`/
   `_pickMedia` via WS `media_player/browse_media` on the master player; drill folders, pick a playable
   item) that stores `media`/`media_type` through `axium.set_alarm`. Master arm/disarm =
   `AxiumAlarmsSwitch` (switch.py, runtime flag `hass.data[DATA_ALARMS_ENABLED]`).

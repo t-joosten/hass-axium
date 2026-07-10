@@ -610,16 +610,18 @@ The row and column **headers are interactive** too:
   so the source ends up playing in exactly the preset's rooms). Presets are
   managed in the Axium options.
 - The **Media Player** column is shown as **one column per amplifier stream**
-  (e.g. `Axium 1` / `Axium 2`). The **master** (`Axium 1`) stream is stack‑wide, so
-  **every** zone can play it — play there and it's whole‑home. The expansion
-  (`Axium 2`) can **break its own zones (9–16) away** to a different stream; those
-  zones then light up under `Axium 2` instead of `Axium 1` (a zone only ever shows
-  under the stream it's actually hearing). Zones on the first amp can't use the
-  expansion column, so those cells are blank. **Tap a stream header** → a panel with
-  **now playing**, a **preset** picker, **volume**, transport, and a **Browse Music
-  Assistant** button that opens that stream's Music Assistant player to pick playlists,
-  albums or radio. For this the amp's MA player must be **named the same as the amplifier**
-  (rename it to `Axium 1` / `Axium 2` in Music Assistant); the panel shows a
+  (e.g. `Axium 1` / `Axium 2`). **Each amp's stream drives only its own zones** —
+  `Axium 1` → zones 1–8, `Axium 2` → zones 9–16 — because the two amplifiers are
+  **independent players that can't be audio‑synced**. So a zone appears (and can be
+  toggled) only under **its own** amp's column; the other stream column is blank for
+  it. Rows are ordered by zone number (1–16, and beyond for more amps). **Tap a stream
+  header** → a panel with **now playing**, a **preset** picker, **volume**, transport,
+  a **whole‑home scope** selector, and a **Browse Music Assistant** browser. Pick a
+  playlist/album/radio and it plays on that amp; set the scope to **"Play on all amps
+  (whole‑home)"** first and it starts on **every** amplifier at once — the same content
+  house‑wide (the amps run independently, so expect a small drift between them, and it's
+  not perfectly in sync). For this the amp's MA player must be **named the same as the
+  amplifier** (rename it to `Axium 1` / `Axium 2` in Music Assistant); the panel shows a
   reminder if it isn't. *Transport (play/pause/next/previous) only works while the
   stream is playing **through Music Assistant** — the amp's DLNA renderer ignores
   pause/skip for playback started another way; control it from Music Assistant itself
