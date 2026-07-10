@@ -1473,6 +1473,13 @@ class AxiumMatrixCard extends HTMLElement {
           <button class="iconbtn close" title="Close"><ha-icon icon="mdi:close"></ha-icon></button>
         </span>
       </div>
+      <div class="nowplaying" hidden>
+        <div class="np-art"></div>
+        <div class="np-meta">
+          <div class="np-title"></div>
+          <div class="np-artist"></div>
+        </div>
+      </div>
       <div class="volrow">
         <button class="iconbtn mute" title="Mute"><ha-icon icon="mdi:volume-high"></ha-icon></button>
         <input class="slider" type="range" min="0" max="100" step="1" aria-label="Volume">
@@ -1555,6 +1562,41 @@ class AxiumMatrixCard extends HTMLElement {
     });
   }
 
+  /** A Music Assistant player whose name matches this zone (best-effort link). */
+  _maPlayerFor(zoneId) {
+    const name = (this._zoneName(zoneId) || "").trim().toLowerCase();
+    if (!name) return null;
+    const reg = (this._hass && this._hass.entities) || {};
+    for (const id of Object.keys(this._hass.states)) {
+      if (!id.startsWith("media_player.")) continue;
+      const e = reg[id];
+      if (!e || e.platform !== "music_assistant") continue;
+      const st = this._hass.states[id];
+      const fn = st && (st.attributes.friendly_name || "").trim().toLowerCase();
+      if (fn === name) return st;
+    }
+    return null;
+  }
+
+  /**
+   * What's playing on a zone: prefer the amp zone's own now-playing (reported
+   * for the internal Media Player source), else a same-named Music Assistant
+   * player streaming to it. Returns null when nothing is playing.
+   */
+  _zoneNowPlaying(zoneId) {
+    const pick = (st) => {
+      if (!st || OFF_STATES.includes(st.state)) return null;
+      const a = st.attributes || {};
+      if (!a.media_title) return null;
+      return {
+        title: a.media_title,
+        artist: a.media_artist || a.media_album_name || "",
+        art: a.entity_picture || "",
+      };
+    };
+    return pick(this._hass.states[zoneId]) || pick(this._maPlayerFor(zoneId));
+  }
+
   /** Preset picker for one source column, in the popover. */
   _openPresetPanel(sourceId) {
     const sid = Number(sourceId);
@@ -1594,13 +1636,27 @@ class AxiumMatrixCard extends HTMLElement {
     this.shadowRoot.getElementById("overlay").hidden = false;
   }
 
-  /** Keep an open zone popover's slider/mute/transport in step with state. */
+  /** Keep an open zone popover's now-playing/slider/mute/transport in step. */
   _refreshPanel() {
     if (!this._panel || this._panel.type !== "zone") return;
     const sheet = this.shadowRoot.getElementById("sheet");
     if (!sheet) return;
     const st = this._hass.states[this._panel.zoneId];
     if (!st) return;
+    const np = this._zoneNowPlaying(this._panel.zoneId);
+    const npEl = sheet.querySelector(".nowplaying");
+    if (npEl) {
+      npEl.hidden = !np;
+      if (np) {
+        const art = npEl.querySelector(".np-art");
+        if (art) {
+          art.style.backgroundImage = np.art ? `url("${np.art}")` : "";
+          art.classList.toggle("has-art", !!np.art);
+        }
+        npEl.querySelector(".np-title").textContent = np.title;
+        npEl.querySelector(".np-artist").textContent = np.artist;
+      }
+    }
     const slider = sheet.querySelector(".slider");
     const volval = sheet.querySelector(".volval");
     const lvl = st.attributes.volume_level;
@@ -1739,6 +1795,26 @@ AxiumMatrixCard.styles = `
   .sheet-actions { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; }
   .iconbtn.power { width: 36px; height: 36px; color: var(--secondary-text-color); }
   .iconbtn.power.on { color: var(--primary-color); }
+  .nowplaying {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 10px; padding-bottom: 10px;
+    border-bottom: 1px solid var(--divider-color);
+  }
+  .nowplaying[hidden] { display: none; }
+  .np-art {
+    width: 40px; height: 40px; flex: 0 0 auto; border-radius: 6px;
+    background: var(--secondary-background-color) center/cover no-repeat;
+  }
+  .np-art:not(.has-art) { display: none; }
+  .np-meta { min-width: 0; }
+  .np-title {
+    font-size: 0.9rem; color: var(--primary-text-color);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .np-artist {
+    font-size: 0.8rem; color: var(--secondary-text-color);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   .volrow { display: flex; align-items: center; gap: 10px; }
   .slider {
     flex: 1 1 auto; min-width: 120px; height: 24px;

@@ -556,10 +556,12 @@ the hub's zones and sources.
 
 The row and column **headers are interactive** too:
 
-- **Tap a zone name** → quick controls for that room: a **power** toggle, a
+- **Tap a zone name** → quick controls for that room: **now playing** (track,
+  artist and cover art when the zone is streaming), a **power** toggle, a
   **volume slider**, mute, and **previous / play-pause / next**. The power toggle
   means a zone can always be turned off here, even when its current source isn't
-  shown as a column.
+  shown as a column. Now-playing comes from the zone's own Media Player source, or
+  from a **Music Assistant player of the same name** if one is streaming to it.
 - **Hold a zone name** (long-press) → open that zone's **device page** (tone,
   gains, sleep timer and other settings).
 - **Tap a source name** → pick a **preset**; its zones start playing that source

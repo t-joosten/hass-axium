@@ -180,9 +180,12 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `axium-matrix-card` (zones × sources routing grid; tap a cell to route a zone to a
   source, tap the zone's currently-active cell to turn that zone off — no Off column).
   The matrix headers are interactive too (an in-card popover overlay, `#overlay`/`#sheet`,
-  closed by tapping the backdrop): **tap a zone name** → quick volume slider + mute +
-  prev/play-pause/next for that zone (`_openZonePanel`; slider debounced via `_scheduleVolume`,
-  live-refreshed by `_refreshPanel` from `_update` unless mid-drag); **hold a zone name** →
+  closed by tapping the backdrop): **tap a zone name** → **now-playing** (title/artist/art via
+  `_zoneNowPlaying`: the zone's own media attributes, else a same-named `music_assistant` player
+  from `_maPlayerFor`), a **power** toggle (`_togglePower` — turn a zone off even when its source
+  isn't a column), quick volume slider + mute + prev/play-pause/next for that zone
+  (`_openZonePanel`; slider debounced via `_scheduleVolume`, live-refreshed by `_refreshPanel`
+  from `_update` unless mid-drag; `disconnectedCallback` clears the timer); **hold a zone name** →
   open the zone device page (`_attachHold`, reused 500ms hold pattern); **tap a source name**
   → preset picker (`_openPresetPanel`) that applies a preset onto that column set-exactly
   (`_applyPresetToSource`: preset zones → that source, other zones on it → off), mirroring the
