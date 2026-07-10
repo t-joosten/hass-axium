@@ -238,7 +238,10 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   up to target. Master arm/disarm = `AxiumAlarmsSwitch` (switch.py, runtime flag
   `hass.data[DATA_ALARMS_ENABLED]`).
 - **Notifications**: `axium.play_notification` service (services.py/.yaml) — plays a sound on
-  `zones`/`presets`, then restores each zone **exactly** (power/source/volume/mute, or off).
+  `zones`/`presets`, then restores each zone **exactly** (power/source/volume/mute, or off). A
+  spoken **`message`** (opt. `tts_engine`/`language`) is turned into a `media-source://tts/<engine>`
+  id by `_tts_content_id` (engine defaults to the first `tts.*` entity) and flows through the same
+  resolve+push path; it takes precedence over `media_content_id`.
   Snapshots `controller.zone_state` (inside a per-entry `asyncio.Lock` so queued calls capture
   the *restored* state), overrides via `controller.async_activate_zone(..., unmute=True)` (the
   shared primitive the alarm also uses). **Default playback = direct UPnP push** (`dlna.py`,

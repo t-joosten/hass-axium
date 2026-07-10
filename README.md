@@ -486,12 +486,27 @@ actions:
       media_content_id: media-source://media_source/local/doorbell.mp3
 ```
 
-You can target `presets` (by name) instead of / in addition to `zones`, set a
-fixed `duration` instead of waiting for the sound to finish, or point `source` at
-an external input if the sound comes from a device wired to one of S1–S8. Set the
-optional `media_player` only if you want to route the sound through a specific
-renderer / Music Assistant player instead of the direct push. Overlapping
-notifications are serialised per amplifier so the save/restore never tangles.
+**Spoken alerts (text-to-speech):** give a **`message`** instead of a sound and
+it's spoken via text-to-speech — no URL to build:
+
+```yaml
+# Washing machine done → speak it in the kitchen
+actions:
+  - action: axium.play_notification
+    data:
+      zones: [media_player.kitchen]
+      volume: 50
+      message: The washing machine is done
+      language: en          # optional; e.g. "nl" with Google Translate for Dutch
+```
+
+It uses your first TTS engine unless you set `tts_engine`. You can target
+`presets` (by name) instead of / in addition to `zones`, set a fixed `duration`
+instead of waiting for the sound to finish, or point `source` at an external
+input if the sound comes from a device wired to one of S1–S8. Set the optional
+`media_player` only if you want to route the sound through a specific renderer /
+Music Assistant player instead of the direct push. Overlapping notifications are
+serialised per amplifier so the save/restore never tangles.
 
 ## Dashboard card (Axium Source Card)
 

@@ -142,12 +142,36 @@ play_notification:
       selector:
         entity:
           domain: media_player
+    message:
+      name: Spoken message
+      description: >-
+        Text to speak (text-to-speech). Takes precedence over Sound. Uses the
+        first TTS engine unless you set one below.
+      required: false
+      example: The washing machine is done
+      selector:
+        text:
+    tts_engine:
+      name: TTS engine
+      description: TTS engine entity for the spoken message (default: the first one).
+      required: false
+      selector:
+        entity:
+          domain: tts
+    language:
+      name: Language
+      description: >-
+        Language for the spoken message (e.g. "nl"), overriding the engine
+        default. Handy with Google Translate.
+      required: false
+      selector:
+        text:
     media_content_id:
       name: Sound
       description: >-
-        Media content id / URL of the sound (a chime, a media-source id, or a
-        TTS url). Home Assistant serves it to the amp, so any HA-reachable media
-        works.
+        Media content id / URL of the sound (a chime or a media-source id).
+        Home Assistant serves it to the amp, so any HA-reachable media works.
+        Ignored if a spoken Message is given.
       required: false
       selector:
         text:

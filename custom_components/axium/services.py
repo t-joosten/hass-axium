@@ -12,6 +12,7 @@ import asyncio
 from functools import partial
 import logging
 import mimetypes
+from urllib.parse import urlencode
 
 import voluptuous as vol
 
@@ -129,9 +130,37 @@ _PLAY_NOTIFICATION_SCHEMA = vol.Schema(
         vol.Optional("media_player"): cv.entity_id,
         vol.Optional("media_content_id"): cv.string,
         vol.Optional("media_content_type"): cv.string,
+        vol.Optional("message"): cv.string,
+        vol.Optional("tts_engine"): cv.string,
+        vol.Optional("language"): cv.string,
         vol.Optional("duration"): vol.All(vol.Coerce(float), vol.Range(0, 300)),
     }
 )
+
+
+def _tts_content_id(hass: HomeAssistant, call: ServiceCall) -> str | None:
+    """Turn a spoken ``message`` into a TTS media-source id, or None if unused.
+
+    The engine defaults to the first available ``tts.*`` entity (overridable via
+    ``tts_engine``); an optional ``language`` overrides the engine's default so
+    e.g. Google Translate can speak Dutch. The result flows through the same
+    ``_resolve_media`` + push path as any other sound.
+    """
+    message = call.data.get("message")
+    if not message:
+        return None
+    engine = call.data.get("tts_engine") or next(
+        iter(hass.states.async_entity_ids("tts")), None
+    )
+    if not engine:
+        raise ServiceValidationError(
+            "play_notification: 'message' needs a text-to-speech engine, but "
+            "none is set up. Install a TTS integration or pass 'tts_engine'."
+        )
+    params = {"message": message}
+    if call.data.get("language"):
+        params["language"] = call.data["language"]
+    return f"media-source://tts/{engine}?{urlencode(params)}"
 
 # One notification at a time per hub, so overlapping calls can't corrupt the
 # save/restore (module-level: hass is a singleton; the locks survive reloads).
@@ -297,6 +326,12 @@ async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> No
         source = detected[0] if detected else SOURCE_MEDIA_PLAYER_BYTE
     level = call.data["volume"] / 100 if "volume" in call.data else None
 
+    # A spoken 'message' becomes a TTS media-source id (validated up front so a
+    # missing engine fails before any zone is overridden); an explicit
+    # media_content_id is used only when no message is given.
+    renderer = call.data.get("media_player")
+    content_id = _tts_content_id(hass, call) or call.data.get("media_content_id")
+
     lock = _NOTIFY_LOCKS.setdefault(entry.entry_id, asyncio.Lock())
     async with lock:
         # Snapshot inside the lock so a queued call captures the restored state.
@@ -305,8 +340,6 @@ async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> No
             state = controller.zone_state(zone)
             snapshot[zone] = (state.power, state.source, state.volume, state.muted)
 
-        renderer = call.data.get("media_player")
-        content_id = call.data.get("media_content_id")
         pushed_urls: list[str] = []
         try:
             # Override: power on, unmute, select the source, set the volume.
