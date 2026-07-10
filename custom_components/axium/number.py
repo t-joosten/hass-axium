@@ -255,6 +255,9 @@ class AxiumSleepTimer(NumberEntity):
             await self._controller.async_send(
                 CMD_VOLUME, self._zone, level_to_volume(original)
             )
+        # Read the zone back so HA (and the cards) reflect the power-off — the
+        # amp doesn't echo a set.
+        await self._controller.async_request_zone_state(self._zone)
 
         self._minutes = 0
         self._task = None
@@ -358,6 +361,10 @@ class AxiumAllZonesSleepTimer(NumberEntity):
                 await self._controller.async_send(
                     CMD_VOLUME, zone, level_to_volume(original)
                 )
+        # Read every zone back so HA (and the matrix) reflect the power-off —
+        # a ZONE_ALL set isn't echoed and isn't picked up per zone until a poll.
+        for zone in self._zones:
+            await self._controller.async_request_zone_state(zone)
 
         self._minutes = 0
         self._task = None

@@ -271,7 +271,10 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   off ALL zones (`CMD_POWER ZONE_ALL`); its deadline is stored under the `"all"` key and it
   has a hub-level `AxiumSleepSensor(zone="all", hub_device=True)`. Both numbers carry
   `axium_kind: "sleep_timer"`; the all-zones one adds `sleep_all: true` (sleep card sorts it
-  first, labels it "All zones").
+  first, labels it "All zones"). **Both `_run`s re-read zone state after the power-off**
+  (`async_request_zone_state` per zone; the amp doesn't echo a set and a `ZONE_ALL` off isn't
+  picked up per zone until the 30s poll), so HA and the matrix reflect the off immediately —
+  without this the matrix kept showing the zones (and the all-power button) as on.
 - **Alarms (wake-to-music)**: HA-side (the amp's native alarm needs clock+preset+favourite
   config — too rigid/unverified). Stored in options (`CONF_ALARMS`, helper `get_alarms`):
   `{name,time,days[0=Mon..6=Sun],zones[entity_ids],source id,volume,enabled,media,media_type,media_player}`.
@@ -369,8 +372,9 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   right services (`media_play_pause`/`media_next_track` on the amp's MA player) — nothing to fix
   card-side. Playback is reliably controlled from Music Assistant itself.
 - **Sleep card Custom… button**: each sleep row (zone and preset) has a "Custom…" button beside
-  the 15/30/60/90m presets that `window.prompt`s for a minutes value and applies it via the same
-  `apply()` path.
+  the 15/30/60/90m presets that opens a clean in-card popover (`_openCustom` → an `#overlay`/`#sheet`
+  absolutely-positioned over the `ha-card`, closed by the backdrop/Cancel/Esc) with a minutes
+  number field + quick chips, applying via the same `apply()` path (not `window.prompt`).
 - Show/hide: card config `zones` (zone entity_ids; source + matrix + volumes cards) and `sources`
   (source ids; matrix card) are optional whitelists — empty/unset = show all. Editors use
   an axium-scoped entity selector for zones and a source-id select for sources. Matrix has

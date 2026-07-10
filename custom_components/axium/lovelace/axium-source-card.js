@@ -1759,13 +1759,6 @@ class AxiumMatrixCard extends HTMLElement {
         <span class="sheet-title"></span>
         <button class="iconbtn close" title="Close"><ha-icon icon="mdi:close"></ha-icon></button>
       </div>
-      ${
-        presets.length
-          ? `<select class="presetsel"><option value="">Play in preset…</option>` +
-            presets.map((p, i) => `<option value="${i}">${escHtml(p.name)}</option>`).join("") +
-            `</select>`
-          : ""
-      }
       <div class="nowplaying" hidden>
         <div class="np-art"></div>
         <div class="np-meta">
@@ -1773,15 +1766,19 @@ class AxiumMatrixCard extends HTMLElement {
           <div class="np-artist"></div>
         </div>
       </div>
-      <div class="volrow">
-        <button class="iconbtn" data-v="down" title="Volume down"><ha-icon icon="mdi:volume-minus"></ha-icon></button>
-        <span class="vollbl">Room volume</span>
-        <button class="iconbtn" data-v="up" title="Volume up"><ha-icon icon="mdi:volume-plus"></ha-icon></button>
-      </div>
+      ${
+        presets.length
+          ? `<select class="presetsel"><option value="">Play in preset…</option>` +
+            presets.map((p, i) => `<option value="${i}">${escHtml(p.name)}</option>`).join("") +
+            `</select>`
+          : ""
+      }
       <div class="transport">
+        <button class="iconbtn" data-v="down" title="Volume down"><ha-icon icon="mdi:volume-minus"></ha-icon></button>
         <button class="iconbtn" data-t="prev" title="Previous"><ha-icon icon="mdi:skip-previous"></ha-icon></button>
         <button class="iconbtn play" data-t="play" title="Play/Pause"><ha-icon icon="mdi:play"></ha-icon></button>
         <button class="iconbtn" data-t="next" title="Next"><ha-icon icon="mdi:skip-next"></ha-icon></button>
+        <button class="iconbtn" data-v="up" title="Volume up"><ha-icon icon="mdi:volume-plus"></ha-icon></button>
       </div>
       <button class="browse"><ha-icon icon="mdi:playlist-music"></ha-icon><span>Browse Music Assistant</span></button>
       <div class="empty" hidden></div>
@@ -1804,10 +1801,11 @@ class AxiumMatrixCard extends HTMLElement {
       );
     }
     if (!maId) {
-      for (const sel of [".transport", ".browse"]) {
-        const el = sheet.querySelector(sel);
-        if (el) el.hidden = true;
-      }
+      // No MA player for this amp — hide transport/browse but keep the volume
+      // buttons (they act on the amp's zones, not the MA player).
+      for (const b of sheet.querySelectorAll("button[data-t]")) b.style.display = "none";
+      const browse = sheet.querySelector(".browse");
+      if (browse) browse.style.display = "none";
       const empty = sheet.querySelector(".empty");
       empty.hidden = false;
       empty.textContent =
@@ -2199,7 +2197,7 @@ AxiumMatrixCard.styles = `
   .title { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: var(--primary-text-color); }
   .scroll { overflow-x: auto; }
   .matrix { display: grid; gap: 4px; align-items: stretch; min-width: min-content; }
-  .corner { display: flex; align-items: center; justify-content: center; }
+  .corner { display: flex; align-items: center; justify-content: flex-start; }
   .allpower {
     display: inline-flex; align-items: center; justify-content: center;
     width: 34px; height: 34px; border-radius: 50%; cursor: pointer;
@@ -2948,7 +2946,7 @@ class AxiumAlarmsCard extends HTMLElement {
 }
 
 AxiumAlarmsCard.styles = `
-  ha-card { padding: 12px 16px; }
+  ha-card { padding: 12px 16px; position: relative; }
   .title { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: var(--primary-text-color); }
   .empty { color: var(--secondary-text-color); padding: 4px 0; }
   .f-media { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
@@ -3032,6 +3030,46 @@ AxiumAlarmsCard.styles = `
   }
   .custom { border-style: dashed; }
   .q:hover, .custom:hover { border-color: var(--primary-color); }
+  .overlay {
+    position: absolute; inset: 0; z-index: 5; display: flex;
+    align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, 0.45); border-radius: var(--ha-card-border-radius, 12px);
+  }
+  .overlay[hidden] { display: none; }
+  .sheet {
+    width: min(320px, 92%); box-sizing: border-box; padding: 16px;
+    border-radius: 14px; background: var(--card-background-color, #fff);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  }
+  .sheet-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin-bottom: 12px;
+  }
+  .sheet-title { font-weight: 600; color: var(--primary-text-color); }
+  .iconbtn {
+    background: none; border: none; cursor: pointer; font: inherit;
+    color: var(--secondary-text-color); padding: 2px 6px; border-radius: 8px;
+  }
+  .iconbtn:hover { color: var(--primary-color); }
+  .cust-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+  .cust-input {
+    flex: 1 1 auto; width: 100%; box-sizing: border-box; font: inherit;
+    font-size: 1.4rem; padding: 8px 10px; border-radius: 10px;
+    border: 1px solid var(--divider-color);
+    background: var(--secondary-background-color); color: var(--primary-text-color);
+  }
+  .cust-unit { color: var(--secondary-text-color); }
+  .cust-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+  .cust-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .cust-cancel, .cust-set {
+    font: inherit; padding: 8px 14px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--divider-color); background: none;
+    color: var(--primary-text-color);
+  }
+  .cust-set {
+    border-color: var(--primary-color); background: var(--primary-color);
+    color: var(--text-primary-color, #fff);
+  }
 `;
 
 /**
@@ -3217,7 +3255,12 @@ class AxiumSleepCard extends HTMLElement {
       <ha-card>
         <div class="title">${title}</div>
         <div class="rows" id="rows"></div>
+        <div class="overlay" id="overlay" hidden><div class="sheet" id="sheet"></div></div>
       </ha-card>`;
+    const overlay = this.shadowRoot.getElementById("overlay");
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) overlay.hidden = true;
+    });
     const rows = this.shadowRoot.getElementById("rows");
     if (!descs.length) rows.innerHTML = `<div class="empty">Nothing to show.</div>`;
     for (const d of descs) {
@@ -3244,17 +3287,66 @@ class AxiumSleepCard extends HTMLElement {
       row.querySelectorAll(".q").forEach((b) =>
         b.addEventListener("click", () => apply(Number(b.dataset.m)))
       );
-      row.querySelector(".custom").addEventListener("click", () => {
-        const v = window.prompt("Sleep timer (minutes)", "45");
-        if (v == null) return;
-        const m = Math.round(Number(v));
-        if (Number.isFinite(m) && m > 0) apply(m);
-      });
+      row.querySelector(".custom").addEventListener("click", () =>
+        this._openCustom(label, apply)
+      );
       row.querySelector(".x").addEventListener("click", () => apply(0));
       rows.appendChild(row);
       this._rowEls[d.key] = row;
     }
     this._tick();
+  }
+
+  /** A clean in-card popover to enter a custom sleep length in minutes. */
+  _openCustom(label, apply) {
+    const overlay = this.shadowRoot.getElementById("overlay");
+    const sheet = this.shadowRoot.getElementById("sheet");
+    if (!overlay || !sheet) return;
+    sheet.innerHTML = `
+      <div class="sheet-head">
+        <span class="sheet-title">Sleep · ${escHtml(label)}</span>
+        <button class="iconbtn close" title="Close">&#10005;</button>
+      </div>
+      <div class="cust-row">
+        <input type="number" class="cust-input" min="1" max="1440" step="1" value="45" inputmode="numeric">
+        <span class="cust-unit">minutes</span>
+      </div>
+      <div class="cust-chips">${[15, 30, 45, 60, 90, 120]
+        .map((m) => `<button class="q" data-m="${m}">${m}m</button>`)
+        .join("")}</div>
+      <div class="cust-actions">
+        <button class="cust-cancel">Cancel</button>
+        <button class="cust-set">Set timer</button>
+      </div>`;
+    const input = sheet.querySelector(".cust-input");
+    const close = () => {
+      overlay.hidden = true;
+    };
+    const commit = () => {
+      const m = Math.round(Number(input.value));
+      if (Number.isFinite(m) && m > 0) {
+        apply(m);
+        close();
+      } else {
+        input.focus();
+      }
+    };
+    sheet.querySelector(".close").addEventListener("click", close);
+    sheet.querySelector(".cust-cancel").addEventListener("click", close);
+    sheet.querySelector(".cust-set").addEventListener("click", commit);
+    sheet.querySelectorAll(".cust-chips .q").forEach((b) =>
+      b.addEventListener("click", () => {
+        input.value = b.dataset.m;
+        input.focus();
+      })
+    );
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") commit();
+      else if (e.key === "Escape") close();
+    });
+    overlay.hidden = false;
+    input.focus();
+    input.select();
   }
 
   // The furthest-out running sleep deadline (ms) among a set of zones, or null.
