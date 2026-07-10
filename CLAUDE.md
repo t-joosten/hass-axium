@@ -275,8 +275,14 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   (`_ampStreamPlayerByName(amp name)`), a **preset dropdown** (`_applyPresetToStream`: start the amp's
   stream, its own preset rooms → Media Player, drop the amp's others), an inline **Music Assistant
   search** (`_streamSearch` via WS `media_player/search_media`) with results **tabbed by
-  Tracks/Albums/Playlists** (`_renderSearchTabs` groups the flat hit list by `media_class`; a pick
-  `play_media`s it on the amp's MA player, enqueue replace), and a **Browse Music Assistant** button
+  Tracks/Albums/Playlists** (`_renderSearchTabs` groups the flat hit list by `media_class`).
+  Each result row (`_renderStreamItems`) shows cover art (or a `_typeIcon`), title, and the
+  **provider** (Spotify/Radio/Local… parsed from the content-id prefix by `_providerLabel`), plus a
+  **lazy-loaded track count** for albums/playlists (`_streamItemCount` browses the item + caches the
+  child count). A row tap `play_media`s it (enqueue replace); a **"›"** browses into expandable items
+  (`_streamDrillInto` → children with a Back button). NB: `search_media` returns only
+  title/thumbnail/type/content_id/can_* — NOT duration, year, or a separate artist (baked into the
+  title); MA exposes no per-item WS for the richer fields. There's also a **Browse Music Assistant** button
   (native `hass-more-info` on the amp's MA player). Shows a "rename the MA player to <amp name>"
   hint when unmatched. `_refreshPanel` dispatches to `_refreshStreamPanel` for `type:"stream"`.
   **NO "play on all amps"/whole-home** — it was built then REMOVED: the two amps can't be time-synced

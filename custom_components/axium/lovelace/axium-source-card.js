@@ -1987,10 +1987,62 @@ class AxiumMatrixCard extends HTMLElement {
   }
 
   /** Render the Tracks/Albums/Playlists tabs + the active tab's results. */
+  // A media provider's label from a content id ("spotify--xs4z://…" → "Spotify").
+  _providerLabel(id) {
+    const m = /^([a-z0-9_]+)(?:--[^:]*)?:\/\//i.exec(String(id || ""));
+    if (!m) return "";
+    const p = m[1].toLowerCase();
+    return (
+      {
+        spotify: "Spotify",
+        radiobrowser: "Radio",
+        tunein: "TuneIn",
+        library: "Library",
+        filesystem_local: "Local",
+        filesystem_smb: "Local",
+        qobuz: "Qobuz",
+        tidal: "Tidal",
+        ytmusic: "YT Music",
+        deezer: "Deezer",
+        apple_music: "Apple Music",
+        soundcloud: "SoundCloud",
+        plex: "Plex",
+        jellyfin: "Jellyfin",
+      }[p] || p.charAt(0).toUpperCase() + p.slice(1)
+    );
+  }
+
+  _typeIcon(c) {
+    return (
+      {
+        track: "mdi:music-note",
+        album: "mdi:album",
+        playlist: "mdi:playlist-music",
+        artist: "mdi:account-music",
+        podcast: "mdi:podcast",
+        directory: "mdi:book-music",
+        music: "mdi:radio",
+      }[c] || "mdi:music"
+    );
+  }
+
+  _typeLabel(c) {
+    return (
+      {
+        track: "Track",
+        album: "Album",
+        playlist: "Playlist",
+        artist: "Artist",
+        podcast: "Podcast",
+        directory: "Audiobook",
+        music: "Radio",
+      }[c] || ""
+    );
+  }
+
   _renderSearchTabs(maId) {
     const tabsEl = this.shadowRoot.querySelector(".sstabs");
-    const resEl = this.shadowRoot.querySelector(".ssresults");
-    if (!tabsEl || !resEl || !this._panel || !this._panel.searchGroups) return;
+    if (!tabsEl || !this._panel || !this._panel.searchGroups) return;
     const labels = { track: "Tracks", album: "Albums", playlist: "Playlists" };
     tabsEl.hidden = false;
     tabsEl.innerHTML = "";
@@ -2004,13 +2056,46 @@ class AxiumMatrixCard extends HTMLElement {
       });
       tabsEl.appendChild(b);
     }
+    this._renderStreamItems(maId, this._panel.searchGroups[this._panel.searchTab], null);
+  }
+
+  /** Render media rows: cover/type-icon, title, provider (+ track count for
+   *  albums/playlists, lazy-loaded), and a "›" to browse into expandable items. */
+  _renderStreamItems(maId, items, backFn) {
+    const resEl = this.shadowRoot.querySelector(".ssresults");
+    if (!resEl) return;
     resEl.innerHTML = "";
-    const items = this._panel.searchGroups[this._panel.searchTab] || [];
-    for (const it of items) {
-      const b = document.createElement("button");
-      b.className = "mitem";
-      b.textContent = "♪ " + it.title;
-      b.addEventListener("click", () =>
+    if (backFn) {
+      const back = document.createElement("button");
+      back.className = "ssback";
+      back.textContent = "‹ Back to results";
+      back.addEventListener("click", backFn);
+      resEl.appendChild(back);
+    }
+    for (const it of items || []) {
+      const row = document.createElement("div");
+      row.className = "srow";
+      const play = document.createElement("button");
+      play.className = "sr-play";
+      const art = document.createElement("span");
+      art.className = "sr-art";
+      if (it.thumbnail) art.style.backgroundImage = `url("${it.thumbnail}")`;
+      else art.innerHTML = `<ha-icon icon="${this._typeIcon(it.media_class)}"></ha-icon>`;
+      const body = document.createElement("span");
+      body.className = "sr-body";
+      const title = document.createElement("span");
+      title.className = "sr-title";
+      title.textContent = it.title;
+      const sub = document.createElement("span");
+      sub.className = "sr-sub";
+      sub.textContent = [this._providerLabel(it.media_content_id), this._typeLabel(it.media_class)]
+        .filter(Boolean)
+        .join(" · ");
+      body.appendChild(title);
+      body.appendChild(sub);
+      play.appendChild(art);
+      play.appendChild(body);
+      play.addEventListener("click", () =>
         this._hass.callService("media_player", "play_media", {
           entity_id: maId,
           media_content_id: it.media_content_id,
@@ -2018,9 +2103,70 @@ class AxiumMatrixCard extends HTMLElement {
           enqueue: "replace",
         })
       );
-      resEl.appendChild(b);
+      row.appendChild(play);
+      if (it.can_expand) {
+        const exp = document.createElement("button");
+        exp.className = "sr-exp";
+        exp.title = "Browse";
+        exp.innerHTML = `<ha-icon icon="mdi:chevron-right"></ha-icon>`;
+        exp.addEventListener("click", () => this._streamDrillInto(maId, it));
+        row.appendChild(exp);
+      }
+      resEl.appendChild(row);
+      if (it.media_class === "album" || it.media_class === "playlist") {
+        this._streamItemCount(maId, it, sub);
+      }
     }
-    if (!items.length) resEl.innerHTML = `<div class="empty">No results.</div>`;
+    if (!(items || []).length) {
+      const e = document.createElement("div");
+      e.className = "empty";
+      e.textContent = "No results.";
+      resEl.appendChild(e);
+    }
+  }
+
+  /** Lazily fetch + cache an album/playlist's track count and append it. */
+  async _streamItemCount(maId, it, subEl) {
+    if (!this._panel) return;
+    this._panel.counts = this._panel.counts || {};
+    let n = this._panel.counts[it.media_content_id];
+    if (n === undefined) {
+      try {
+        const res = await this._hass.callWS({
+          type: "media_player/browse_media",
+          entity_id: maId,
+          media_content_id: it.media_content_id,
+          media_content_type: it.media_content_type,
+        });
+        n = (res.children || []).length;
+        this._panel.counts[it.media_content_id] = n;
+      } catch (err) {
+        return;
+      }
+    }
+    if (subEl && n && subEl.isConnected)
+      subEl.textContent += ` · ${n} track${n === 1 ? "" : "s"}`;
+  }
+
+  /** Browse into an expandable result (album/artist/playlist) and show its items. */
+  async _streamDrillInto(maId, it) {
+    const resEl = this.shadowRoot.querySelector(".ssresults");
+    const tabsEl = this.shadowRoot.querySelector(".sstabs");
+    if (resEl) resEl.textContent = "Loading…";
+    let res;
+    try {
+      res = await this._hass.callWS({
+        type: "media_player/browse_media",
+        entity_id: maId,
+        media_content_id: it.media_content_id,
+        media_content_type: it.media_content_type,
+      });
+    } catch (err) {
+      if (resEl) resEl.textContent = "Couldn't open.";
+      return;
+    }
+    if (tabsEl) tabsEl.hidden = true;
+    this._renderStreamItems(maId, res.children || [], () => this._renderSearchTabs(maId));
   }
 
   /** Keep an open amp-stream popover in step with its MA player. */
@@ -2457,15 +2603,42 @@ AxiumMatrixCard.styles = `
   }
   .ssresults {
     display: flex; flex-direction: column; margin-top: 6px;
-    max-height: 240px; overflow-y: auto;
+    max-height: 300px; overflow-y: auto;
   }
   .ssresults:empty { display: none; }
-  .mitem {
+  .ssback {
+    align-self: flex-start; background: none; border: none; cursor: pointer; font: inherit;
+    color: var(--secondary-text-color); padding: 4px 2px; margin-bottom: 2px;
+  }
+  .ssback:hover { color: var(--primary-color); }
+  .srow { display: flex; align-items: center; gap: 2px; }
+  .sr-play {
+    flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px;
     text-align: left; background: none; border: none; cursor: pointer; font: inherit;
-    color: var(--primary-text-color); padding: 8px 6px; border-radius: 6px;
+    color: var(--primary-text-color); padding: 6px; border-radius: 8px;
+  }
+  .sr-play:hover { background: var(--secondary-background-color); }
+  .sr-art {
+    flex: 0 0 auto; width: 40px; height: 40px; border-radius: 6px;
+    background: var(--secondary-background-color) center/cover no-repeat;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--secondary-text-color); --mdc-icon-size: 22px;
+  }
+  .sr-body { min-width: 0; display: flex; flex-direction: column; }
+  .sr-title {
+    font-size: 0.92rem; color: var(--primary-text-color);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .mitem:hover { background: var(--secondary-background-color); }
+  .sr-sub {
+    font-size: 0.78rem; color: var(--secondary-text-color);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .sr-exp {
+    flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; border-radius: 50%; border: none; background: none;
+    cursor: pointer; color: var(--secondary-text-color); --mdc-icon-size: 22px;
+  }
+  .sr-exp:hover { background: var(--secondary-background-color); color: var(--primary-color); }
   .overlay {
     position: absolute; inset: 0; z-index: 5;
     display: flex; align-items: center; justify-content: center;
