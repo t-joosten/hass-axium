@@ -2175,14 +2175,7 @@ class AxiumMatrixCard extends HTMLElement {
       body.appendChild(sub);
       play.appendChild(art);
       play.appendChild(body);
-      play.addEventListener("click", () =>
-        this._hass.callService("media_player", "play_media", {
-          entity_id: maId,
-          media_content_id: it.media_content_id,
-          media_content_type: it.media_content_type,
-          enqueue: "replace",
-        })
-      );
+      play.addEventListener("click", () => this._playSearchItem(maId, it));
       row.appendChild(play);
       if (it.can_expand) {
         const exp = document.createElement("button");
@@ -2203,6 +2196,19 @@ class AxiumMatrixCard extends HTMLElement {
       e.textContent = "No results.";
       resEl.appendChild(e);
     }
+  }
+
+  /** Play a tapped search/browse result and start it immediately. `replace`
+   *  sets the queue but this amp's MA/DLNA renderer doesn't always auto-start
+   *  the transport, so nudge `media_play` once the queue is in place. */
+  async _playSearchItem(maId, it) {
+    await this._hass.callService("media_player", "play_media", {
+      entity_id: maId,
+      media_content_id: it.media_content_id,
+      media_content_type: it.media_content_type,
+      enqueue: "replace",
+    });
+    this._hass.callService("media_player", "media_play", { entity_id: maId });
   }
 
   /** Lazily fetch + cache an album/playlist's children and append its count. */

@@ -295,7 +295,9 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   every hit combined; when the search is empty `searchOrder` is `[]` (no tabs → "No results"). Each result row (`_renderStreamItems`) shows
   cover art (or a `_typeIcon`), title, and the **provider** (Spotify/Radio/Local… parsed from the
   content-id prefix by `_providerLabel`), plus a **lazy-loaded track count** for albums/playlists
-  (`_streamItemCount`). A row tap `play_media`s it (enqueue replace); a **"›"** browses into expandable
+  (`_streamItemCount`). A row tap **plays it immediately** (`_playSearchItem`: `play_media` enqueue
+  replace, then — awaited — a `media_play` nudge, because this amp's MA/DLNA renderer sets the queue on
+  `replace` but doesn't reliably auto-start the transport, so the user otherwise had to press play); a **"›"** browses into expandable
   items (`_streamDrillInto` → children with a Back button). **The MA WS calls are the shared module fns
   `axiumMaSearch`/`axiumMaBrowse`** (both the matrix stream panel and the alarms-card browser use them —
   one place for the request shape). **`_streamItemCount` and `_streamDrillInto` share `_panel.childCache`**
