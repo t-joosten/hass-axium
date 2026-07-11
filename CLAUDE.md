@@ -286,30 +286,25 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `_openStreamPanel(ampId)`: now-playing + transport + volume driving that amp's MA player
   (`_ampStreamPlayerByName(amp name)`), a **preset dropdown** (`_applyPresetToStream`: start the amp's
   stream, its own preset rooms → Media Player, drop the amp's others), an inline **Music Assistant
-  search** (`_streamSearch`) with results **tabbed per `media_class` present**
-  (`_renderSearchTabs`; groups by the raw `media_class`, one tab each — Tracks/Albums/Playlists/Artists/
-  Radio/Podcasts/… — ordered by `_searchTabOrder` (common music types first, then the rest
-  alphabetically) and labelled by `_tabLabel`, so **nothing a search returns is dropped**; an earlier
-  version collapsed everything into 3 fixed tabs and hid radio/artist as "No results"). **An "All" tab is
-  prepended and selected by default** (`groups.all = hits`; `searchOrder = ["all", ...catOrder]`) showing
-  every hit combined; when the search is empty `searchOrder` is `[]` (no tabs → "No results"). Each result row (`_renderStreamItems`) shows
-  cover art (or a `_typeIcon`), title, and the **provider** (Spotify/Radio/Local… parsed from the
-  content-id prefix by `_providerLabel`). A row tap **plays it immediately** (`_playSearchItem`:
-  a single `play_media` with **`enqueue: "play"`** — "play now", which reliably auto-starts on this amp
-  for track/album/playlist/artist, verified on hardware). **Do NOT add a `media_play` nudge** (an earlier
-  version did): this MA player reports **`state: "playing"` even while paused** (a DLNA state desync,
-  verified via `media_position` freezing on pause), so a delayed nudge **un-pauses a stream the user just
-  paused** — that was the "pause button doesn't work" bug. (`enqueue: "replace"` was also unreliable for a
-  lone track — sometimes left idle; `"play"` isn't. **Pause itself works** — only the reported state/icon
-  lags.) A **"›"**
-  browses into an expandable item (`_streamDrillInto` → children with a Back button), **one browse per tap,
-  on demand** (search + drill show a CSS spinner while loading — `_showSpinner`/`.ssspin`; the browse
-  latency is MA↔provider-bound, e.g. Spotify, and can't be sped up card-side). **DO NOT prefetch per-row browses** (there used to be a `_streamItemCount` that fired a
-  `browse_media` for every album/playlist row to show a track count — a burst of ~10-15 concurrent
-  `browse_media` calls **hangs Music Assistant**: some never return, cached empties poison the drill, and
-  playback stalls. Removed; the track count went with it). **The MA WS calls are the shared module fns
-  `axiumMaSearch`/`axiumMaBrowse`** (both the matrix stream panel and the alarms-card browser use them —
-  one place for the request shape). NB: `search_media`/`browse_media` return items whose
+  search** — the **shared `<axium-ma-search>` custom element** (`AxiumMaSearch`, own class + shadow DOM),
+  embedded by BOTH the matrix stream panel (`mode="play"` — a row tap plays it now via `enqueue:"play"`)
+  AND the alarms wake-song picker (`mode="pick"` — a row tap fires a **`pick` CustomEvent** to store it and
+  plays nothing; `startBrowse=true` opens on the library root). One implementation → identical search UX
+  everywhere. Set-once props `.hass`/`.player`/`.mode`/`.startBrowse` (no attributes); parents push fresh
+  `.hass` on every update (it's read at query time). **Searches auto-run ~1s after typing stops**
+  (debounced) as well as on Enter / the button. Results group by raw `media_class` into an **All** tab
+  (default, all hits) plus a tab per type (`_tabOrder`/`_tabLabel`: Tracks/Albums/Playlists/Artists/Radio/…
+  — common types first, then the rest alphabetically), so **nothing a search returns is dropped**; empty
+  search → no tabs. Rows show cover art, title, and the **provider** (`_providerLabel`). A **"›"** drills in
+  (`_drill`; Back returns to the search tabs or browse root — `_state.home`), **one browse per tap, on
+  demand**, with a spinner while loading (browse latency is MA↔provider-bound, e.g. Spotify — can't be
+  sped up). **Do NOT re-add a `media_play` nudge** in play mode: this MA player reports `state:"playing"`
+  even while paused (DLNA desync, verified via `media_position` freezing), so a nudge un-pauses a
+  just-paused stream (the old "pause doesn't work" bug); `enqueue:"play"` reliably auto-starts without one
+  (`"replace"` was flaky for a lone track). **DO NOT prefetch per-row browses** (an old `_streamItemCount`
+  fired a `browse_media` per album/playlist row for a track count — a burst of ~10-15 concurrent
+  `browse_media` calls **hangs Music Assistant**; removed). The WS calls are the module fns
+  `axiumMaSearch`/`axiumMaBrowse`. NB: `search_media`/`browse_media` return items whose
   `media_content_type` is a generic **`"music"`** for every class (Spotify etc.) — the `media_class` is
   what differentiates track/album/artist/playlist; pass the item's own `media_content_type` back to
   browse/play (it works). **Async guards:** every `await` in the search/browse path re-checks the panel is
@@ -385,11 +380,11 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   old title matches nothing and the wake song silently never plays. **LIMITATION (per-amp reality):**
   the wake media plays on the master amp only, so a wake song reaches the **master amp's zones**;
   alarm zones on an expansion amp are activated + faded but won't hear the song (would need play_media
-  on each activated zone's own amp — TODO if wake-on-expansion is wanted). The alarms card's Add form has an inline MA browser (`_openMediaBrowse`/`_browseTo`/
-  `_pickMedia`; drill folders, pick a playable item) that stores `media`/`media_type` through
-  `axium.set_alarm`. It also has a **search box** (`_searchMedia`); browse + search share
-  `_renderMediaItems`/`_renderCrumbs` and go through the shared `axiumMaBrowse`/`axiumMaSearch` module
-  fns. The Add form's amp-stream source options come from **`_ampStreams`, which matches the primary amp
+  on each activated zone's own amp — TODO if wake-on-expansion is wanted). The alarms card's Add form embeds the **shared `<axium-ma-search>` element in `mode="pick"`**
+  (`_openMediaBrowse` mounts it; a `pick` event → `_pickMedia` stores `media`/`media_type`/`media_title`
+  on the form dataset → `axium.set_alarm`). It's the SAME search UI as the matrix stream panel (tabs,
+  spinner, provider labels, drill-in, 1s debounce) — the old bespoke `_browseTo`/`_searchMedia`/
+  `_renderMediaItems`/`_renderCrumbs` flat browser was removed. The Add form's amp-stream source options come from **`_ampStreams`, which matches the primary amp
   by `<hub>_amp_primary` (NOT the bare hub id — that's the empty logical container with no MA player)**
   plus expansions `<hub>_unit_*`; matching the hub id there dropped the primary amp's stream and listed
   the empty hub instead. Master arm/disarm = `AxiumAlarmsSwitch` (switch.py, runtime flag

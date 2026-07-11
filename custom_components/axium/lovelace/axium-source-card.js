@@ -1294,6 +1294,398 @@ class AxiumHubCardEditor extends HTMLElement {
  * itself.
  *
  * Config:
+/**
+ * Reusable Music Assistant search/browse UI (own shadow DOM). Both the matrix
+ * stream panel and the alarms wake-song picker embed it, so the search
+ * experience is identical. Set-once properties (no attributes):
+ *   .hass    — the hass object (set on every parent update; used at query time)
+ *   .player  — the MA media_player entity_id to search/browse
+ *   .mode    — "play" (tap a row → play it now) or "pick" (tap → fire a `pick`
+ *              CustomEvent with the item; nothing is played)
+ *   .startBrowse — true → show the library root on open (for the picker)
+ * Auto-searches ~1s after typing stops; Enter / the button search immediately.
+ */
+class AxiumMaSearch extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._mode = "play";
+    this._startBrowse = false;
+    this._state = { seq: 0 };
+    this._debTimer = null;
+    this._built = false;
+  }
+  set hass(h) {
+    this._hass = h;
+  }
+  get hass() {
+    return this._hass;
+  }
+  set player(p) {
+    const changed = p !== this._player;
+    this._player = p;
+    if (changed && this._built && this._startBrowse && p) this._drillRoot();
+  }
+  set mode(m) {
+    this._mode = m;
+  }
+  set startBrowse(v) {
+    this._startBrowse = !!v;
+  }
+
+  connectedCallback() {
+    this._build();
+  }
+  disconnectedCallback() {
+    if (this._debTimer) clearTimeout(this._debTimer);
+  }
+
+  _build() {
+    if (this._built) return;
+    this._built = true;
+    this.shadowRoot.innerHTML =
+      `<style>${AxiumMaSearch.styles}</style>` +
+      `<div class="ssrow">` +
+      `<input type="search" class="ssin" placeholder="Search Music Assistant…">` +
+      `<button type="button" class="ssbtn" title="Search"><ha-icon icon="mdi:magnify"></ha-icon></button>` +
+      `</div>` +
+      `<div class="sstabs" hidden></div>` +
+      `<div class="ssresults"></div>`;
+    const input = this.shadowRoot.querySelector(".ssin");
+    const run = () => {
+      if (this._debTimer) {
+        clearTimeout(this._debTimer);
+        this._debTimer = null;
+      }
+      const q = input.value.trim();
+      if (q) this._search(q);
+      else if (this._startBrowse) this._drillRoot();
+      else this._clear();
+    };
+    // Auto-search ~1s after typing stops.
+    input.addEventListener("input", () => {
+      if (this._debTimer) clearTimeout(this._debTimer);
+      this._debTimer = setTimeout(run, 1000);
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        run();
+      }
+    });
+    this.shadowRoot.querySelector(".ssbtn").addEventListener("click", run);
+    if (this._startBrowse && this._player) this._drillRoot();
+  }
+
+  _q(sel) {
+    return this.shadowRoot.querySelector(sel);
+  }
+  _clear() {
+    const tabs = this._q(".sstabs");
+    if (tabs) tabs.hidden = true;
+    const res = this._q(".ssresults");
+    if (res) res.innerHTML = "";
+  }
+  _spinner() {
+    const tabs = this._q(".sstabs");
+    if (tabs) tabs.hidden = true;
+    const res = this._q(".ssresults");
+    if (res) res.innerHTML = `<div class="ssspin"></div>`;
+  }
+
+  async _search(query) {
+    if (!this._hass || !this._player) return;
+    this._spinner();
+    const seq = ++this._state.seq;
+    let hits;
+    try {
+      hits = await axiumMaSearch(this._hass, this._player, query);
+    } catch (e) {
+      if (this._state.seq === seq) {
+        const r = this._q(".ssresults");
+        if (r) r.textContent = "Search failed.";
+      }
+      return;
+    }
+    if (this._state.seq !== seq || !this.isConnected) return;
+    // Group by the raw media_class; an "All" tab (default) plus a tab per type.
+    const groups = {};
+    for (const it of hits) {
+      const mc = it.media_class || "other";
+      (groups[mc] = groups[mc] || []).push(it);
+    }
+    const catOrder = this._tabOrder(Object.keys(groups));
+    groups.all = hits;
+    this._state.groups = groups;
+    this._state.order = hits.length ? ["all", ...catOrder] : [];
+    this._state.tab = this._state.order[0] || null;
+    this._renderTabs();
+  }
+
+  _tabOrder(present) {
+    const pref = [
+      "track", "album", "playlist", "artist", "music", "radio", "podcast",
+      "audiobook", "directory", "episode", "genre", "composer",
+    ];
+    return [
+      ...pref.filter((k) => present.includes(k)),
+      ...present.filter((k) => !pref.includes(k)).sort(),
+    ];
+  }
+  _tabLabel(mc) {
+    const map = {
+      all: "All", track: "Tracks", album: "Albums", playlist: "Playlists",
+      artist: "Artists", music: "Radio", radio: "Radio", podcast: "Podcasts",
+      directory: "Audiobooks", audiobook: "Audiobooks", episode: "Episodes",
+      genre: "Genres", composer: "Composers", movie: "Movies", video: "Videos",
+      tv_show: "Shows", season: "Seasons", channel: "Channels", app: "Apps",
+      other: "Other",
+    };
+    if (map[mc]) return map[mc];
+    const t = String(mc || "").replace(/_/g, " ");
+    const label = t ? t.charAt(0).toUpperCase() + t.slice(1) : "Other";
+    return label.endsWith("s") ? label : label + "s";
+  }
+
+  _renderTabs() {
+    this._state.home = () => this._renderTabs();
+    const tabsEl = this._q(".sstabs");
+    if (!tabsEl || !this._state.groups) return;
+    const order = this._state.order || [];
+    if (!order.includes(this._state.tab)) this._state.tab = order[0] || null;
+    tabsEl.hidden = false;
+    tabsEl.innerHTML = "";
+    for (const t of order) {
+      const b = document.createElement("button");
+      b.className = "sstab" + (t === this._state.tab ? " on" : "");
+      b.textContent = `${this._tabLabel(t)} (${this._state.groups[t].length})`;
+      b.addEventListener("click", () => {
+        this._state.tab = t;
+        this._renderTabs();
+      });
+      tabsEl.appendChild(b);
+    }
+    const items = (this._state.tab && this._state.groups[this._state.tab]) || [];
+    this._renderItems(items, null);
+  }
+
+  // Browse the library root (picker's initial view).
+  async _drillRoot() {
+    if (!this._hass || !this._player) return;
+    this._state.home = () => this._drillRoot();
+    this._spinner();
+    const seq = ++this._state.seq;
+    let children;
+    try {
+      const r = await axiumMaBrowse(this._hass, this._player);
+      children = r.children || [];
+    } catch (e) {
+      if (this._state.seq === seq) {
+        const el = this._q(".ssresults");
+        if (el) el.textContent = "Couldn't browse.";
+      }
+      return;
+    }
+    if (this._state.seq !== seq || !this.isConnected) return;
+    const tabs = this._q(".sstabs");
+    if (tabs) tabs.hidden = true;
+    this._renderItems(children, null);
+  }
+
+  // Browse into an expandable item; Back returns to the current "home" view.
+  async _drill(item) {
+    this._spinner();
+    const seq = ++this._state.seq;
+    let children;
+    try {
+      const r = await axiumMaBrowse(
+        this._hass, this._player, item.media_content_id, item.media_content_type
+      );
+      children = r.children || [];
+    } catch (e) {
+      if (this._state.seq === seq) {
+        const el = this._q(".ssresults");
+        if (el) el.textContent = "Couldn't open.";
+      }
+      return;
+    }
+    if (this._state.seq !== seq || !this.isConnected) return;
+    const tabs = this._q(".sstabs");
+    if (tabs) tabs.hidden = true;
+    this._renderItems(children, this._state.home);
+  }
+
+  _renderItems(items, back) {
+    const res = this._q(".ssresults");
+    if (!res) return;
+    res.innerHTML = "";
+    if (back) {
+      const b = document.createElement("button");
+      b.className = "ssback";
+      b.textContent = "‹ Back";
+      b.addEventListener("click", () => back());
+      res.appendChild(b);
+    }
+    for (const it of items || []) {
+      const row = document.createElement("div");
+      row.className = "srow";
+      const main = document.createElement("button");
+      main.className = "sr-play";
+      const art = document.createElement("span");
+      art.className = "sr-art";
+      if (it.thumbnail) art.style.backgroundImage = `url("${it.thumbnail}")`;
+      else art.innerHTML = `<ha-icon icon="${this._typeIcon(it.media_class)}"></ha-icon>`;
+      const body = document.createElement("span");
+      body.className = "sr-body";
+      const title = document.createElement("span");
+      title.className = "sr-title";
+      title.textContent = it.title;
+      const sub = document.createElement("span");
+      sub.className = "sr-sub";
+      sub.textContent = [
+        this._providerLabel(it.media_content_id),
+        this._typeLabel(it.media_class),
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      body.appendChild(title);
+      body.appendChild(sub);
+      main.appendChild(art);
+      main.appendChild(body);
+      const canPlay = it.can_play !== false && !!it.media_content_id;
+      main.addEventListener("click", () => {
+        if (canPlay) this._activate(it);
+        else if (it.can_expand) this._drill(it);
+      });
+      row.appendChild(main);
+      if (it.can_expand) {
+        const exp = document.createElement("button");
+        exp.className = "sr-exp";
+        exp.title = "Browse";
+        exp.innerHTML = `<ha-icon icon="mdi:chevron-right"></ha-icon>`;
+        exp.addEventListener("click", () => this._drill(it));
+        row.appendChild(exp);
+      }
+      res.appendChild(row);
+    }
+    if (!(items || []).length) {
+      const e = document.createElement("div");
+      e.className = "empty";
+      e.textContent = "No results.";
+      res.appendChild(e);
+    }
+  }
+
+  // Row tap: play now, or (pick mode) fire a `pick` event with the item.
+  _activate(it) {
+    if (this._mode === "pick") {
+      this.dispatchEvent(
+        new CustomEvent("pick", { detail: it, bubbles: true, composed: true })
+      );
+      return;
+    }
+    if (!this._hass || !this._player) return;
+    this._hass.callService("media_player", "play_media", {
+      entity_id: this._player,
+      media_content_id: it.media_content_id,
+      media_content_type: it.media_content_type,
+      enqueue: "play",
+    });
+  }
+
+  _providerLabel(id) {
+    const m = /^([a-z0-9_]+)(?:--[^:]*)?:\/\//i.exec(String(id || ""));
+    if (!m) return "";
+    const p = m[1].toLowerCase();
+    return (
+      {
+        spotify: "Spotify", radiobrowser: "Radio", tunein: "TuneIn",
+        library: "Library", filesystem_local: "Local", filesystem_smb: "Local",
+        qobuz: "Qobuz", tidal: "Tidal", ytmusic: "YT Music", deezer: "Deezer",
+        apple_music: "Apple Music", soundcloud: "SoundCloud", plex: "Plex",
+        jellyfin: "Jellyfin",
+      }[p] || p.charAt(0).toUpperCase() + p.slice(1)
+    );
+  }
+  _typeIcon(c) {
+    return (
+      {
+        track: "mdi:music-note", album: "mdi:album", playlist: "mdi:playlist-music",
+        artist: "mdi:account-music", podcast: "mdi:podcast",
+        directory: "mdi:book-music", music: "mdi:radio",
+      }[c] || "mdi:music"
+    );
+  }
+  _typeLabel(c) {
+    return (
+      {
+        track: "Track", album: "Album", playlist: "Playlist", artist: "Artist",
+        podcast: "Podcast", directory: "Audiobook", music: "Radio",
+      }[c] || ""
+    );
+  }
+}
+
+AxiumMaSearch.styles = `
+  :host { display: flex; flex-direction: column; min-height: 0; }
+  .ssrow { display: flex; gap: 6px; }
+  .ssin {
+    flex: 1 1 auto; min-width: 0; font: inherit; padding: 7px 9px; border-radius: 8px;
+    border: 1px solid var(--divider-color); background: var(--card-background-color);
+    color: var(--primary-text-color);
+  }
+  .ssbtn {
+    display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+    border: 1px solid var(--divider-color); border-radius: 8px; padding: 0 12px;
+    background: var(--card-background-color); color: var(--primary-text-color); --mdc-icon-size: 20px;
+  }
+  .ssbtn:hover { border-color: var(--primary-color); color: var(--primary-color); }
+  .sstabs { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; flex: 0 0 auto; }
+  .sstabs[hidden] { display: none; }
+  .sstab {
+    font: inherit; font-size: 0.8rem; padding: 4px 10px; border-radius: 14px; cursor: pointer;
+    border: 1px solid var(--divider-color); background: none; color: var(--secondary-text-color);
+  }
+  .sstab.on { border-color: var(--primary-color); color: var(--text-primary-color, #fff); background: var(--primary-color); }
+  .ssresults { display: flex; flex-direction: column; margin-top: 6px; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  .ssresults:empty { display: none; }
+  .ssspin {
+    align-self: center; margin: 22px auto; width: 30px; height: 30px; border-radius: 50%;
+    border: 3px solid var(--divider-color); border-top-color: var(--primary-color);
+    animation: axium-spin 0.8s linear infinite;
+  }
+  @keyframes axium-spin { to { transform: rotate(360deg); } }
+  .ssback {
+    align-self: flex-start; background: none; border: none; cursor: pointer; font: inherit;
+    color: var(--secondary-text-color); padding: 4px 2px; margin-bottom: 2px;
+  }
+  .ssback:hover { color: var(--primary-color); }
+  .srow { display: flex; align-items: center; gap: 2px; }
+  .sr-play {
+    flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px;
+    text-align: left; background: none; border: none; cursor: pointer; font: inherit;
+    color: var(--primary-text-color); padding: 6px; border-radius: 8px;
+  }
+  .sr-play:hover { background: var(--secondary-background-color); }
+  .sr-art {
+    flex: 0 0 auto; width: 40px; height: 40px; border-radius: 6px;
+    background: var(--secondary-background-color) center/cover no-repeat;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--secondary-text-color); --mdc-icon-size: 22px;
+  }
+  .sr-body { min-width: 0; display: flex; flex-direction: column; }
+  .sr-title { font-size: 0.92rem; color: var(--primary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sr-sub { font-size: 0.78rem; color: var(--secondary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sr-exp {
+    flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; border-radius: 50%; border: none; background: none;
+    cursor: pointer; color: var(--secondary-text-color); --mdc-icon-size: 22px;
+  }
+  .sr-exp:hover { background: var(--secondary-background-color); color: var(--primary-color); }
+  .empty { color: var(--secondary-text-color); padding: 8px 2px; }
+`;
+
+/**
  *   type: custom:axium-matrix-card
  *   hub: <config_entry_id>   # optional — defaults to the only Axium hub
  *   name: Matrix             # optional — header text
@@ -1999,12 +2391,7 @@ class AxiumMatrixCard extends HTMLElement {
         <button class="iconbtn" data-t="next" title="Next"><ha-icon icon="mdi:skip-next"></ha-icon></button>
         <button class="iconbtn" data-v="up" title="Volume up"><ha-icon icon="mdi:volume-plus"></ha-icon></button>
       </div>
-      <div class="streamsearch">
-        <input type="search" class="ssin" placeholder="Search Music Assistant…">
-        <button type="button" class="ssbtn" title="Search"><ha-icon icon="mdi:magnify"></ha-icon></button>
-      </div>
-      <div class="sstabs" hidden></div>
-      <div class="ssresults"></div>
+      <axium-ma-search class="masearch" style="flex:1 1 auto; min-height:0;"></axium-ma-search>
       <button class="browse"><ha-icon icon="mdi:playlist-music"></ha-icon><span>Browse Music Assistant</span></button>
       <div class="empty" hidden></div>
     `;
@@ -2029,7 +2416,7 @@ class AxiumMatrixCard extends HTMLElement {
       // No MA player for this amp — hide transport/search/browse but keep the
       // volume buttons (they act on the amp's zones, not the MA player).
       for (const el of sheet.querySelectorAll(
-        "button[data-t], .browse, .streamsearch, .sstabs, .ssresults"
+        "button[data-t], .browse, axium-ma-search"
       ))
         el.style.display = "none";
       const empty = sheet.querySelector(".empty");
@@ -2063,19 +2450,13 @@ class AxiumMatrixCard extends HTMLElement {
         );
         this._closePanel();
       });
-      // Inline Music Assistant search — results tabbed by Tracks/Albums/Playlists.
-      const ssin = sheet.querySelector(".ssin");
-      const runSearch = () => {
-        const q = ssin.value.trim();
-        if (q) this._streamSearch(maId, q);
-      };
-      sheet.querySelector(".ssbtn").addEventListener("click", runSearch);
-      ssin.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          runSearch();
-        }
-      });
+      // Shared Music Assistant search component, in "play" mode.
+      const search = sheet.querySelector("axium-ma-search");
+      if (search) {
+        search.mode = "play";
+        search.hass = this._hass;
+        search.player = maId;
+      }
     }
     const st0 = this._hass.states[maId];
     this._panel = {
@@ -2138,256 +2519,6 @@ class AxiumMatrixCard extends HTMLElement {
       );
   }
 
-  /** Search Music Assistant on the amp's stream player; group hits by type. */
-  /** Show a loading spinner inside a results container. */
-  _showSpinner(el) {
-    if (el) el.innerHTML = `<div class="ssspin"></div>`;
-  }
-
-  async _streamSearch(maId, query) {
-    const resEl = this.shadowRoot.querySelector(".ssresults");
-    this._showSpinner(resEl);
-    // Race guards: only apply results if this exact panel is still open (the
-    // user may have closed it or switched amps mid-request) and this is still
-    // the latest search fired on it (a slower earlier query must not overwrite
-    // a newer one).
-    const panel = this._panel;
-    if (!panel) return;
-    const seq = (panel.searchSeq = (panel.searchSeq || 0) + 1);
-    let hits;
-    try {
-      hits = await axiumMaSearch(this._hass, maId, query);
-    } catch (err) {
-      if (this._panel === panel && resEl) resEl.textContent = "Search failed.";
-      return;
-    }
-    if (this._panel !== panel || panel.searchSeq !== seq) return;
-    // Group hits by their real media_class and show a tab per category present
-    // (Tracks, Albums, Playlists, Artists, Radio, Podcasts, …) so nothing the
-    // search returns is dropped.
-    const groups = {};
-    for (const it of hits) {
-      const mc = it.media_class || "other";
-      (groups[mc] = groups[mc] || []).push(it);
-    }
-    // "All" is the first tab and the default — it shows every hit combined;
-    // then a tab per category present.
-    const catOrder = this._searchTabOrder(Object.keys(groups));
-    groups.all = hits;
-    panel.searchGroups = groups;
-    panel.searchOrder = hits.length ? ["all", ...catOrder] : [];
-    panel.searchTab = panel.searchOrder[0] || null;
-    this._renderSearchTabs(maId);
-  }
-
-  // Tab order: the common music types first, then any other category the search
-  // returned, alphabetically.
-  _searchTabOrder(present) {
-    const pref = [
-      "track", "album", "playlist", "artist", "music", "radio", "podcast",
-      "audiobook", "directory", "episode", "genre", "composer",
-    ];
-    return [
-      ...pref.filter((k) => present.includes(k)),
-      ...present.filter((k) => !pref.includes(k)).sort(),
-    ];
-  }
-
-  // Plural tab label for a media_class (falls back to a title-cased plural).
-  _tabLabel(mc) {
-    const map = {
-      all: "All",
-      track: "Tracks", album: "Albums", playlist: "Playlists", artist: "Artists",
-      music: "Radio", radio: "Radio", podcast: "Podcasts", directory: "Audiobooks",
-      audiobook: "Audiobooks", episode: "Episodes", genre: "Genres",
-      composer: "Composers", movie: "Movies", video: "Videos", tv_show: "Shows",
-      season: "Seasons", channel: "Channels", app: "Apps", other: "Other",
-    };
-    if (map[mc]) return map[mc];
-    const t = String(mc || "").replace(/_/g, " ");
-    const label = t ? t.charAt(0).toUpperCase() + t.slice(1) : "Other";
-    return label.endsWith("s") ? label : label + "s";
-  }
-
-  /** Render the Tracks/Albums/Playlists tabs + the active tab's results. */
-  // A media provider's label from a content id ("spotify--xs4z://…" → "Spotify").
-  _providerLabel(id) {
-    const m = /^([a-z0-9_]+)(?:--[^:]*)?:\/\//i.exec(String(id || ""));
-    if (!m) return "";
-    const p = m[1].toLowerCase();
-    return (
-      {
-        spotify: "Spotify",
-        radiobrowser: "Radio",
-        tunein: "TuneIn",
-        library: "Library",
-        filesystem_local: "Local",
-        filesystem_smb: "Local",
-        qobuz: "Qobuz",
-        tidal: "Tidal",
-        ytmusic: "YT Music",
-        deezer: "Deezer",
-        apple_music: "Apple Music",
-        soundcloud: "SoundCloud",
-        plex: "Plex",
-        jellyfin: "Jellyfin",
-      }[p] || p.charAt(0).toUpperCase() + p.slice(1)
-    );
-  }
-
-  _typeIcon(c) {
-    return (
-      {
-        track: "mdi:music-note",
-        album: "mdi:album",
-        playlist: "mdi:playlist-music",
-        artist: "mdi:account-music",
-        podcast: "mdi:podcast",
-        directory: "mdi:book-music",
-        music: "mdi:radio",
-      }[c] || "mdi:music"
-    );
-  }
-
-  _typeLabel(c) {
-    return (
-      {
-        track: "Track",
-        album: "Album",
-        playlist: "Playlist",
-        artist: "Artist",
-        podcast: "Podcast",
-        directory: "Audiobook",
-        music: "Radio",
-      }[c] || ""
-    );
-  }
-
-  _renderSearchTabs(maId) {
-    const tabsEl = this.shadowRoot.querySelector(".sstabs");
-    if (!tabsEl || !this._panel || !this._panel.searchGroups) return;
-    const order = this._panel.searchOrder || [];
-    if (!order.includes(this._panel.searchTab))
-      this._panel.searchTab = order[0] || null;
-    tabsEl.hidden = false;
-    tabsEl.innerHTML = "";
-    for (const t of order) {
-      const b = document.createElement("button");
-      b.className = "sstab" + (t === this._panel.searchTab ? " on" : "");
-      b.textContent = `${this._tabLabel(t)} (${this._panel.searchGroups[t].length})`;
-      b.addEventListener("click", () => {
-        this._panel.searchTab = t;
-        this._renderSearchTabs(maId);
-      });
-      tabsEl.appendChild(b);
-    }
-    const items =
-      (this._panel.searchTab && this._panel.searchGroups[this._panel.searchTab]) || [];
-    this._renderStreamItems(maId, items, null);
-  }
-
-  /** Render media rows: cover/type-icon, title, provider (+ track count for
-   *  albums/playlists, lazy-loaded), and a "›" to browse into expandable items. */
-  _renderStreamItems(maId, items, backFn) {
-    const resEl = this.shadowRoot.querySelector(".ssresults");
-    if (!resEl) return;
-    resEl.innerHTML = "";
-    if (backFn) {
-      const back = document.createElement("button");
-      back.className = "ssback";
-      back.textContent = "‹ Back to results";
-      back.addEventListener("click", backFn);
-      resEl.appendChild(back);
-    }
-    for (const it of items || []) {
-      const row = document.createElement("div");
-      row.className = "srow";
-      const play = document.createElement("button");
-      play.className = "sr-play";
-      const art = document.createElement("span");
-      art.className = "sr-art";
-      if (it.thumbnail) art.style.backgroundImage = `url("${it.thumbnail}")`;
-      else art.innerHTML = `<ha-icon icon="${this._typeIcon(it.media_class)}"></ha-icon>`;
-      const body = document.createElement("span");
-      body.className = "sr-body";
-      const title = document.createElement("span");
-      title.className = "sr-title";
-      title.textContent = it.title;
-      const sub = document.createElement("span");
-      sub.className = "sr-sub";
-      sub.textContent = [this._providerLabel(it.media_content_id), this._typeLabel(it.media_class)]
-        .filter(Boolean)
-        .join(" · ");
-      body.appendChild(title);
-      body.appendChild(sub);
-      play.appendChild(art);
-      play.appendChild(body);
-      play.addEventListener("click", () => this._playSearchItem(maId, it));
-      row.appendChild(play);
-      if (it.can_expand) {
-        const exp = document.createElement("button");
-        exp.className = "sr-exp";
-        exp.title = "Browse";
-        exp.innerHTML = `<ha-icon icon="mdi:chevron-right"></ha-icon>`;
-        exp.addEventListener("click", () => this._streamDrillInto(maId, it));
-        row.appendChild(exp);
-      }
-      resEl.appendChild(row);
-    }
-    if (!(items || []).length) {
-      const e = document.createElement("div");
-      e.className = "empty";
-      e.textContent = "No results.";
-      resEl.appendChild(e);
-    }
-  }
-
-  /** Play a tapped search/browse result immediately. `enqueue: "play"` ("play
-   *  now") reliably auto-starts on this amp for tracks/albums/playlists/artists
-   *  (verified on hardware), so NO `media_play` nudge is needed — and a nudge is
-   *  actively harmful: this player reports `state: "playing"` even when paused
-   *  (a DLNA quirk), and a delayed nudge would un-pause a stream the user just
-   *  paused (the "pause doesn't work" bug). */
-  _playSearchItem(maId, it) {
-    this._hass.callService("media_player", "play_media", {
-      entity_id: maId,
-      media_content_id: it.media_content_id,
-      media_content_type: it.media_content_type,
-      enqueue: "play",
-    });
-    // We just started playback — reflect it on the play/stop button.
-    if (this._panel && this._panel.type === "stream") {
-      this._panel.streamPlaying = true;
-      this._setStreamPlayIcon();
-    }
-  }
-
-  /** Browse into an expandable result (album/artist/playlist) and show its items.
-   *  Fetched on demand, one call per tap — do NOT prefetch these per row (a burst
-   *  of concurrent browse_media calls hangs Music Assistant). */
-  async _streamDrillInto(maId, it) {
-    const resEl = this.shadowRoot.querySelector(".ssresults");
-    const tabsEl = this.shadowRoot.querySelector(".sstabs");
-    const panel = this._panel;
-    this._showSpinner(resEl);
-    let children;
-    try {
-      const res = await axiumMaBrowse(
-        this._hass,
-        maId,
-        it.media_content_id,
-        it.media_content_type
-      );
-      children = res.children || [];
-    } catch (err) {
-      if (this._panel === panel && resEl) resEl.textContent = "Couldn't open.";
-      return;
-    }
-    if (this._panel !== panel) return;
-    if (tabsEl) tabsEl.hidden = true;
-    this._renderStreamItems(maId, children, () => this._renderSearchTabs(maId));
-  }
-
   /** Keep an open amp-stream popover in step with its MA player. */
   _refreshStreamPanel() {
     const sheet = this.shadowRoot.getElementById("sheet");
@@ -2445,6 +2576,8 @@ class AxiumMatrixCard extends HTMLElement {
     if (st.state && OFF_STATES.includes(st.state)) this._panel.streamPlaying = false;
     this._setStreamPlayIcon();
     this._setStreamPauseIcon(this._panel.ampId);
+    const search = sheet.querySelector("axium-ma-search");
+    if (search) search.hass = this._hass;
   }
 
   _scheduleVolume(zoneId, pct) {
@@ -3139,6 +3272,10 @@ class AxiumAlarmsCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (hass && this._config) this._render();
+    // Keep an open wake-song picker's hass current (its subtree isn't rebuilt
+    // by _refresh).
+    const s = this.shadowRoot.querySelector("axium-ma-search");
+    if (s) s.hass = hass;
   }
   getCardSize() {
     return 3;
@@ -3510,105 +3647,25 @@ class AxiumAlarmsCard extends HTMLElement {
       box.innerHTML = `<div class="empty">No Music Assistant stream player found — rename the amp's MA player to the amp's name first.</div>`;
       return;
     }
-    form._maPlayer = player;
     box.hidden = false;
-    box.innerHTML = `
-      <div class="msearch">
-        <input type="search" class="msearchin" placeholder="Search Music Assistant…">
-        <button type="button" class="msearchbtn"><ha-icon icon="mdi:magnify"></ha-icon></button>
-      </div>
-      <div class="crumbs"></div>
-      <div class="mlist">Loading…</div>`;
-    const input = box.querySelector(".msearchin");
-    const run = () => {
-      const q = input.value.trim();
-      if (q) this._searchMedia(form, q);
-      else this._browseTo(form, undefined, undefined, []);
-    };
-    box.querySelector(".msearchbtn").addEventListener("click", run);
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        run();
-      }
-    });
-    this._browseTo(form, undefined, undefined, []);
-  }
-
-  // Render the ⌂ + breadcrumb trail into the browser box.
-  _renderCrumbs(form, crumbs) {
-    const cr = form.querySelector(".mediabrowse .crumbs");
-    if (!cr) return;
-    cr.innerHTML = "";
-    const home = document.createElement("button");
-    home.className = "crumb";
-    home.textContent = "⌂";
-    home.addEventListener("click", () => this._browseTo(form, undefined, undefined, []));
-    cr.appendChild(home);
-    (crumbs || []).forEach((c, i) => {
-      const b = document.createElement("button");
-      b.className = "crumb";
-      b.textContent = "› " + c.title;
-      b.addEventListener("click", () =>
-        this._browseTo(form, c.id, c.type, crumbs.slice(0, i))
-      );
-      cr.appendChild(b);
-    });
-  }
-
-  // Render a list of media items (browse children or search hits): a playable
-  // item is picked, an expandable one drills in.
-  _renderMediaItems(form, items, crumbs) {
-    const list = form.querySelector(".mediabrowse .mlist");
-    if (!list) return;
-    list.innerHTML = "";
-    for (const ch of items || []) {
-      const it = document.createElement("button");
-      it.className = "mitem";
-      it.textContent = (ch.can_play ? "♪ " : "📁 ") + ch.title;
-      it.addEventListener("click", () => {
-        if (ch.can_play) this._pickMedia(form, ch);
-        else if (ch.can_expand)
-          this._browseTo(form, ch.media_content_id, ch.media_content_type, [
-            ...(crumbs || []),
-            { title: ch.title, id: ch.media_content_id, type: ch.media_content_type },
-          ]);
-      });
-      list.appendChild(it);
-    }
-    if (!(items || []).length)
-      list.innerHTML = `<div class="empty">Nothing here.</div>`;
-  }
-
-  async _browseTo(form, id, type, crumbs) {
-    const list = form.querySelector(".mediabrowse .mlist");
-    if (list) list.textContent = "Loading…";
-    let res;
-    try {
-      res = await axiumMaBrowse(this._hass, form._maPlayer, id, type);
-    } catch (err) {
-      if (list) list.textContent = "Couldn't browse Music Assistant.";
-      return;
-    }
-    this._renderCrumbs(form, crumbs);
-    this._renderMediaItems(form, res.children, crumbs);
-  }
-
-  async _searchMedia(form, query) {
-    const list = form.querySelector(".mediabrowse .mlist");
-    if (list) list.textContent = "Searching…";
-    let hits;
-    try {
-      hits = await axiumMaSearch(this._hass, form._maPlayer, query);
-    } catch (err) {
-      if (list) list.textContent = "Search failed.";
-      return;
-    }
-    this._renderCrumbs(form, []);
-    this._renderMediaItems(form, hits, []);
+    // Let the component own its scrolling (its results list scrolls internally).
+    box.style.maxHeight = "none";
+    box.style.overflow = "visible";
+    // The SAME shared search component as the matrix stream panel, in "pick"
+    // mode: tapping a result stores it as the wake song (`pick` event) rather
+    // than playing it. Opens on the library root; searches auto-run ~1s after
+    // typing stops.
+    box.innerHTML = `<axium-ma-search style="max-height:340px;"></axium-ma-search>`;
+    const search = box.querySelector("axium-ma-search");
+    search.mode = "pick";
+    search.startBrowse = true;
+    search.hass = this._hass;
+    search.player = player;
+    search.addEventListener("pick", (ev) => this._pickMedia(form, ev.detail));
   }
 
   _pickMedia(form, ch) {
+    if (!ch) return;
     form.dataset.media = ch.media_content_id;
     form.dataset.mediaType = ch.media_content_type || "playlist";
     form.dataset.mediaTitle = ch.title || "";
@@ -4472,6 +4529,7 @@ class AxiumVolumesCardEditor extends HTMLElement {
 }
 
 if (!customElements.get("axium-source-card")) {
+  customElements.define("axium-ma-search", AxiumMaSearch);
   customElements.define("axium-source-card", AxiumSourceCard);
   customElements.define("axium-source-card-editor", AxiumSourceCardEditor);
   customElements.define("axium-hub-card", AxiumHubCard);

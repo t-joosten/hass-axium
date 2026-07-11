@@ -673,10 +673,13 @@ rooms appear (empty = all); in YAML that's `zones:`.
   zones power on, switch to the source and gently fade up to the target volume.
   You can also set **Auto turn-off after N minutes** — the woken zones power back
   off that many minutes after the alarm fires (0 = leave them on). On the alarms
-  card you can also **"Wake to Music Assistant"** — browse your
-  Music Assistant library right in the add form and pick a playlist/album/radio;
-  the alarm streams it to the rooms via the amp's stream (needs the amp's MA
-  player named after the amplifier, e.g. `Axium 1`). The **Alarms** switch on the
+  card you can also **"Wake to Music Assistant"** — the **same search** as the
+  matrix stream panel opens right in the add form (type to search — it runs
+  automatically about a second after you stop typing — with results tabbed by
+  type, or browse the library and drill in), and you **pick** a
+  track/playlist/album/radio as the wake song; the alarm streams it to the rooms
+  via the amp's stream (needs the amp's MA player named after the amplifier, e.g.
+  `Axium 1`). The **Alarms** switch on the
   amplifier device arms/disarms them all at once (e.g. while you're away).
 
 Each alarm also gets a **next-fire timestamp sensor** (`sensor.axium_alarm_<name>`)
