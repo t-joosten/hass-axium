@@ -2023,8 +2023,12 @@ class AxiumMatrixCard extends HTMLElement {
       const mc = it.media_class || "other";
       (groups[mc] = groups[mc] || []).push(it);
     }
+    // "All" is the first tab and the default — it shows every hit combined;
+    // then a tab per category present.
+    const catOrder = this._searchTabOrder(Object.keys(groups));
+    groups.all = hits;
     panel.searchGroups = groups;
-    panel.searchOrder = this._searchTabOrder(Object.keys(groups));
+    panel.searchOrder = hits.length ? ["all", ...catOrder] : [];
     panel.searchTab = panel.searchOrder[0] || null;
     this._renderSearchTabs(maId);
   }
@@ -2045,6 +2049,7 @@ class AxiumMatrixCard extends HTMLElement {
   // Plural tab label for a media_class (falls back to a title-cased plural).
   _tabLabel(mc) {
     const map = {
+      all: "All",
       track: "Tracks", album: "Albums", playlist: "Playlists", artist: "Artists",
       music: "Radio", radio: "Radio", podcast: "Podcasts", directory: "Audiobooks",
       audiobook: "Audiobooks", episode: "Episodes", genre: "Genres",

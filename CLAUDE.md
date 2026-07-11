@@ -290,7 +290,9 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   (`_renderSearchTabs`; groups by the raw `media_class`, one tab each — Tracks/Albums/Playlists/Artists/
   Radio/Podcasts/… — ordered by `_searchTabOrder` (common music types first, then the rest
   alphabetically) and labelled by `_tabLabel`, so **nothing a search returns is dropped**; an earlier
-  version collapsed everything into 3 fixed tabs and hid radio/artist as "No results"). Each result row (`_renderStreamItems`) shows
+  version collapsed everything into 3 fixed tabs and hid radio/artist as "No results"). **An "All" tab is
+  prepended and selected by default** (`groups.all = hits`; `searchOrder = ["all", ...catOrder]`) showing
+  every hit combined; when the search is empty `searchOrder` is `[]` (no tabs → "No results"). Each result row (`_renderStreamItems`) shows
   cover art (or a `_typeIcon`), title, and the **provider** (Spotify/Radio/Local… parsed from the
   content-id prefix by `_providerLabel`), plus a **lazy-loaded track count** for albums/playlists
   (`_streamItemCount`). A row tap `play_media`s it (enqueue replace); a **"›"** browses into expandable
