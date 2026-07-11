@@ -482,7 +482,15 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   true on play, false on stop, and cleared only by a *definite* off/`idle` state in `_refreshStreamPanel`,
   never by a reported "playing"). Do NOT re-add a `media_play_pause` toggle or trust `st.state` for the
   icon. `prev`/`next` still call their services (next tends to stop the stream — hardware). Reliable
-  transport is still via Music Assistant itself.
+  transport is still via Music Assistant itself. **BOTH pause paths were tested and neither works
+  (2026-07-11) — do not retry:** (1) `media_pause` on the MA player relays a DLNA pause the amp ignores
+  (MA's own queue `elapsed_time` keeps ticking through it); (2) the Axium **native** `0x3D` `MEDIA_PAUSE`
+  (via the zone media_player entity) controls the amp's *internal* media player, NOT the DLNA stream MA
+  pushes — it doesn't pause the audio and its `MEDIA_PLAY`/`NEXT` can **change the track** (desyncs MA's
+  queue). `media_seek` DOES work, but a stop→replay→seek "pause" is a dead end: the only position source
+  (`get_queue` `elapsed_time`) is unreliable (sometimes cumulative across repeats, > track duration).
+  Conclusion: **there is no working pause for a streamed source on this amp — `media_stop` is the
+  ceiling.** Never wire native `0x3D` media control to the amp-stream panel.
 - **Sleep card Custom… button**: each sleep row (zone and preset) has a "Custom…" button beside
   the 15/30/60/90m presets that opens a clean in-card popover (`_openCustom` → an `#overlay`/`#sheet`
   absolutely-positioned over the `ha-card`, closed by the backdrop/Cancel/Esc) with a minutes
