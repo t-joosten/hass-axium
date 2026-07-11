@@ -1913,7 +1913,7 @@ class AxiumMatrixCard extends HTMLElement {
       <div class="transport">
         <button class="iconbtn" data-v="down" title="Volume down"><ha-icon icon="mdi:volume-minus"></ha-icon></button>
         <button class="iconbtn" data-t="prev" title="Previous"><ha-icon icon="mdi:skip-previous"></ha-icon></button>
-        <button class="iconbtn play" data-t="play" title="Play/Pause"><ha-icon icon="mdi:play"></ha-icon></button>
+        <button class="iconbtn play" data-t="play" title="Play/Stop"><ha-icon icon="mdi:play"></ha-icon></button>
         <button class="iconbtn" data-t="next" title="Next"><ha-icon icon="mdi:skip-next"></ha-icon></button>
         <button class="iconbtn" data-v="up" title="Volume up"><ha-icon icon="mdi:volume-plus"></ha-icon></button>
       </div>
@@ -1958,13 +1958,14 @@ class AxiumMatrixCard extends HTMLElement {
     } else {
       for (const b of sheet.querySelectorAll("button[data-t]")) {
         b.addEventListener("click", () => {
-          const svc =
-            b.dataset.t === "prev"
-              ? "media_previous_track"
-              : b.dataset.t === "next"
-              ? "media_next_track"
-              : "media_play_pause";
-          this._hass.callService("media_player", svc, { entity_id: maId });
+          if (b.dataset.t === "prev")
+            this._hass.callService("media_player", "media_previous_track", { entity_id: maId });
+          else if (b.dataset.t === "next")
+            this._hass.callService("media_player", "media_next_track", { entity_id: maId });
+          // This amp's DLNA renderer IGNORES pause (verified on hardware: pause
+          // leaves both state and media_position unchanged), but media_stop halts
+          // it. So the middle button is play/stop, not play/pause.
+          else this._togglePlayStop(maId);
         });
       }
       sheet.querySelector(".browse").addEventListener("click", () => {
@@ -1991,9 +1992,45 @@ class AxiumMatrixCard extends HTMLElement {
         }
       });
     }
-    this._panel = { type: "stream", ampId, maId, dragging: false };
+    const st0 = this._hass.states[maId];
+    this._panel = {
+      type: "stream",
+      ampId,
+      maId,
+      dragging: false,
+      // Optimistic play/stop state — the reported state is unreliable (this
+      // player reports "playing" even when stopped externally), so we track
+      // intent and only trust a definite off/idle state to clear it.
+      streamPlaying: st0 ? !OFF_STATES.includes(st0.state) : false,
+    };
     this.shadowRoot.getElementById("overlay").hidden = false;
     this._refreshPanel();
+  }
+
+  /** Toggle the amp stream between playing and stopped. Pause is a no-op on this
+   *  amp's renderer, so "stop" is the working halt; play resumes the queue. */
+  _togglePlayStop(maId) {
+    if (!this._panel) return;
+    const playing = this._panel.streamPlaying !== false;
+    this._hass.callService(
+      "media_player",
+      playing ? "media_stop" : "media_play",
+      { entity_id: maId }
+    );
+    this._panel.streamPlaying = !playing;
+    this._setStreamPlayIcon();
+  }
+
+  /** Reflect the optimistic play/stop state on the transport button. */
+  _setStreamPlayIcon() {
+    const sheet = this.shadowRoot.getElementById("sheet");
+    if (!sheet || !this._panel) return;
+    const icon = sheet.querySelector('button[data-t="play"] ha-icon');
+    if (icon)
+      icon.setAttribute(
+        "icon",
+        this._panel.streamPlaying === false ? "mdi:play" : "mdi:stop"
+      );
   }
 
   /** Search Music Assistant on the amp's stream player; group hits by type. */
@@ -2213,6 +2250,11 @@ class AxiumMatrixCard extends HTMLElement {
       media_content_type: it.media_content_type,
       enqueue: "play",
     });
+    // We just started playback — reflect it on the play/stop button.
+    if (this._panel && this._panel.type === "stream") {
+      this._panel.streamPlaying = true;
+      this._setStreamPlayIcon();
+    }
   }
 
   /** Browse into an expandable result (album/artist/playlist) and show its items.
@@ -2291,11 +2333,12 @@ class AxiumMatrixCard extends HTMLElement {
     };
     setT("prev", !!(feat & SUPPORT_PREVIOUS_TRACK));
     setT("next", !!(feat & SUPPORT_NEXT_TRACK));
-    setT("play", !!(feat & (SUPPORT_PLAY | SUPPORT_PAUSE)));
-    const playIcon = sheet.querySelector('button[data-t="play"] ha-icon');
-    if (playIcon) {
-      playIcon.setAttribute("icon", st.state === "playing" ? "mdi:pause" : "mdi:play");
-    }
+    setT("play", true);
+    // A definite off/idle state is trustworthy (e.g. the stream ended or was
+    // stopped elsewhere); a reported "playing" is NOT (this renderer reports
+    // playing even when stopped/paused), so keep the optimistic flag otherwise.
+    if (st.state && OFF_STATES.includes(st.state)) this._panel.streamPlaying = false;
+    this._setStreamPlayIcon();
   }
 
   _scheduleVolume(zoneId, pct) {

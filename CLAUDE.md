@@ -470,12 +470,19 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   (`_sourceFilter()`). **Source-card editor**: picking a stream carries `ampId` into the config;
   the source card's `_zones()` then scopes to that amp's zones (`_zoneAmpId`), so a source card for
   "Axium 1" shows only zones 1-8. Editor `_changed`/`_currentToken` round-trip the `ampId`.
-- **Stream-panel transport is a hardware limitation**: the amp's DLNA renderer only honours
-  play/pause/next/prev when Music Assistant *owns the queue* (started via `play_media`); for
-  externally-started or direct-push playback pause is a no-op and next *stops* the stream, and
-  the renderer reports `idle` even while playing (verified on real hardware). The card calls the
-  right services (`media_play_pause`/`media_next_track` on the amp's MA player) — nothing to fix
-  card-side. Playback is reliably controlled from Music Assistant itself.
+- **Stream-panel transport / PAUSE IS A HARDWARE NO-OP** (verified on real hardware, 2026-07-11):
+  the amp's DLNA renderer **ignores pause even when Music Assistant owns the queue** — `media_pause`/
+  `media_play_pause` leave both `state` and `media_position` unchanged (an earlier note here optimistically
+  claimed transport works with an MA queue; it does NOT for pause). **`media_stop` DOES work** (→ `idle`),
+  and `media_play` after a stop resumes the queue (restarts the current track, not exact-position). So the
+  stream panel's middle transport button is **play/STOP, not play/pause** (`_togglePlayStop`: `media_stop`
+  when playing, `media_play` when stopped). **The reported state is unreliable** — this MA player reports
+  `state: "playing"` even when stopped/paused, and `media_position`/`..._updated_at` don't tick live — so
+  the button icon is driven by an **optimistic `_panel.streamPlaying` flag** (`_setStreamPlayIcon`; set
+  true on play, false on stop, and cleared only by a *definite* off/`idle` state in `_refreshStreamPanel`,
+  never by a reported "playing"). Do NOT re-add a `media_play_pause` toggle or trust `st.state` for the
+  icon. `prev`/`next` still call their services (next tends to stop the stream — hardware). Reliable
+  transport is still via Music Assistant itself.
 - **Sleep card Custom… button**: each sleep row (zone and preset) has a "Custom…" button beside
   the 15/30/60/90m presets that opens a clean in-card popover (`_openCustom` → an `#overlay`/`#sheet`
   absolutely-positioned over the `ha-card`, closed by the backdrop/Cancel/Esc) with a minutes
