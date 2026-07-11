@@ -360,7 +360,12 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `+ Add alarm`; `.addform[hidden]` needs its own display:none rule since `.addform{display:flex}` beats
   the UA `[hidden]`) lists **amp streams** (`_ampStreams`/`_maByName`) in its source select — a `stream:`
   option sets `source`=media-player-byte + `media_player`=that amp's MA player; `src:` options are the
-  analog sources.
+  analog sources. **Layout** (`_buildAddForm`): labelled fields (`.af-field` = `.af-label` over a control),
+  Name+Time in a 2-col `.af-row2`, **quick day presets** (`.qd`: Every day / Weekdays / Weekend → set the
+  `.f-days` chips; days are 0=Mon..6=Sun), 2-letter day chips, `Rooms`/`Wake to`/`Volume`/`Auto turn-off`
+  sections, and a right-aligned `.af-actions` footer (Cancel → `_toggleAdd`, Add). Selectors `_submitAdd`
+  reads are unchanged (`.f-name`/`.f-time`/`.f-days .daychip.on`/`.f-zones .zonechip.on`/`.f-source`/
+  `.f-volume`→`input[type=range]`/`.f-duration`).
   The hub card finds hub-owned entities via `entityHub` + the entity-registry `platform`,
   and the hub device by identifier `["axium", <hub id>]`. The matrix + hub cards reuse
   `axium-hub-card-editor` (hub + name) for their visual editor.

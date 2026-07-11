@@ -3617,45 +3617,99 @@ class AxiumAlarmsCard extends HTMLElement {
     const streams = mediaSid != null ? this._ampStreams() : [];
     form.dataset.mediaSid = mediaSid != null ? String(mediaSid) : "";
     form.innerHTML = `
-      <input type="text" class="f-name" placeholder="Name">
-      <input type="time" class="f-time" value="07:00">
-      <div class="chips f-days"></div>
-      <div class="chips f-zones"></div>
-      <select class="f-source">${analog
-        .map((s) => `<option value="src:${s.id}">${escHtml(s.name)}</option>`)
-        .join("")}${streams
-        .map((a) => `<option value="stream:${escHtml(a.player)}">${escHtml(a.name)}</option>`)
-        .join("")}</select>
-      <label class="f-vol">Volume <input type="range" min="0" max="100" value="30"><span class="volval">30%</span></label>
-      <label class="f-dur">Auto turn-off after <input type="number" class="f-duration" min="0" max="1440" step="1" value="0" inputmode="numeric"> min <span class="durhint">(0 = stay on)</span></label>
-      <div class="f-media">
-        <button type="button" class="mediabtn link">♪ Wake to Music Assistant…</button>
-        <span class="mediasel"></span>
-        <div class="mediabrowse" hidden></div>
+      <div class="af-row2">
+        <label class="af-field af-name-field">
+          <span class="af-label">Name</span>
+          <input type="text" class="f-name" placeholder="e.g. Weekday wake-up">
+        </label>
+        <label class="af-field">
+          <span class="af-label">Time</span>
+          <input type="time" class="f-time" value="07:00">
+        </label>
       </div>
-      <button class="addbtn">Add</button>`;
+      <div class="af-field">
+        <span class="af-label">Repeat</span>
+        <div class="af-quickdays">
+          <button type="button" class="qd" data-days="everyday">Every day</button>
+          <button type="button" class="qd" data-days="weekdays">Weekdays</button>
+          <button type="button" class="qd" data-days="weekend">Weekend</button>
+        </div>
+        <div class="chips f-days"></div>
+      </div>
+      <div class="af-field">
+        <span class="af-label">Rooms</span>
+        <div class="chips f-zones"></div>
+      </div>
+      <div class="af-field">
+        <span class="af-label">Wake to</span>
+        <select class="f-source">${analog
+          .map((s) => `<option value="src:${s.id}">${escHtml(s.name)}</option>`)
+          .join("")}${streams
+          .map((a) => `<option value="stream:${escHtml(a.player)}">${escHtml(a.name)}</option>`)
+          .join("")}</select>
+        <div class="f-media">
+          <button type="button" class="mediabtn link">♪ Pick a Music Assistant track…</button>
+          <span class="mediasel"></span>
+          <div class="mediabrowse" hidden></div>
+        </div>
+      </div>
+      <div class="af-field">
+        <span class="af-label">Volume <span class="volval">30%</span></span>
+        <input type="range" class="f-volume" min="0" max="100" value="30">
+      </div>
+      <div class="af-field">
+        <span class="af-label">Auto turn-off</span>
+        <div class="af-dur-row">
+          <input type="number" class="f-duration" min="0" max="1440" step="1" value="0" inputmode="numeric">
+          <span class="af-unit">min</span>
+          <span class="durhint">0 = stay on</span>
+        </div>
+      </div>
+      <div class="af-actions">
+        <button type="button" class="af-cancel link">Cancel</button>
+        <button type="button" class="addbtn">Add alarm</button>
+      </div>`;
     form.querySelector(".mediabtn").addEventListener("click", () =>
       this._openMediaBrowse(form)
     );
+    form.querySelector(".af-cancel").addEventListener("click", () =>
+      this._toggleAdd()
+    );
+    const daysEl = form.querySelector(".f-days");
     _DAY_ABBR.forEach((lbl, idx) => {
       const c = document.createElement("button");
+      c.type = "button";
       c.className = "daychip on";
-      c.textContent = lbl[0];
+      c.textContent = lbl.slice(0, 2);
       c.dataset.d = idx;
       c.title = lbl;
       c.addEventListener("click", () => c.classList.toggle("on"));
-      form.querySelector(".f-days").appendChild(c);
+      daysEl.appendChild(c);
     });
+    // Quick day presets (0=Mon..6=Sun).
+    const dayGroups = {
+      everyday: new Set([0, 1, 2, 3, 4, 5, 6]),
+      weekdays: new Set([0, 1, 2, 3, 4]),
+      weekend: new Set([5, 6]),
+    };
+    for (const q of form.querySelectorAll(".qd"))
+      q.addEventListener("click", () => {
+        const want = dayGroups[q.dataset.days];
+        for (const c of daysEl.querySelectorAll(".daychip"))
+          c.classList.toggle("on", want.has(Number(c.dataset.d)));
+      });
+    const zonesEl = form.querySelector(".f-zones");
     for (const z of this._addZones()) {
       const st = this._hass.states[z];
       const c = document.createElement("button");
+      c.type = "button";
       c.className = "zonechip";
       c.textContent = (st && st.attributes.friendly_name) || z;
       c.dataset.z = z;
       c.addEventListener("click", () => c.classList.toggle("on"));
-      form.querySelector(".f-zones").appendChild(c);
+      zonesEl.appendChild(c);
     }
-    const vol = form.querySelector('input[type="range"]');
+    const vol = form.querySelector(".f-volume");
     const volval = form.querySelector(".volval");
     vol.addEventListener("input", () => (volval.textContent = `${vol.value}%`));
     form.querySelector(".addbtn").addEventListener("click", () =>
@@ -3807,11 +3861,12 @@ AxiumAlarmsCard.styles = `
   }
   .days { display: inline-flex; gap: 2px; }
   .daychip {
-    width: 20px; height: 20px; border-radius: 50%; padding: 0;
+    min-width: 40px; padding: 7px 0; text-align: center; border-radius: 10px;
     border: 1px solid var(--divider-color); background: none; cursor: pointer;
-    font-size: 0.7rem; color: var(--secondary-text-color);
+    font: inherit; font-size: 0.82rem; color: var(--primary-text-color);
   }
   .daychip.on { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .daychip:hover, .qd:hover { border-color: var(--primary-color); }
   .x { border: none; background: none; cursor: pointer; color: var(--secondary-text-color); font-size: 0.9rem; flex: 0 0 auto; }
   .x:hover { color: var(--error-color); }
   .tog { position: relative; display: inline-block; width: 36px; height: 20px; flex: 0 0 auto; }
@@ -3822,29 +3877,48 @@ AxiumAlarmsCard.styles = `
   .tog input:checked + .track::before { transform: translateX(16px); }
   .addbar { margin-top: 10px; }
   .link { border: none; background: none; color: var(--primary-color); cursor: pointer; font: inherit; padding: 0; }
-  .addform { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--divider-color); }
+  .addform { display: flex; flex-direction: column; gap: 16px; margin-top: 10px; padding-top: 14px; border-top: 1px solid var(--divider-color); }
   .addform[hidden] { display: none; }
-  .addform input[type="text"], .addform select {
-    font: inherit; padding: 6px 8px; border-radius: 6px;
+  .af-field { display: flex; flex-direction: column; gap: 7px; }
+  .af-row2 { display: grid; grid-template-columns: 1fr 132px; gap: 12px; align-items: end; }
+  .af-label {
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--secondary-text-color);
+  }
+  .af-label .volval { color: var(--primary-color); font-weight: 700; letter-spacing: 0; }
+  .addform input[type="text"], .addform input[type="time"], .addform select, .f-duration {
+    font: inherit; padding: 9px 10px; border-radius: 8px; box-sizing: border-box;
     border: 1px solid var(--divider-color);
     background: var(--card-background-color); color: var(--primary-text-color);
   }
-  .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .addform input[type="text"], .addform input[type="time"], .addform select { width: 100%; }
+  .addform input:focus, .addform select:focus { outline: none; border-color: var(--primary-color); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .zonechip {
-    padding: 4px 10px; border-radius: 16px; border: 1px solid var(--divider-color);
+    padding: 7px 12px; border-radius: 16px; border: 1px solid var(--divider-color);
     background: none; cursor: pointer; font: inherit; font-size: 0.85rem;
     color: var(--primary-text-color);
   }
+  .zonechip:hover { border-color: var(--primary-color); }
   .zonechip.on { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
-  .f-vol { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--secondary-text-color); }
-  .f-dur { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--secondary-text-color); flex-wrap: wrap; }
-  .f-dur .f-duration { width: 64px; font: inherit; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--divider-color); background: var(--secondary-background-color); color: var(--primary-text-color); }
-  .durhint { color: var(--secondary-text-color); font-size: 0.8rem; }
-  .addbtn {
-    align-self: flex-start; padding: 6px 16px; border-radius: 8px; border: none;
-    background: var(--primary-color); color: var(--text-primary-color, #fff);
-    cursor: pointer; font: inherit;
+  .af-quickdays { display: flex; flex-wrap: wrap; gap: 6px; }
+  .qd {
+    padding: 4px 11px; border-radius: 14px; border: 1px solid var(--divider-color);
+    background: none; cursor: pointer; font: inherit; font-size: 0.78rem;
+    color: var(--secondary-text-color);
   }
+  .f-volume { width: 100%; height: 26px; accent-color: var(--primary-color); cursor: pointer; }
+  .af-dur-row { display: flex; align-items: center; gap: 8px; }
+  .f-duration { width: 84px; }
+  .af-unit { color: var(--primary-text-color); font-size: 0.9rem; }
+  .durhint { color: var(--secondary-text-color); font-size: 0.8rem; }
+  .af-actions { display: flex; justify-content: flex-end; align-items: center; gap: 16px; margin-top: 2px; }
+  .addbtn {
+    padding: 10px 22px; border-radius: 10px; border: none;
+    background: var(--primary-color); color: var(--text-primary-color, #fff);
+    cursor: pointer; font: inherit; font-weight: 600;
+  }
+  .addbtn:hover { filter: brightness(1.08); }
   .quick { display: inline-flex; gap: 4px; margin-top: 4px; }
   .q, .custom {
     padding: 3px 10px; border-radius: 14px; border: 1px solid var(--divider-color);
