@@ -245,24 +245,48 @@ async function axiumMaBrowse(hass, entityId, contentId, contentType) {
   return res || {};
 }
 
-// A zone's max-volume cap (0..100) from its `number.*_max_volume` entity (on the
-// same device as the zone media_player). 100 when not found.
+// A zone's max-volume cap (0..100) from its `number.*_max_volume` entity. 100
+// when there's no cap. Fast path derives the number id from the zone id (O(1),
+// avoids scanning all entities every tick); falls back to a device+platform scan
+// only if that id is absent (e.g. renamed). Caches the last KNOWN value per zone
+// so a transient `unavailable`/`unknown` doesn't briefly uncap the slider.
+const _axiumMaxVolCache = new Map();
 function axiumMaxVolume(hass, zoneId) {
   try {
-    const ents = hass.entities || {};
-    const dev = ents[zoneId] && ents[zoneId].device_id;
-    if (dev) {
-      for (const id of Object.keys(ents)) {
-        if (!id.startsWith("number.") || !id.endsWith("_max_volume")) continue;
-        if (ents[id].device_id !== dev) continue;
-        const v = Number((hass.states[id] || {}).state);
-        if (Number.isFinite(v)) return Math.max(0, Math.min(100, v));
+    const states = hass.states || {};
+    // Fast path: media_player.axium_…_zone_N → number.axium_…_zone_N_max_volume.
+    let st = states["number." + zoneId.slice(zoneId.indexOf(".") + 1) + "_max_volume"];
+    if (!st) {
+      const ents = hass.entities || {};
+      const dev = ents[zoneId] && ents[zoneId].device_id;
+      if (dev) {
+        for (const id of Object.keys(ents)) {
+          if (!id.startsWith("number.") || !id.endsWith("_max_volume")) continue;
+          const e = ents[id];
+          if (e.device_id !== dev || e.platform !== "axium") continue;
+          st = states[id];
+          break;
+        }
       }
     }
+    const v = st && Number(st.state);
+    if (Number.isFinite(v)) {
+      const capped = Math.max(0, Math.min(100, v));
+      _axiumMaxVolCache.set(zoneId, capped);
+      return capped;
+    }
+    // Entity is unavailable/unknown right now — reuse the last known cap.
+    if (_axiumMaxVolCache.has(zoneId)) return _axiumMaxVolCache.get(zoneId);
   } catch (e) {
     /* fall through */
   }
   return 100;
+}
+
+// Size a greyed "cap" overlay (`prop` is "height" for a vertical slider or
+// "width" for a horizontal one) to the region above a zone's max volume.
+function axiumApplyVolCap(el, hass, zoneId, prop) {
+  if (el) el.style[prop] = Math.max(0, 100 - axiumMaxVolume(hass, zoneId)) + "%";
 }
 
 function axiumSourceChoices(hass) {
@@ -1358,6 +1382,7 @@ class AxiumMaSearch extends HTMLElement {
   }
   disconnectedCallback() {
     if (this._debTimer) clearTimeout(this._debTimer);
+    this._cancelPlay();
   }
 
   _build() {
@@ -1449,12 +1474,15 @@ class AxiumMaSearch extends HTMLElement {
   }
 
   // Which tab an item belongs to. Radio stations come back as a generic
-  // `media_class: "music"` (radiobrowser/TuneIn), so classify them by provider
-  // into a proper "radio" tab instead of hiding them under a vague label.
+  // `media_class: "music"` (radiobrowser/TuneIn), so classify them by the raw
+  // provider prefix of the content id (NOT the display label — that would couple
+  // bucketing to a human-facing string) into a proper "radio" tab.
   _bucket(it) {
     if (it.media_class === "radio") return "radio";
-    const prov = this._providerLabel(it.media_content_id).toLowerCase();
-    if (prov === "radio" || prov === "tunein") return "radio";
+    if (/^(radiobrowser|tunein|radionet|radio_?browser)(--[^:]*)?:\/\//i.test(
+      String(it.media_content_id || "")
+    ))
+      return "radio";
     return it.media_class || "other";
   }
   _tabOrder(present) {
@@ -1483,7 +1511,6 @@ class AxiumMaSearch extends HTMLElement {
   }
 
   _renderTabs() {
-    this._state.home = () => this._renderTabs();
     const tabsEl = this._q(".sstabs");
     if (!tabsEl || !this._state.groups) return;
     const order = this._state.order || [];
@@ -1501,13 +1528,12 @@ class AxiumMaSearch extends HTMLElement {
       tabsEl.appendChild(b);
     }
     const items = (this._state.tab && this._state.groups[this._state.tab]) || [];
-    this._renderItems(items, null);
+    this._renderItems(items, null, () => this._renderTabs());
   }
 
   // Browse the library root (picker's initial view).
   async _drillRoot() {
     if (!this._hass || !this._player) return;
-    this._state.home = () => this._drillRoot();
     this._spinner();
     const seq = ++this._state.seq;
     let children;
@@ -1515,20 +1541,18 @@ class AxiumMaSearch extends HTMLElement {
       const r = await axiumMaBrowse(this._hass, this._player);
       children = r.children || [];
     } catch (e) {
-      if (this._state.seq === seq) {
-        const el = this._q(".ssresults");
-        if (el) el.textContent = "Couldn't browse.";
-      }
+      if (this._state.seq === seq) this._renderError("Couldn't browse.", null);
       return;
     }
     if (this._state.seq !== seq || !this.isConnected) return;
     const tabs = this._q(".sstabs");
     if (tabs) tabs.hidden = true;
-    this._renderItems(children, null);
+    this._renderItems(children, null, () => this._drillRoot());
   }
 
-  // Browse into an expandable item; Back returns to the current "home" view.
-  async _drill(item) {
+  // Browse into an expandable item. `back` re-renders the PARENT level, so Back
+  // steps up exactly one level at any depth.
+  async _drill(item, back) {
     this._spinner();
     const seq = ++this._state.seq;
     let children;
@@ -1538,29 +1562,22 @@ class AxiumMaSearch extends HTMLElement {
       );
       children = r.children || [];
     } catch (e) {
-      if (this._state.seq === seq) {
-        const el = this._q(".ssresults");
-        if (el) el.textContent = "Couldn't open.";
-      }
+      if (this._state.seq === seq) this._renderError("Couldn't open.", back);
       return;
     }
     if (this._state.seq !== seq || !this.isConnected) return;
     const tabs = this._q(".sstabs");
     if (tabs) tabs.hidden = true;
-    this._renderItems(children, this._state.home);
+    this._renderItems(children, back, () => this._drill(item, back));
   }
 
-  _renderItems(items, back) {
+  // `back` = go up one level (null at the top). `rerenderSelf` re-renders THIS
+  // list; it becomes the parent-back target when drilling into a child.
+  _renderItems(items, back, rerenderSelf) {
     const res = this._q(".ssresults");
     if (!res) return;
     res.innerHTML = "";
-    if (back) {
-      const b = document.createElement("button");
-      b.className = "ssback";
-      b.textContent = "‹ Back";
-      b.addEventListener("click", () => back());
-      res.appendChild(b);
-    }
+    if (back) res.appendChild(this._backButton(back));
     for (const it of items || []) {
       const row = document.createElement("div");
       row.className = "srow";
@@ -1590,7 +1607,7 @@ class AxiumMaSearch extends HTMLElement {
       const canPlay = it.can_play !== false && !!it.media_content_id;
       main.addEventListener("click", () => {
         if (canPlay) this._activate(it);
-        else if (it.can_expand) this._drill(it);
+        else if (it.can_expand) this._drill(it, rerenderSelf);
       });
       row.appendChild(main);
       if (it.can_expand) {
@@ -1598,7 +1615,7 @@ class AxiumMaSearch extends HTMLElement {
         exp.className = "sr-exp";
         exp.title = "Browse";
         exp.innerHTML = `<ha-icon icon="mdi:chevron-right"></ha-icon>`;
-        exp.addEventListener("click", () => this._drill(it));
+        exp.addEventListener("click", () => this._drill(it, rerenderSelf));
         row.appendChild(exp);
       }
       res.appendChild(row);
@@ -1611,6 +1628,26 @@ class AxiumMaSearch extends HTMLElement {
     }
   }
 
+  _backButton(back) {
+    const b = document.createElement("button");
+    b.className = "ssback";
+    b.textContent = "‹ Back";
+    b.addEventListener("click", () => back());
+    return b;
+  }
+
+  // Show an error but keep the Back button so navigation isn't lost.
+  _renderError(msg, back) {
+    const res = this._q(".ssresults");
+    if (!res) return;
+    res.innerHTML = "";
+    if (back) res.appendChild(this._backButton(back));
+    const e = document.createElement("div");
+    e.className = "empty";
+    e.textContent = msg;
+    res.appendChild(e);
+  }
+
   // Row tap: play now, or (pick mode) fire a `pick` event with the item.
   _activate(it) {
     if (this._mode === "pick") {
@@ -1621,7 +1658,7 @@ class AxiumMaSearch extends HTMLElement {
     }
     if (!this._hass || !this._player) return;
     const play = () => {
-      if (!this._hass || !this._player) return;
+      if (!this.isConnected || !this._hass || !this._player) return;
       this._hass.callService("media_player", "play_media", {
         entity_id: this._player,
         media_content_id: it.media_content_id,
@@ -1629,13 +1666,33 @@ class AxiumMaSearch extends HTMLElement {
         enqueue: "play",
       });
     };
-    // Verified on hardware: when `play_media` arrives while the amp's renderer is
-    // already PLAYING, it stops (goes idle) instead of switching — and a second
-    // `play_media` from the now-idle state actually plays it (the "tap twice"
-    // the user hit). So if it's currently playing, fire again once it's settled.
     const st = this._hass.states[this._player];
+    this._cancelPlay(); // drop a pending double-play from an earlier tap
     play();
-    if (st && st.state === "playing") setTimeout(play, 1500);
+    // Let the embedder reflect that playback started (optimistic stop button).
+    this.dispatchEvent(new CustomEvent("play", { bubbles: true, composed: true }));
+    // Verified on hardware: `play_media` while the renderer is already PLAYING
+    // stops it (goes idle) instead of switching — a second `play_media` from the
+    // now-idle state actually plays it (the "tap twice" the user hit). Store the
+    // handle so it can be cancelled on close / a newer tap / disconnect.
+    if (st && st.state === "playing") this._playTimer = setTimeout(play, 1500);
+  }
+
+  _cancelPlay() {
+    if (this._playTimer) {
+      clearTimeout(this._playTimer);
+      this._playTimer = null;
+    }
+  }
+
+  // Called by the embedding card when its popover closes — cancel any pending
+  // deferred play so it can't fire after the panel is dismissed.
+  cancelPending() {
+    this._cancelPlay();
+    if (this._debTimer) {
+      clearTimeout(this._debTimer);
+      this._debTimer = null;
+    }
   }
 
   _providerLabel(id) {
@@ -2055,6 +2112,9 @@ class AxiumMatrixCard extends HTMLElement {
         : () => this._openPresetPanel(ch.dataset.src);
       ch.addEventListener("click", open);
       ch.addEventListener("keydown", (ev) => {
+        // Only when the header itself is focused — not the nested power button
+        // (Enter on it should toggle the source, not also open the panel).
+        if (ev.target !== ch) return;
         if (ev.key === "Enter" || ev.key === " ") {
           ev.preventDefault();
           open();
@@ -2126,11 +2186,9 @@ class AxiumMatrixCard extends HTMLElement {
   }
 
   /** The zones currently powered on and routed to this column's source. */
-  _activeZonesForColumn(col) {
-    const zones =
-      col.kind === "stream"
-        ? this._zones().filter((z) => col.zones.has(z))
-        : this._zones();
+  _activeZonesForColumn(col, zonesArg) {
+    const all = zonesArg || this._zones();
+    const zones = col.kind === "stream" ? all.filter((z) => col.zones.has(z)) : all;
     return zones.filter((z) => {
       if (col.kind === "stream") return this._streamCellActive(z, col.ampId);
       const st = this._hass.states[z];
@@ -2323,6 +2381,10 @@ class AxiumMatrixCard extends HTMLElement {
       clearTimeout(this._volTimer);
       this._volTimer = null;
     }
+    // Cancel any pending deferred play in the search component so it can't fire
+    // after the popover is dismissed.
+    const search = this.shadowRoot.querySelector("axium-ma-search");
+    if (search && search.cancelPending) search.cancelPending();
     this._panel = null;
   }
 
@@ -2533,6 +2595,14 @@ class AxiumMatrixCard extends HTMLElement {
         search.mode = "play";
         search.hass = this._hass;
         search.player = maId;
+        // When a search result starts playing, reflect it on the play/stop
+        // button (the component can't touch this panel's optimistic flag).
+        search.addEventListener("play", () => {
+          if (this._panel && this._panel.type === "stream") {
+            this._panel.streamPlaying = true;
+            this._setStreamPlayIcon();
+          }
+        });
       }
     }
     const st0 = this._hass.states[maId];
@@ -2567,21 +2637,31 @@ class AxiumMatrixCard extends HTMLElement {
   /** "Pause"/resume the rooms on an amp's stream by powering its zones off/on
    *  (reuses the per-source power memory in `_toggleSourcePower`). The MA stream
    *  keeps running, so resuming is instant — unlike Stop, which tears it down. */
-  _toggleStreamRooms(ampId) {
-    const col = this._columns().find((c) => c.kind === "stream" && c.ampId === ampId);
-    if (col) this._toggleSourcePower(col);
-    this._setStreamPauseIcon(ampId);
+  _streamColumn(ampId) {
+    return this._columns().find((c) => c.kind === "stream" && c.ampId === ampId);
   }
 
-  /** Pause icon when the amp has active rooms, play icon when they're all off. */
-  _setStreamPauseIcon(ampId) {
+  _toggleStreamRooms(ampId) {
+    const col = this._streamColumn(ampId);
+    if (!col) return;
+    const wasActive = this._activeZonesForColumn(col).length > 0;
+    this._toggleSourcePower(col);
+    // Optimistic: if rooms were on we just turned them off (show play), else on.
+    this._setStreamPauseIcon(ampId, !wasActive);
+  }
+
+  /** Pause icon when the amp's rooms are on, play icon when off. Pass `playing`
+   *  to set it optimistically; otherwise it's derived from current state. */
+  _setStreamPauseIcon(ampId, playing) {
     const sheet = this.shadowRoot.getElementById("sheet");
     if (!sheet) return;
     const icon = sheet.querySelector('button[data-t="pauseplay"] ha-icon');
     if (!icon) return;
-    const col = this._columns().find((c) => c.kind === "stream" && c.ampId === ampId);
-    const active = col ? this._activeZonesForColumn(col).length > 0 : false;
-    icon.setAttribute("icon", active ? "mdi:pause" : "mdi:play");
+    if (playing === undefined) {
+      const col = this._streamColumn(ampId);
+      playing = col ? this._activeZonesForColumn(col).length > 0 : false;
+    }
+    icon.setAttribute("icon", playing ? "mdi:pause" : "mdi:play");
   }
 
   /** Reflect the optimistic play/stop state on the transport button. */
@@ -2632,11 +2712,6 @@ class AxiumMatrixCard extends HTMLElement {
       slider.value = String(pct);
       if (volval) volval.textContent = `${pct}%`;
     }
-    // Grey out the range above the zone's max volume (zone panel only).
-    const cap = sheet.querySelector(".slidcap");
-    if (cap)
-      cap.style.width =
-        Math.max(0, 100 - axiumMaxVolume(this._hass, this._panel.zoneId)) + "%";
     const muteIcon = sheet.querySelector(".mute ha-icon");
     if (muteIcon) {
       muteIcon.setAttribute(
@@ -2872,10 +2947,7 @@ class AxiumMatrixCard extends HTMLElement {
       if (volval) volval.textContent = `${pct}%`;
     }
     // Grey out the range above the zone's max volume (zone panel only).
-    const cap = sheet.querySelector(".slidcap");
-    if (cap)
-      cap.style.width =
-        Math.max(0, 100 - axiumMaxVolume(this._hass, this._panel.zoneId)) + "%";
+    axiumApplyVolCap(sheet.querySelector(".slidcap"), this._hass, this._panel.zoneId, "width");
     const muteIcon = sheet.querySelector(".mute ha-icon");
     if (muteIcon) {
       muteIcon.setAttribute(
@@ -2940,11 +3012,14 @@ class AxiumMatrixCard extends HTMLElement {
       h.title = name;
       h.textContent = name;
     }
-    // Per-source power toggle: lit when the source has any active zone.
+    // Per-source power toggle: lit when the source has any active zone. Compute
+    // the zone list once and reuse it for every column (avoids re-sorting zones
+    // per column, per tick).
     const colByKey = new Map(this._columns().map((c) => [this._colKey(c), c]));
+    const zones = this._zones();
     for (const pw of this.shadowRoot.querySelectorAll(".srcpwr")) {
       const col = colByKey.get(pw.dataset.colkey);
-      pw.classList.toggle("on", !!col && this._activeZonesForColumn(col).length > 0);
+      pw.classList.toggle("on", !!col && this._activeZonesForColumn(col, zones).length > 0);
     }
     const allpwr = this.shadowRoot.querySelector(".allpower");
     if (allpwr) {
@@ -4430,8 +4505,7 @@ class AxiumVolumesCard extends HTMLElement {
         col.querySelector(".pct").textContent = pctv + "%";
       }
       // Grey out the range above the zone's max volume.
-      const cap = col.querySelector(".volcap");
-      if (cap) cap.style.height = Math.max(0, 100 - axiumMaxVolume(this._hass, z)) + "%";
+      axiumApplyVolCap(col.querySelector(".volcap"), this._hass, z, "height");
       const zn = col.querySelector(".zn");
       zn.textContent = this._name(z);
       zn.title = this._name(z);

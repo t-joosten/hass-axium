@@ -301,12 +301,16 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   search keeps the currently-selected tab** if the new results still have that category (else falls back to
   All) — so refining a query from within e.g. the Tracks tab stays on Tracks.
   **Bucketing (`_bucket`) is NOT purely `media_class`:** radio stations come back with a generic
-  `media_class: "music"` (radiobrowser/TuneIn) — detect them by provider (`_providerLabel` == "Radio"/
-  "TuneIn", or `media_class === "radio"`) and put them in a dedicated **Radio** tab; the leftover generic
-  `"music"` is labelled **Music**. (Before this, radio was hidden under a vague "music"→"Radio" label.) Rows show cover art, title, and the **provider** (`_providerLabel`). A **"›"** drills in
-  (`_drill`; Back returns to the search tabs or browse root — `_state.home`), **one browse per tap, on
-  demand**, with a spinner while loading (browse latency is MA↔provider-bound, e.g. Spotify — can't be
-  sped up). **Do NOT re-add a `media_play` nudge** in play mode: this MA player reports `state:"playing"`
+  `media_class: "music"` (radiobrowser/TuneIn) — detect them by the **raw content-id provider prefix**
+  (`radiobrowser://`/`tunein://`/`radionet://`, or `media_class === "radio"`) and put them in a dedicated
+  **Radio** tab; the leftover generic `"music"` is labelled **Music**. (Match the raw prefix, NOT
+  `_providerLabel`'s display string — that would couple bucketing to a human-facing label.) Rows show
+  cover art, title, and the **provider** (`_providerLabel`). A **"›"** drills in (`_drill(item, back)`),
+  **one browse per tap, on demand**, with a spinner while loading (MA↔provider-bound). **Back steps up
+  exactly one level at any depth:** each list is rendered with a `back` (parent re-render, null at top)
+  and a `rerenderSelf` (passed as the child's `back` when drilling) — no `_state.home` single-level hack.
+  Error paths use `_renderError(msg, back)` which KEEPS the Back button (don't overwrite `.ssresults` with
+  bare text). **Do NOT re-add a `media_play` nudge** in play mode: this MA player reports `state:"playing"`
   even while paused (DLNA desync, verified via `media_position` freezing), so a nudge un-pauses a
   just-paused stream (the old "pause doesn't work" bug); `enqueue:"play"` reliably auto-starts without one
   (`"replace"` was flaky for a lone track). **Switch-from-playing double-fire** (`_activate`): verified on
@@ -314,7 +318,15 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   instead of switching** — and a second `play_media` from the now-idle state actually plays the new track
   (the user's "tap once → music stops, tap again → plays"). So `_activate` fires `play_media`, and **if the
   player state was "playing", fires it again ~1.5s later**. From idle it's a single fire (no double). Don't
-  "simplify" this to a single call. **DO NOT prefetch per-row browses** (an old `_streamItemCount`
+  "simplify" this to a single call. **The deferred play is a stored, cancellable timer** (`_playTimer`,
+  cleared by `_cancelPlay`): cancelled at the start of a new `_activate` (rapid taps don't stack), in
+  `disconnectedCallback`, and via the public `cancelPending()` which the matrix `_closePanel` calls — else
+  it would fire `play_media` ~1.5s AFTER the user closed the popover / hit Stop (the popover only hides,
+  it doesn't remove the element). **`_activate` (play mode) dispatches a `play` CustomEvent** so the stream
+  panel can set its optimistic `_panel.streamPlaying=true` + refresh the stop-button icon (the isolated
+  component can't touch `_panel`, and `_refreshStreamPanel` never sets streamPlaying=true because reported
+  "playing" is untrusted) — without it the Stop button stayed on ▶ and did `media_play` (resume) after a
+  search-initiated play. **DO NOT prefetch per-row browses** (an old `_streamItemCount`
   fired a `browse_media` per album/playlist row for a track count — a burst of ~10-15 concurrent
   `browse_media` calls **hangs Music Assistant**; removed). The WS calls are the module fns
   `axiumMaSearch`/`axiumMaBrowse`. NB: `search_media`/`browse_media` return items whose
@@ -474,10 +486,14 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   and the final `change` still fires. Filterable via its own editor (`axium-volumes-card-editor`:
   hub/zones/name) — the `zones` whitelist (empty = all). Reads/writes only the zones'
   media_player state. **Max-volume cap:** the region above a zone's max volume is **greyed out** on the
-  slider (a `.volcap`/`.slidcap` overlay sized to `100 − max`), and drags/sets are **clamped** to it. The
-  max is `axiumMaxVolume(hass, zoneId)` (0-100) — read from the zone's `number.*_max_volume` entity (found
-  by matching the `_max_volume` entity-id suffix on the zone media_player's own device; 100 if absent).
-  Same greying is applied to the **matrix zone popover** volume slider (`_openZonePanel`/`_refreshPanel`).
+  slider (`axiumApplyVolCap` sizes a `.volcap`/`.slidcap` overlay to `100 − max`), and drags/sets are
+  **clamped** to it. The max is `axiumMaxVolume(hass, zoneId)` (0-100) from the zone's `number.*_max_volume`
+  entity. **Fast path** derives the number id from the zone id (`number.<zone-slug>_max_volume`, O(1) — it
+  ran on every hass tick per zone, so a full `hass.entities` scan was too costly); falls back to a
+  device+`platform==="axium"` scan only if that id is absent (renamed). **Caches the last known value per
+  zone** (`_axiumMaxVolCache`) so a transient `unavailable`/`unknown` doesn't briefly UNCAP the slider
+  (returning the 100 default). Same greying on the **matrix zone popover** slider (`_openZonePanel`/
+  `_refreshPanel`).
 - **The internal Media Player source is SPLIT per amp everywhere** (id ≥ `STREAM_SOURCE_MIN`):
   `axiumSourceChoices` emits **one choice per amp** ("Axium 1", "Axium 2" — NOT one combined
   "Media Player" or "Axium 1 / Axium 2"), each amp-scoped by a 3-part token
