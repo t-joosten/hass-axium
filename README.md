@@ -623,11 +623,15 @@ The row and column **headers are interactive** too:
   toggled) only under **its own** amp's column; the other stream column is blank for
   it. Rows are ordered by zone number (1–16, and beyond for more amps). **Tap a stream
   header** → a panel with **now playing**, a **preset** picker, **volume**, transport,
-  and an inline **Music Assistant search**. Type to search that amp's stream player;
-  results are **tabbed into Tracks / Albums / Playlists**, each row showing cover art,
-  the provider (Spotify, Radio, Local…) and a track count for albums/playlists. Tap a
-  row to play it, or **›** to browse into it. There's also a **Browse Music Assistant**
-  button for the full library. For all of this the amp's MA player must be **named the
+  and an inline **Music Assistant search**. The transport row has **previous /
+  pause-play / stop / next**: **pause-play** silences the amp's rooms and brings them
+  back (it powers the rooms off/on — the stream keeps running, so resume is instant, and
+  it reuses the per-source memory), while **stop** halts the stream itself. (This amp
+  can't truly pause a stream — see below — so "pause" is really a room on/off.) Type to
+  search that amp's stream player; results are grouped into an **All** tab plus a tab per
+  result type (Tracks, Albums, Playlists, Artists, Radio, …), each row showing cover art
+  and the provider (Spotify, Radio, Local…). Tap a row to **play it**, or **›** to browse
+  into it. There's also a **Browse Music Assistant** button for the full library. For all of this the amp's MA player must be **named the
   same as the amplifier** (rename it to `Axium 1` / `Axium 2` in Music Assistant); the
   panel shows a reminder if it isn't. There is intentionally **no "play on both amps"** — the two amps
   can't be time‑synced, so it would drift badly; for genuine whole‑home audio feed all the

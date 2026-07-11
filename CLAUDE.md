@@ -488,8 +488,13 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   the button icon is driven by an **optimistic `_panel.streamPlaying` flag** (`_setStreamPlayIcon`; set
   true on play, false on stop, and cleared only by a *definite* off/`idle` state in `_refreshStreamPanel`,
   never by a reported "playing"). Do NOT re-add a `media_play_pause` toggle or trust `st.state` for the
-  icon. `prev`/`next` still call their services (next tends to stop the stream — hardware). Reliable
-  transport is still via Music Assistant itself. **BOTH pause paths were tested and neither works
+  icon. `prev`/`next` still call their services (next tends to stop the stream — hardware). **A
+  `data-t="pauseplay"` button sits BEFORE the stop button** (`_toggleStreamRooms` →
+  `_toggleSourcePower` on the amp's stream column): since a true transport pause is impossible, it
+  "pauses"/resumes by powering the amp's stream ROOMS off/on (the MA stream keeps running, so resume is
+  instant — but it rejoins live, not at the pre-pause position). Icon pause↔play via `_setStreamPauseIcon`
+  (pause when any room is on). It shares the SAME localStorage memory (`stream:<ampId>`) as the matrix
+  column power button. Reliable true transport is still via Music Assistant itself. **BOTH pause paths were tested and neither works
   (2026-07-11) — do not retry:** (1) `media_pause` on the MA player relays a DLNA pause the amp ignores
   (MA's own queue `elapsed_time` keeps ticking through it); (2) the Axium **native** `0x3D` `MEDIA_PAUSE`
   (via the zone media_player entity) controls the amp's *internal* media player, NOT the DLNA stream MA

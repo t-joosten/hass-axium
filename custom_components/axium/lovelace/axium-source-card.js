@@ -1994,7 +1994,8 @@ class AxiumMatrixCard extends HTMLElement {
       <div class="transport">
         <button class="iconbtn" data-v="down" title="Volume down"><ha-icon icon="mdi:volume-minus"></ha-icon></button>
         <button class="iconbtn" data-t="prev" title="Previous"><ha-icon icon="mdi:skip-previous"></ha-icon></button>
-        <button class="iconbtn play" data-t="play" title="Play/Stop"><ha-icon icon="mdi:play"></ha-icon></button>
+        <button class="iconbtn pauseplay" data-t="pauseplay" title="Pause / resume the rooms"><ha-icon icon="mdi:pause"></ha-icon></button>
+        <button class="iconbtn play" data-t="play" title="Stop / start the stream"><ha-icon icon="mdi:play"></ha-icon></button>
         <button class="iconbtn" data-t="next" title="Next"><ha-icon icon="mdi:skip-next"></ha-icon></button>
         <button class="iconbtn" data-v="up" title="Volume up"><ha-icon icon="mdi:volume-plus"></ha-icon></button>
       </div>
@@ -2043,9 +2044,12 @@ class AxiumMatrixCard extends HTMLElement {
             this._hass.callService("media_player", "media_previous_track", { entity_id: maId });
           else if (b.dataset.t === "next")
             this._hass.callService("media_player", "media_next_track", { entity_id: maId });
-          // This amp's DLNA renderer IGNORES pause (verified on hardware: pause
-          // leaves both state and media_position unchanged), but media_stop halts
-          // it. So the middle button is play/stop, not play/pause.
+          // "Pause"/resume the ROOMS by powering the amp's stream zones off/on
+          // (reuses the per-source power logic). The MA stream keeps running, so
+          // resuming is instant — a true transport pause isn't possible (this
+          // amp's DLNA renderer ignores pause).
+          else if (b.dataset.t === "pauseplay") this._toggleStreamRooms(ampId);
+          // media_stop halts the actual stream (restart loses the position).
           else this._togglePlayStop(maId);
         });
       }
@@ -2100,6 +2104,26 @@ class AxiumMatrixCard extends HTMLElement {
     );
     this._panel.streamPlaying = !playing;
     this._setStreamPlayIcon();
+  }
+
+  /** "Pause"/resume the rooms on an amp's stream by powering its zones off/on
+   *  (reuses the per-source power memory in `_toggleSourcePower`). The MA stream
+   *  keeps running, so resuming is instant — unlike Stop, which tears it down. */
+  _toggleStreamRooms(ampId) {
+    const col = this._columns().find((c) => c.kind === "stream" && c.ampId === ampId);
+    if (col) this._toggleSourcePower(col);
+    this._setStreamPauseIcon(ampId);
+  }
+
+  /** Pause icon when the amp has active rooms, play icon when they're all off. */
+  _setStreamPauseIcon(ampId) {
+    const sheet = this.shadowRoot.getElementById("sheet");
+    if (!sheet) return;
+    const icon = sheet.querySelector('button[data-t="pauseplay"] ha-icon');
+    if (!icon) return;
+    const col = this._columns().find((c) => c.kind === "stream" && c.ampId === ampId);
+    const active = col ? this._activeZonesForColumn(col).length > 0 : false;
+    icon.setAttribute("icon", active ? "mdi:pause" : "mdi:play");
   }
 
   /** Reflect the optimistic play/stop state on the transport button. */
@@ -2420,6 +2444,7 @@ class AxiumMatrixCard extends HTMLElement {
     // playing even when stopped/paused), so keep the optimistic flag otherwise.
     if (st.state && OFF_STATES.includes(st.state)) this._panel.streamPlaying = false;
     this._setStreamPlayIcon();
+    this._setStreamPauseIcon(this._panel.ampId);
   }
 
   _scheduleVolume(zoneId, pct) {
