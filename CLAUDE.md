@@ -297,7 +297,9 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `.hass` on every update (it's read at query time). **Searches auto-run ~1s after typing stops**
   (debounced) as well as on Enter / the button. Results group into an **All** tab (default, all hits) plus
   a tab per type (`_tabOrder`/`_tabLabel`: Tracks/Albums/Playlists/Artists/Radio/…), common types first
-  then the rest alphabetically, so **nothing a search returns is dropped**; empty search → no tabs.
+  then the rest alphabetically, so **nothing a search returns is dropped**; empty search → no tabs. **A new
+  search keeps the currently-selected tab** if the new results still have that category (else falls back to
+  All) — so refining a query from within e.g. the Tracks tab stays on Tracks.
   **Bucketing (`_bucket`) is NOT purely `media_class`:** radio stations come back with a generic
   `media_class: "music"` (radiobrowser/TuneIn) — detect them by provider (`_providerLabel` == "Radio"/
   "TuneIn", or `media_class === "radio"`) and put them in a dedicated **Radio** tab; the leftover generic

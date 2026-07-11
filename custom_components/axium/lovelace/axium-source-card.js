@@ -1436,9 +1436,15 @@ class AxiumMaSearch extends HTMLElement {
     }
     const catOrder = this._tabOrder(Object.keys(groups));
     groups.all = hits;
+    const prevTab = this._state.tab;
     this._state.groups = groups;
     this._state.order = hits.length ? ["all", ...catOrder] : [];
-    this._state.tab = this._state.order[0] || null;
+    // Keep the user's selected tab across a new search when the new results
+    // still have that category; otherwise fall back to All.
+    this._state.tab =
+      prevTab && this._state.order.includes(prevTab)
+        ? prevTab
+        : this._state.order[0] || null;
     this._renderTabs();
   }
 
