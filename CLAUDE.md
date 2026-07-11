@@ -295,12 +295,16 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   every hit combined; when the search is empty `searchOrder` is `[]` (no tabs → "No results"). Each result row (`_renderStreamItems`) shows
   cover art (or a `_typeIcon`), title, and the **provider** (Spotify/Radio/Local… parsed from the
   content-id prefix by `_providerLabel`). A row tap **plays it immediately** (`_playSearchItem`:
-  `play_media` enqueue replace, then — after a **~1.2s delay** — a `media_play` nudge). **The delay is
-  load-bearing:** `replace` sets the queue but this amp's MA/DLNA renderer doesn't reliably auto-start,
-  and an artist/playlist queue resolves slowly — an *immediate* nudge lands mid-load and leaves the player
-  **idle** (verified on hardware: artist → idle with a 0ms nudge, → playing with a delayed one). A **"›"**
+  a single `play_media` with **`enqueue: "play"`** — "play now", which reliably auto-starts on this amp
+  for track/album/playlist/artist, verified on hardware). **Do NOT add a `media_play` nudge** (an earlier
+  version did): this MA player reports **`state: "playing"` even while paused** (a DLNA state desync,
+  verified via `media_position` freezing on pause), so a delayed nudge **un-pauses a stream the user just
+  paused** — that was the "pause button doesn't work" bug. (`enqueue: "replace"` was also unreliable for a
+  lone track — sometimes left idle; `"play"` isn't. **Pause itself works** — only the reported state/icon
+  lags.) A **"›"**
   browses into an expandable item (`_streamDrillInto` → children with a Back button), **one browse per tap,
-  on demand**. **DO NOT prefetch per-row browses** (there used to be a `_streamItemCount` that fired a
+  on demand** (search + drill show a CSS spinner while loading — `_showSpinner`/`.ssspin`; the browse
+  latency is MA↔provider-bound, e.g. Spotify, and can't be sped up card-side). **DO NOT prefetch per-row browses** (there used to be a `_streamItemCount` that fired a
   `browse_media` for every album/playlist row to show a track count — a burst of ~10-15 concurrent
   `browse_media` calls **hangs Music Assistant**: some never return, cached empties poison the drill, and
   playback stalls. Removed; the track count went with it). **The MA WS calls are the shared module fns

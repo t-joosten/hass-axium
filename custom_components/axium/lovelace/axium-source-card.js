@@ -1997,9 +1997,14 @@ class AxiumMatrixCard extends HTMLElement {
   }
 
   /** Search Music Assistant on the amp's stream player; group hits by type. */
+  /** Show a loading spinner inside a results container. */
+  _showSpinner(el) {
+    if (el) el.innerHTML = `<div class="ssspin"></div>`;
+  }
+
   async _streamSearch(maId, query) {
     const resEl = this.shadowRoot.querySelector(".ssresults");
-    if (resEl) resEl.textContent = "Searching…";
+    this._showSpinner(resEl);
     // Race guards: only apply results if this exact panel is still open (the
     // user may have closed it or switched amps mid-request) and this is still
     // the latest search fired on it (a slower earlier query must not overwrite
@@ -2195,20 +2200,19 @@ class AxiumMatrixCard extends HTMLElement {
     }
   }
 
-  /** Play a tapped search/browse result and start it immediately. `replace`
-   *  sets the queue but this amp's MA/DLNA renderer doesn't always auto-start
-   *  the transport, so — after giving MA time to resolve the queue (artists and
-   *  playlists load slowly; nudging too early leaves the player idle) — nudge
-   *  `media_play`. It's a no-op if `replace` already started it. */
-  async _playSearchItem(maId, it) {
-    await this._hass.callService("media_player", "play_media", {
+  /** Play a tapped search/browse result immediately. `enqueue: "play"` ("play
+   *  now") reliably auto-starts on this amp for tracks/albums/playlists/artists
+   *  (verified on hardware), so NO `media_play` nudge is needed — and a nudge is
+   *  actively harmful: this player reports `state: "playing"` even when paused
+   *  (a DLNA quirk), and a delayed nudge would un-pause a stream the user just
+   *  paused (the "pause doesn't work" bug). */
+  _playSearchItem(maId, it) {
+    this._hass.callService("media_player", "play_media", {
       entity_id: maId,
       media_content_id: it.media_content_id,
       media_content_type: it.media_content_type,
-      enqueue: "replace",
+      enqueue: "play",
     });
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-    this._hass.callService("media_player", "media_play", { entity_id: maId });
   }
 
   /** Browse into an expandable result (album/artist/playlist) and show its items.
@@ -2218,7 +2222,7 @@ class AxiumMatrixCard extends HTMLElement {
     const resEl = this.shadowRoot.querySelector(".ssresults");
     const tabsEl = this.shadowRoot.querySelector(".sstabs");
     const panel = this._panel;
-    if (resEl) resEl.textContent = "Loading…";
+    this._showSpinner(resEl);
     let children;
     try {
       const res = await axiumMaBrowse(
@@ -2674,6 +2678,12 @@ AxiumMatrixCard.styles = `
     flex: 1 1 auto; min-height: 0; overflow-y: auto;
   }
   .ssresults:empty { display: none; }
+  .ssspin {
+    align-self: center; margin: 22px auto; width: 30px; height: 30px;
+    border-radius: 50%; border: 3px solid var(--divider-color);
+    border-top-color: var(--primary-color); animation: axium-spin 0.8s linear infinite;
+  }
+  @keyframes axium-spin { to { transform: rotate(360deg); } }
   .ssback {
     align-self: flex-start; background: none; border: none; cursor: pointer; font: inherit;
     color: var(--secondary-text-color); padding: 4px 2px; margin-bottom: 2px;
