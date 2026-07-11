@@ -236,8 +236,10 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   model/fw/zones-on/temp/clipping + all-off; tap opens the hub device page); and
   `axium-matrix-card` (zones × sources routing grid; tap a cell to route a zone to a
   source, tap the zone's currently-active cell to turn that zone off — no Off column).
-  The matrix headers are interactive too (an in-card popover overlay, `#overlay`/`#sheet`,
-  closed by tapping the backdrop): **tap a zone name** → the zone popover (`_openZonePanel`): a
+  The matrix headers are interactive too (a **full-screen** popover overlay, `#overlay`/`#sheet`:
+  `.overlay` is `position:fixed; inset:0` and `.sheet` fills the viewport — a flex column whose
+  `.ssresults` flexes so a long search list uses the whole screen; closed by tapping the backdrop):
+  **tap a zone name** → the zone popover (`_openZonePanel`): a
   **power** toggle (`_togglePower`), a **volume** slider + mute, and the zone's **tone/EQ** controls —
   **bass/treble/balance** sliders (`number.set_value`) + **loudness** and **mono** toggles
   (`switch.toggle`; both rendered by a generic `toggle()` and refreshed by iterating `.toneswitch`),
@@ -284,11 +286,11 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `_openStreamPanel(ampId)`: now-playing + transport + volume driving that amp's MA player
   (`_ampStreamPlayerByName(amp name)`), a **preset dropdown** (`_applyPresetToStream`: start the amp's
   stream, its own preset rooms → Media Player, drop the amp's others), an inline **Music Assistant
-  search** (`_streamSearch`) with results **tabbed by
-  Tracks/Albums/Playlists** (`_renderSearchTabs`; `_searchBucket` maps EVERY `media_class` into one of
-  the three tabs — playlist→Playlists, album/artist→Albums, everything else playable (track, radio,
-  episode…)→Tracks — so **nothing a search returns is silently dropped**; an earlier version kept only
-  literal track/album/playlist and hid radio/artist hits). Each result row (`_renderStreamItems`) shows
+  search** (`_streamSearch`) with results **tabbed per `media_class` present**
+  (`_renderSearchTabs`; groups by the raw `media_class`, one tab each — Tracks/Albums/Playlists/Artists/
+  Radio/Podcasts/… — ordered by `_searchTabOrder` (common music types first, then the rest
+  alphabetically) and labelled by `_tabLabel`, so **nothing a search returns is dropped**; an earlier
+  version collapsed everything into 3 fixed tabs and hid radio/artist as "No results"). Each result row (`_renderStreamItems`) shows
   cover art (or a `_typeIcon`), title, and the **provider** (Spotify/Radio/Local… parsed from the
   content-id prefix by `_providerLabel`), plus a **lazy-loaded track count** for albums/playlists
   (`_streamItemCount`). A row tap `play_media`s it (enqueue replace); a **"›"** browses into expandable

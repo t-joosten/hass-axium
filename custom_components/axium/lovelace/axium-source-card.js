@@ -2015,23 +2015,46 @@ class AxiumMatrixCard extends HTMLElement {
       return;
     }
     if (this._panel !== panel || panel.searchSeq !== seq) return;
-    // Bucket every hit into one of the three tabs so nothing is dropped.
-    const groups = { track: [], album: [], playlist: [] };
-    for (const it of hits) groups[this._searchBucket(it.media_class)].push(it);
+    // Group hits by their real media_class and show a tab per category present
+    // (Tracks, Albums, Playlists, Artists, Radio, Podcasts, …) so nothing the
+    // search returns is dropped.
+    const groups = {};
+    for (const it of hits) {
+      const mc = it.media_class || "other";
+      (groups[mc] = groups[mc] || []).push(it);
+    }
     panel.searchGroups = groups;
-    panel.searchTab =
-      ["track", "album", "playlist"].find((t) => groups[t].length) || "track";
+    panel.searchOrder = this._searchTabOrder(Object.keys(groups));
+    panel.searchTab = panel.searchOrder[0] || null;
     this._renderSearchTabs(maId);
   }
 
-  // Which of the 3 tabs a media_class belongs to: a playlist → Playlists, an
-  // album/artist (expandable collections) → Albums, everything else playable
-  // (track, radio, episode, …) → Tracks. Anything else would otherwise be
-  // silently hidden.
-  _searchBucket(mediaClass) {
-    if (mediaClass === "playlist") return "playlist";
-    if (mediaClass === "album" || mediaClass === "artist") return "album";
-    return "track";
+  // Tab order: the common music types first, then any other category the search
+  // returned, alphabetically.
+  _searchTabOrder(present) {
+    const pref = [
+      "track", "album", "playlist", "artist", "music", "radio", "podcast",
+      "audiobook", "directory", "episode", "genre", "composer",
+    ];
+    return [
+      ...pref.filter((k) => present.includes(k)),
+      ...present.filter((k) => !pref.includes(k)).sort(),
+    ];
+  }
+
+  // Plural tab label for a media_class (falls back to a title-cased plural).
+  _tabLabel(mc) {
+    const map = {
+      track: "Tracks", album: "Albums", playlist: "Playlists", artist: "Artists",
+      music: "Radio", radio: "Radio", podcast: "Podcasts", directory: "Audiobooks",
+      audiobook: "Audiobooks", episode: "Episodes", genre: "Genres",
+      composer: "Composers", movie: "Movies", video: "Videos", tv_show: "Shows",
+      season: "Seasons", channel: "Channels", app: "Apps", other: "Other",
+    };
+    if (map[mc]) return map[mc];
+    const t = String(mc || "").replace(/_/g, " ");
+    const label = t ? t.charAt(0).toUpperCase() + t.slice(1) : "Other";
+    return label.endsWith("s") ? label : label + "s";
   }
 
   /** Render the Tracks/Albums/Playlists tabs + the active tab's results. */
@@ -2091,20 +2114,24 @@ class AxiumMatrixCard extends HTMLElement {
   _renderSearchTabs(maId) {
     const tabsEl = this.shadowRoot.querySelector(".sstabs");
     if (!tabsEl || !this._panel || !this._panel.searchGroups) return;
-    const labels = { track: "Tracks", album: "Albums", playlist: "Playlists" };
+    const order = this._panel.searchOrder || [];
+    if (!order.includes(this._panel.searchTab))
+      this._panel.searchTab = order[0] || null;
     tabsEl.hidden = false;
     tabsEl.innerHTML = "";
-    for (const t of ["track", "album", "playlist"]) {
+    for (const t of order) {
       const b = document.createElement("button");
       b.className = "sstab" + (t === this._panel.searchTab ? " on" : "");
-      b.textContent = `${labels[t]} (${this._panel.searchGroups[t].length})`;
+      b.textContent = `${this._tabLabel(t)} (${this._panel.searchGroups[t].length})`;
       b.addEventListener("click", () => {
         this._panel.searchTab = t;
         this._renderSearchTabs(maId);
       });
       tabsEl.appendChild(b);
     }
-    this._renderStreamItems(maId, this._panel.searchGroups[this._panel.searchTab], null);
+    const items =
+      (this._panel.searchTab && this._panel.searchGroups[this._panel.searchTab]) || [];
+    this._renderStreamItems(maId, items, null);
   }
 
   /** Render media rows: cover/type-icon, title, provider (+ track count for
@@ -2670,7 +2697,7 @@ AxiumMatrixCard.styles = `
   }
   .ssresults {
     display: flex; flex-direction: column; margin-top: 6px;
-    max-height: 300px; overflow-y: auto;
+    flex: 1 1 auto; min-height: 0; overflow-y: auto;
   }
   .ssresults:empty { display: none; }
   .ssback {
@@ -2707,18 +2734,17 @@ AxiumMatrixCard.styles = `
   }
   .sr-exp:hover { background: var(--secondary-background-color); color: var(--primary-color); }
   .overlay {
-    position: absolute; inset: 0; z-index: 5;
-    display: flex; align-items: center; justify-content: center;
-    background: rgba(0, 0, 0, 0.35);
-    border-radius: var(--ha-card-border-radius, 12px);
+    position: fixed; inset: 0; z-index: 9999;
+    display: flex; align-items: stretch; justify-content: stretch;
+    background: rgba(0, 0, 0, 0.5);
   }
   .overlay[hidden] { display: none; }
   .sheet {
     background: var(--card-background-color, var(--ha-card-background, #fff));
-    border: 1px solid var(--divider-color);
-    border-radius: 12px; padding: 12px 14px;
-    min-width: 240px; max-width: 92%;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    border: none; border-radius: 0; box-shadow: none;
+    width: 100%; height: 100%; max-width: 100%; box-sizing: border-box;
+    padding: max(14px, env(safe-area-inset-top)) 16px 16px;
+    display: flex; flex-direction: column; overflow-y: auto;
   }
   .sheet-head {
     display: flex; align-items: center; justify-content: space-between;
