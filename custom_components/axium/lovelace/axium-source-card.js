@@ -1428,11 +1428,11 @@ class AxiumMaSearch extends HTMLElement {
       return;
     }
     if (this._state.seq !== seq || !this.isConnected) return;
-    // Group by the raw media_class; an "All" tab (default) plus a tab per type.
+    // Group into tabs; an "All" tab (default) plus a tab per type.
     const groups = {};
     for (const it of hits) {
-      const mc = it.media_class || "other";
-      (groups[mc] = groups[mc] || []).push(it);
+      const b = this._bucket(it);
+      (groups[b] = groups[b] || []).push(it);
     }
     const catOrder = this._tabOrder(Object.keys(groups));
     groups.all = hits;
@@ -1442,9 +1442,18 @@ class AxiumMaSearch extends HTMLElement {
     this._renderTabs();
   }
 
+  // Which tab an item belongs to. Radio stations come back as a generic
+  // `media_class: "music"` (radiobrowser/TuneIn), so classify them by provider
+  // into a proper "radio" tab instead of hiding them under a vague label.
+  _bucket(it) {
+    if (it.media_class === "radio") return "radio";
+    const prov = this._providerLabel(it.media_content_id).toLowerCase();
+    if (prov === "radio" || prov === "tunein") return "radio";
+    return it.media_class || "other";
+  }
   _tabOrder(present) {
     const pref = [
-      "track", "album", "playlist", "artist", "music", "radio", "podcast",
+      "track", "album", "playlist", "artist", "radio", "music", "podcast",
       "audiobook", "directory", "episode", "genre", "composer",
     ];
     return [
@@ -1455,7 +1464,7 @@ class AxiumMaSearch extends HTMLElement {
   _tabLabel(mc) {
     const map = {
       all: "All", track: "Tracks", album: "Albums", playlist: "Playlists",
-      artist: "Artists", music: "Radio", radio: "Radio", podcast: "Podcasts",
+      artist: "Artists", radio: "Radio", music: "Music", podcast: "Podcasts",
       directory: "Audiobooks", audiobook: "Audiobooks", episode: "Episodes",
       genre: "Genres", composer: "Composers", movie: "Movies", video: "Videos",
       tv_show: "Shows", season: "Seasons", channel: "Channels", app: "Apps",

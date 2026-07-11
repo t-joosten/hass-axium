@@ -295,10 +295,13 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   plays nothing; `startBrowse=true` opens on the library root). One implementation → identical search UX
   everywhere. Set-once props `.hass`/`.player`/`.mode`/`.startBrowse` (no attributes); parents push fresh
   `.hass` on every update (it's read at query time). **Searches auto-run ~1s after typing stops**
-  (debounced) as well as on Enter / the button. Results group by raw `media_class` into an **All** tab
-  (default, all hits) plus a tab per type (`_tabOrder`/`_tabLabel`: Tracks/Albums/Playlists/Artists/Radio/…
-  — common types first, then the rest alphabetically), so **nothing a search returns is dropped**; empty
-  search → no tabs. Rows show cover art, title, and the **provider** (`_providerLabel`). A **"›"** drills in
+  (debounced) as well as on Enter / the button. Results group into an **All** tab (default, all hits) plus
+  a tab per type (`_tabOrder`/`_tabLabel`: Tracks/Albums/Playlists/Artists/Radio/…), common types first
+  then the rest alphabetically, so **nothing a search returns is dropped**; empty search → no tabs.
+  **Bucketing (`_bucket`) is NOT purely `media_class`:** radio stations come back with a generic
+  `media_class: "music"` (radiobrowser/TuneIn) — detect them by provider (`_providerLabel` == "Radio"/
+  "TuneIn", or `media_class === "radio"`) and put them in a dedicated **Radio** tab; the leftover generic
+  `"music"` is labelled **Music**. (Before this, radio was hidden under a vague "music"→"Radio" label.) Rows show cover art, title, and the **provider** (`_providerLabel`). A **"›"** drills in
   (`_drill`; Back returns to the search tabs or browse root — `_state.home`), **one browse per tap, on
   demand**, with a spinner while loading (browse latency is MA↔provider-bound, e.g. Spotify — can't be
   sped up). **Do NOT re-add a `media_play` nudge** in play mode: this MA player reports `state:"playing"`
