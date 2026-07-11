@@ -1547,13 +1547,20 @@ class AxiumMatrixCard extends HTMLElement {
       `<div class="corner"><button class="allpower" title="All zones on/off">` +
       `<ha-icon icon="mdi:power"></ha-icon></button></div>` +
       columns
-        .map((c) =>
-          c.kind === "stream"
-            ? `<div class="colhead stream" role="button" tabindex="0" data-amp="${c.ampId}"` +
-              ` title="${escHtml(c.name)}"><span>${escHtml(c.name)}</span></div>`
-            : `<div class="colhead" role="button" tabindex="0" data-src="${c.id}"` +
-              ` title="${escHtml(c.name)}"><span>${escHtml(c.name)}</span></div>`
-        )
+        .map((c) => {
+          const key = this._colKey(c);
+          const pwr =
+            `<button class="srcpwr" data-colkey="${escHtml(key)}"` +
+            ` title="Turn ${escHtml(c.name)} on/off"><ha-icon icon="mdi:power"></ha-icon></button>`;
+          const attrs =
+            c.kind === "stream"
+              ? `class="colhead stream" data-amp="${c.ampId}"`
+              : `class="colhead" data-src="${c.id}"`;
+          return (
+            `<div ${attrs} role="button" tabindex="0" data-colkey="${escHtml(key)}"` +
+            ` title="${escHtml(c.name)}">${pwr}<span>${escHtml(c.name)}</span></div>`
+          );
+        })
         .join("");
     const rows = zones
       .map((z) => {
@@ -1617,6 +1624,15 @@ class AxiumMatrixCard extends HTMLElement {
         }
       });
     }
+    // Per-source power toggle (nested in the header; stop the click from also
+    // opening the header's preset/stream panel).
+    for (const pw of this.shadowRoot.querySelectorAll(".srcpwr")) {
+      pw.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        const col = this._columns().find((c) => this._colKey(c) === pw.dataset.colkey);
+        if (col) this._toggleSourcePower(col);
+      });
+    }
     const allpwr = this.shadowRoot.querySelector(".allpower");
     if (allpwr)
       allpwr.addEventListener("click", () => this._toggleAllPower());
@@ -1638,6 +1654,71 @@ class AxiumMatrixCard extends HTMLElement {
     this._hass.callService("media_player", anyOn ? "turn_off" : "turn_on", {
       entity_id: zones,
     });
+  }
+
+  /** Stable key for a matrix column: an analog source id, or "stream:<ampId>". */
+  _colKey(col) {
+    return col.kind === "stream" ? `stream:${col.ampId}` : String(col.id);
+  }
+
+  /** The zones currently powered on and routed to this column's source. */
+  _activeZonesForColumn(col) {
+    const zones =
+      col.kind === "stream"
+        ? this._zones().filter((z) => col.zones.has(z))
+        : this._zones();
+    return zones.filter((z) => {
+      if (col.kind === "stream") return this._streamCellActive(z, col.ampId);
+      const st = this._hass.states[z];
+      return (
+        st && !OFF_STATES.includes(st.state) && this._currentSourceId(st) === col.id
+      );
+    });
+  }
+
+  /**
+   * Per-source on/off. OFF (source has active zones): remember those zones, then
+   * power them off. ON (no active zones): re-enable the remembered zones on this
+   * source. The remembered set is persisted (localStorage, per hub) so it
+   * survives a page reload; an empty memory (never turned off here) means ON has
+   * nothing to restore and is a no-op.
+   */
+  _toggleSourcePower(col) {
+    const key = this._colKey(col);
+    const active = this._activeZonesForColumn(col);
+    if (active.length) {
+      this._rememberZones(key, active);
+      for (const z of active) this._turnZoneOff(z);
+    } else {
+      const ampId = col.kind === "stream" ? col.ampId : undefined;
+      for (const z of this._recallZones(key)) {
+        if (this._hass.states[z]) this._route(z, col.id, ampId);
+      }
+    }
+  }
+
+  _srcMemKey() {
+    return `axium-matrix-srcmem:${this._hubId() || "x"}`;
+  }
+  _srcMemAll() {
+    try {
+      return JSON.parse(window.localStorage.getItem(this._srcMemKey()) || "{}") || {};
+    } catch (e) {
+      return {};
+    }
+  }
+  _rememberZones(colKey, zones) {
+    const all = this._srcMemAll();
+    all[colKey] = zones;
+    try {
+      window.localStorage.setItem(this._srcMemKey(), JSON.stringify(all));
+    } catch (e) {
+      /* storage unavailable — degrade to no persistence */
+    }
+  }
+  _recallZones(colKey) {
+    const z = this._srcMemAll()[colKey];
+    return Array.isArray(z) ? z : [];
   }
 
   /**
@@ -2613,6 +2694,12 @@ class AxiumMatrixCard extends HTMLElement {
       h.title = name;
       h.textContent = name;
     }
+    // Per-source power toggle: lit when the source has any active zone.
+    const colByKey = new Map(this._columns().map((c) => [this._colKey(c), c]));
+    for (const pw of this.shadowRoot.querySelectorAll(".srcpwr")) {
+      const col = colByKey.get(pw.dataset.colkey);
+      pw.classList.toggle("on", !!col && this._activeZonesForColumn(col).length > 0);
+    }
     const allpwr = this.shadowRoot.querySelector(".allpower");
     if (allpwr) {
       const anyOn = this._zones().some((z) => {
@@ -2655,7 +2742,19 @@ AxiumMatrixCard.styles = `
   .colhead:focus-visible, .rowhead:focus-visible {
     outline: 2px solid var(--primary-color); outline-offset: 1px; border-radius: 4px;
   }
-  .colhead { justify-content: center; text-align: center; padding: 0 2px; }
+  .colhead { flex-direction: column; justify-content: center; text-align: center; padding: 2px; gap: 2px; }
+  .srcpwr {
+    flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; padding: 0; border-radius: 50%; cursor: pointer;
+    border: 1px solid var(--divider-color); background: var(--card-background-color);
+    color: var(--secondary-text-color);
+  }
+  .srcpwr:hover { border-color: var(--primary-color); color: var(--primary-color); }
+  .srcpwr.on {
+    background: var(--primary-color); border-color: var(--primary-color);
+    color: var(--text-primary-color, #fff);
+  }
+  .srcpwr ha-icon { --mdc-icon-size: 13px; }
   .colhead span, .rowhead {
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
   }

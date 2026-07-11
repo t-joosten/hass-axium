@@ -329,7 +329,14 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `axiumZoneSelectOptions`, so the config lists zones 1..16 too. Sleep rows sort by the zone number
   parsed from the timer entity id (`_sleepZoneNum`).
   Matrix **corner power button** (`.allpower`, `_toggleAllPower`): if any zone is on → `turn_off` all,
-  else `turn_on` all; highlighted `.on` when any is on. The **alarms card** Add form (collapsed until
+  else `turn_on` all; highlighted `.on` when any is on. **Per-source power toggle** (`.srcpwr` in each
+  `.colhead`, `_toggleSourcePower`): OFF (source has active zones) → remember them + `_turnZoneOff` each;
+  ON (none active) → `_route` each remembered zone back onto that source (analog: `select_source`; stream:
+  `media_play` + Media Player). The remembered set persists in **localStorage** keyed `axium-matrix-srcmem:
+  <hubId>` (survives reload; empty memory → ON is a no-op). `_colKey` = analog id or `stream:<ampId>`;
+  `_activeZonesForColumn` uses `_streamCellActive` for streams, `_currentSourceId === id` for analog;
+  `.srcpwr.on` lit in `_update` when the column has any active zone. The button `stopPropagation`s so it
+  doesn't also open the header's preset/stream panel. The **alarms card** Add form (collapsed until
   `+ Add alarm`; `.addform[hidden]` needs its own display:none rule since `.addform{display:flex}` beats
   the UA `[hidden]`) lists **amp streams** (`_ampStreams`/`_maByName`) in its source select — a `stream:`
   option sets `source`=media-player-byte + `media_player`=that amp's MA player; `src:` options are the

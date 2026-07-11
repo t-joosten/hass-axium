@@ -591,6 +591,13 @@ zone's currently-active (highlighted) cell to **turn that zone off**. It's the
 fastest way to see and change what every room is playing at once. Auto-detects
 the hub's zones and sources.
 
+Each **source column has a power button** (the small ⏻ above its name): tap it to
+turn that whole source **off** — it remembers which rooms were on that source and
+switches them off — and tap again to turn it back **on**, restoring exactly those
+rooms. The remembered set is kept per hub (survives a page reload). The button
+lights up while any room is on that source. (For an amp *stream* column it toggles
+the rooms hearing that amp's stream, resuming the stream when turned back on.)
+
 The row and column **headers are interactive** too:
 
 - **Tap a zone name** → quick controls for that room: **now playing** (track,
