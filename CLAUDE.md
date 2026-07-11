@@ -294,17 +294,23 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   prepended and selected by default** (`groups.all = hits`; `searchOrder = ["all", ...catOrder]`) showing
   every hit combined; when the search is empty `searchOrder` is `[]` (no tabs → "No results"). Each result row (`_renderStreamItems`) shows
   cover art (or a `_typeIcon`), title, and the **provider** (Spotify/Radio/Local… parsed from the
-  content-id prefix by `_providerLabel`), plus a **lazy-loaded track count** for albums/playlists
-  (`_streamItemCount`). A row tap **plays it immediately** (`_playSearchItem`: `play_media` enqueue
-  replace, then — awaited — a `media_play` nudge, because this amp's MA/DLNA renderer sets the queue on
-  `replace` but doesn't reliably auto-start the transport, so the user otherwise had to press play); a **"›"** browses into expandable
-  items (`_streamDrillInto` → children with a Back button). **The MA WS calls are the shared module fns
+  content-id prefix by `_providerLabel`). A row tap **plays it immediately** (`_playSearchItem`:
+  `play_media` enqueue replace, then — after a **~1.2s delay** — a `media_play` nudge). **The delay is
+  load-bearing:** `replace` sets the queue but this amp's MA/DLNA renderer doesn't reliably auto-start,
+  and an artist/playlist queue resolves slowly — an *immediate* nudge lands mid-load and leaves the player
+  **idle** (verified on hardware: artist → idle with a 0ms nudge, → playing with a delayed one). A **"›"**
+  browses into an expandable item (`_streamDrillInto` → children with a Back button), **one browse per tap,
+  on demand**. **DO NOT prefetch per-row browses** (there used to be a `_streamItemCount` that fired a
+  `browse_media` for every album/playlist row to show a track count — a burst of ~10-15 concurrent
+  `browse_media` calls **hangs Music Assistant**: some never return, cached empties poison the drill, and
+  playback stalls. Removed; the track count went with it). **The MA WS calls are the shared module fns
   `axiumMaSearch`/`axiumMaBrowse`** (both the matrix stream panel and the alarms-card browser use them —
-  one place for the request shape). **`_streamItemCount` and `_streamDrillInto` share `_panel.childCache`**
-  (keyed by content-id) so drilling into an already-counted album doesn't re-browse. **Async guards:** every
-  `await` in the search/browse/count path re-checks the panel is still the same object (`this._panel === panel`)
-  and search re-checks `panel.searchSeq` — closing the popover, switching amps, or a slower older query
-  can't render into the wrong/torn-down panel. NB: `search_media` returns only
+  one place for the request shape). NB: `search_media`/`browse_media` return items whose
+  `media_content_type` is a generic **`"music"`** for every class (Spotify etc.) — the `media_class` is
+  what differentiates track/album/artist/playlist; pass the item's own `media_content_type` back to
+  browse/play (it works). **Async guards:** every `await` in the search/browse path re-checks the panel is
+  still the same object (`this._panel === panel`) and search re-checks `panel.searchSeq` — closing the
+  popover, switching amps, or a slower older query can't render into the wrong/torn-down panel. NB: `search_media` returns only
   title/thumbnail/type/content_id/can_* — NOT duration, year, or a separate artist (baked into the
   title); MA exposes no per-item WS for the richer fields. There's also a **Browse Music Assistant** button
   (native `hass-more-info` on the amp's MA player). Shows a "rename the MA player to <amp name>"

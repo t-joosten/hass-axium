@@ -2186,9 +2186,6 @@ class AxiumMatrixCard extends HTMLElement {
         row.appendChild(exp);
       }
       resEl.appendChild(row);
-      if (it.media_class === "album" || it.media_class === "playlist") {
-        this._streamItemCount(maId, it, sub);
-      }
     }
     if (!(items || []).length) {
       const e = document.createElement("div");
@@ -2200,7 +2197,9 @@ class AxiumMatrixCard extends HTMLElement {
 
   /** Play a tapped search/browse result and start it immediately. `replace`
    *  sets the queue but this amp's MA/DLNA renderer doesn't always auto-start
-   *  the transport, so nudge `media_play` once the queue is in place. */
+   *  the transport, so — after giving MA time to resolve the queue (artists and
+   *  playlists load slowly; nudging too early leaves the player idle) — nudge
+   *  `media_play`. It's a no-op if `replace` already started it. */
   async _playSearchItem(maId, it) {
     await this._hass.callService("media_player", "play_media", {
       entity_id: maId,
@@ -2208,67 +2207,31 @@ class AxiumMatrixCard extends HTMLElement {
       media_content_type: it.media_content_type,
       enqueue: "replace",
     });
+    await new Promise((resolve) => setTimeout(resolve, 1200));
     this._hass.callService("media_player", "media_play", { entity_id: maId });
   }
 
-  /** Lazily fetch + cache an album/playlist's children and append its count. */
-  async _streamItemCount(maId, it, subEl) {
-    const panel = this._panel;
-    if (!panel) return;
-    panel.childCache = panel.childCache || {};
-    let children = panel.childCache[it.media_content_id];
-    if (children === undefined) {
-      try {
-        const res = await axiumMaBrowse(
-          this._hass,
-          maId,
-          it.media_content_id,
-          it.media_content_type
-        );
-        children = res.children || [];
-      } catch (err) {
-        return;
-      }
-      if (this._panel !== panel) return;
-      panel.childCache[it.media_content_id] = children;
-    }
-    const n = children.length;
-    // Show the count even when it's 0 (an empty album/playlist) — a falsy-zero
-    // guard here would hide it and cache the omission.
-    if (subEl && subEl.isConnected)
-      subEl.textContent += ` · ${n} track${n === 1 ? "" : "s"}`;
-  }
-
-  /** Browse into an expandable result (album/artist/playlist) and show its items. */
+  /** Browse into an expandable result (album/artist/playlist) and show its items.
+   *  Fetched on demand, one call per tap — do NOT prefetch these per row (a burst
+   *  of concurrent browse_media calls hangs Music Assistant). */
   async _streamDrillInto(maId, it) {
     const resEl = this.shadowRoot.querySelector(".ssresults");
     const tabsEl = this.shadowRoot.querySelector(".sstabs");
     const panel = this._panel;
-    // Reuse the children already fetched for the track count instead of
-    // browsing the same item again.
-    let children =
-      panel && panel.childCache ? panel.childCache[it.media_content_id] : undefined;
-    if (children === undefined) {
-      if (resEl) resEl.textContent = "Loading…";
-      try {
-        const res = await axiumMaBrowse(
-          this._hass,
-          maId,
-          it.media_content_id,
-          it.media_content_type
-        );
-        children = res.children || [];
-      } catch (err) {
-        if (this._panel === panel && resEl) resEl.textContent = "Couldn't open.";
-        return;
-      }
-      if (this._panel !== panel) return;
-      if (panel) {
-        panel.childCache = panel.childCache || {};
-        panel.childCache[it.media_content_id] = children;
-      }
+    if (resEl) resEl.textContent = "Loading…";
+    let children;
+    try {
+      const res = await axiumMaBrowse(
+        this._hass,
+        maId,
+        it.media_content_id,
+        it.media_content_type
+      );
+      children = res.children || [];
+    } catch (err) {
+      if (this._panel === panel && resEl) resEl.textContent = "Couldn't open.";
+      return;
     }
-    // Bail if the panel changed while we resolved from cache/await.
     if (this._panel !== panel) return;
     if (tabsEl) tabsEl.hidden = true;
     this._renderStreamItems(maId, children, () => this._renderSearchTabs(maId));
