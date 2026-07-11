@@ -2742,19 +2742,21 @@ AxiumMatrixCard.styles = `
   .colhead:focus-visible, .rowhead:focus-visible {
     outline: 2px solid var(--primary-color); outline-offset: 1px; border-radius: 4px;
   }
-  .colhead { flex-direction: column; justify-content: center; text-align: center; padding: 2px; gap: 2px; }
+  .colhead { flex-direction: column; justify-content: flex-start; text-align: center; padding: 4px 2px 6px; gap: 10px; }
   .srcpwr {
     flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
-    width: 20px; height: 20px; padding: 0; border-radius: 50%; cursor: pointer;
+    width: 30px; height: 30px; padding: 0; border-radius: 50%; cursor: pointer;
     border: 1px solid var(--divider-color); background: var(--card-background-color);
-    color: var(--secondary-text-color);
+    color: var(--secondary-text-color); touch-action: manipulation;
   }
   .srcpwr:hover { border-color: var(--primary-color); color: var(--primary-color); }
   .srcpwr.on {
     background: var(--primary-color); border-color: var(--primary-color);
     color: var(--text-primary-color, #fff);
   }
-  .srcpwr ha-icon { --mdc-icon-size: 13px; }
+  .srcpwr ha-icon { --mdc-icon-size: 18px; }
+  /* Give the name its own clear tap zone, set apart from the power button. */
+  .colhead > span { display: block; width: 100%; padding: 4px 0; }
   .colhead span, .rowhead {
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
   }
