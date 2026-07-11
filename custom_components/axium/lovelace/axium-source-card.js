@@ -245,6 +245,26 @@ async function axiumMaBrowse(hass, entityId, contentId, contentType) {
   return res || {};
 }
 
+// A zone's max-volume cap (0..100) from its `number.*_max_volume` entity (on the
+// same device as the zone media_player). 100 when not found.
+function axiumMaxVolume(hass, zoneId) {
+  try {
+    const ents = hass.entities || {};
+    const dev = ents[zoneId] && ents[zoneId].device_id;
+    if (dev) {
+      for (const id of Object.keys(ents)) {
+        if (!id.startsWith("number.") || !id.endsWith("_max_volume")) continue;
+        if (ents[id].device_id !== dev) continue;
+        const v = Number((hass.states[id] || {}).state);
+        if (Number.isFinite(v)) return Math.max(0, Math.min(100, v));
+      }
+    }
+  } catch (e) {
+    /* fall through */
+  }
+  return 100;
+}
+
 function axiumSourceChoices(hass) {
   const hubs = axiumHubs(hass);
   const multi = hubs.length > 1;
@@ -1585,12 +1605,22 @@ class AxiumMaSearch extends HTMLElement {
       return;
     }
     if (!this._hass || !this._player) return;
-    this._hass.callService("media_player", "play_media", {
-      entity_id: this._player,
-      media_content_id: it.media_content_id,
-      media_content_type: it.media_content_type,
-      enqueue: "play",
-    });
+    const play = () => {
+      if (!this._hass || !this._player) return;
+      this._hass.callService("media_player", "play_media", {
+        entity_id: this._player,
+        media_content_id: it.media_content_id,
+        media_content_type: it.media_content_type,
+        enqueue: "play",
+      });
+    };
+    // Verified on hardware: when `play_media` arrives while the amp's renderer is
+    // already PLAYING, it stops (goes idle) instead of switching — and a second
+    // `play_media` from the now-idle state actually plays it (the "tap twice"
+    // the user hit). So if it's currently playing, fire again once it's settled.
+    const st = this._hass.states[this._player];
+    play();
+    if (st && st.state === "playing") setTimeout(play, 1500);
   }
 
   _providerLabel(id) {
@@ -2036,6 +2066,33 @@ class AxiumMatrixCard extends HTMLElement {
     this._built = true;
   }
 
+  /** Show the popover overlay covering the DASHBOARD content, but not HA's
+   *  sidebar/header (best-effort: measure the sidebar for the left offset, and
+   *  offset the top by the header height). Falls back to full-viewport if the
+   *  HA layout can't be measured. */
+  _showOverlay() {
+    const overlay = this.shadowRoot.getElementById("overlay");
+    if (!overlay) return;
+    let left = 0;
+    try {
+      const ha = document.querySelector("home-assistant");
+      const main = ha && ha.shadowRoot && ha.shadowRoot.querySelector("home-assistant-main");
+      const sb = main && main.shadowRoot && main.shadowRoot.querySelector("ha-sidebar");
+      if (sb) {
+        const r = sb.getBoundingClientRect();
+        // A docked sidebar sits at the left edge; ignore it when it's an
+        // off-screen mobile drawer or spans most of the width.
+        if (r.width > 0 && r.left <= 1 && r.right > 0 && r.right < window.innerWidth * 0.5)
+          left = Math.round(r.right);
+      }
+    } catch (e) {
+      /* HA internals moved — fall back to full-viewport */
+    }
+    overlay.style.left = left + "px";
+    overlay.style.top = "var(--header-height, 56px)";
+    overlay.hidden = false;
+  }
+
   /** Corner power button: if any zone is on, turn them all off; else all on. */
   _toggleAllPower() {
     const zones = this._zones();
@@ -2299,7 +2356,10 @@ class AxiumMatrixCard extends HTMLElement {
       </div>
       <div class="volrow">
         <button class="iconbtn mute" title="Mute"><ha-icon icon="mdi:volume-high"></ha-icon></button>
-        <input class="slider" type="range" min="0" max="100" step="1" aria-label="Volume">
+        <div class="slidwrap">
+          <input class="slider" type="range" min="0" max="100" step="1" aria-label="Volume">
+          <div class="slidcap"></div>
+        </div>
         <span class="volval"></span>
       </div>
       <div class="tone">
@@ -2316,6 +2376,8 @@ class AxiumMatrixCard extends HTMLElement {
     );
     const slider = sheet.querySelector(".slider");
     slider.addEventListener("input", () => {
+      const maxv = axiumMaxVolume(this._hass, zoneId);
+      if (Number(slider.value) > maxv) slider.value = maxv;
       this._panel.dragging = true;
       sheet.querySelector(".volval").textContent = `${slider.value}%`;
       this._scheduleVolume(zoneId, Number(slider.value));
@@ -2351,7 +2413,7 @@ class AxiumMatrixCard extends HTMLElement {
     }
     sheet.querySelector(".close").addEventListener("click", () => this._closePanel());
     this._panel = { type: "zone", zoneId, dragging: false, toneDrag: null };
-    this.shadowRoot.getElementById("overlay").hidden = false;
+    this._showOverlay();
     this._refreshPanel();
   }
 
@@ -2469,7 +2531,7 @@ class AxiumMatrixCard extends HTMLElement {
       // intent and only trust a definite off/idle state to clear it.
       streamPlaying: st0 ? !OFF_STATES.includes(st0.state) : false,
     };
-    this.shadowRoot.getElementById("overlay").hidden = false;
+    this._showOverlay();
     this._refreshPanel();
   }
 
@@ -2555,6 +2617,11 @@ class AxiumMatrixCard extends HTMLElement {
       slider.value = String(pct);
       if (volval) volval.textContent = `${pct}%`;
     }
+    // Grey out the range above the zone's max volume (zone panel only).
+    const cap = sheet.querySelector(".slidcap");
+    if (cap)
+      cap.style.width =
+        Math.max(0, 100 - axiumMaxVolume(this._hass, this._panel.zoneId)) + "%";
     const muteIcon = sheet.querySelector(".mute ha-icon");
     if (muteIcon) {
       muteIcon.setAttribute(
@@ -2590,9 +2657,10 @@ class AxiumMatrixCard extends HTMLElement {
       clearTimeout(this._volTimer);
       this._volTimer = null;
     }
+    const maxv = axiumMaxVolume(this._hass, zoneId) / 100;
     this._hass.callService("media_player", "volume_set", {
       entity_id: zoneId,
-      volume_level: Math.max(0, Math.min(1, pct / 100)),
+      volume_level: Math.max(0, Math.min(maxv, pct / 100)),
     });
   }
 
@@ -2765,7 +2833,7 @@ class AxiumMatrixCard extends HTMLElement {
     }
     sheet.querySelector(".close").addEventListener("click", () => this._closePanel());
     this._panel = { type: "preset", sourceId: sid };
-    this.shadowRoot.getElementById("overlay").hidden = false;
+    this._showOverlay();
   }
 
   /** Keep an open popover (zone or amp stream) in step with live state. */
@@ -2788,6 +2856,11 @@ class AxiumMatrixCard extends HTMLElement {
       slider.value = String(pct);
       if (volval) volval.textContent = `${pct}%`;
     }
+    // Grey out the range above the zone's max volume (zone panel only).
+    const cap = sheet.querySelector(".slidcap");
+    if (cap)
+      cap.style.width =
+        Math.max(0, 100 - axiumMaxVolume(this._hass, this._panel.zoneId)) + "%";
     const muteIcon = sheet.querySelector(".mute ha-icon");
     if (muteIcon) {
       muteIcon.setAttribute(
@@ -2952,73 +3025,6 @@ AxiumMatrixCard.styles = `
   }
   .browse:hover { border-color: var(--primary-color); }
   .browse ha-icon { --mdc-icon-size: 20px; }
-  .streamsearch { display: flex; gap: 6px; margin-top: 10px; }
-  .ssin {
-    flex: 1 1 auto; min-width: 0; font: inherit; padding: 7px 9px; border-radius: 8px;
-    border: 1px solid var(--divider-color); background: var(--card-background-color);
-    color: var(--primary-text-color);
-  }
-  .ssbtn {
-    display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
-    border: 1px solid var(--divider-color); border-radius: 8px; padding: 0 12px;
-    background: var(--card-background-color); color: var(--primary-text-color);
-    --mdc-icon-size: 20px;
-  }
-  .ssbtn:hover { border-color: var(--primary-color); color: var(--primary-color); }
-  .sstabs { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
-  .sstabs[hidden] { display: none; }
-  .sstab {
-    font: inherit; font-size: 0.8rem; padding: 4px 10px; border-radius: 14px; cursor: pointer;
-    border: 1px solid var(--divider-color); background: none; color: var(--secondary-text-color);
-  }
-  .sstab.on {
-    border-color: var(--primary-color); color: var(--text-primary-color, #fff);
-    background: var(--primary-color);
-  }
-  .ssresults {
-    display: flex; flex-direction: column; margin-top: 6px;
-    flex: 1 1 auto; min-height: 0; overflow-y: auto;
-  }
-  .ssresults:empty { display: none; }
-  .ssspin {
-    align-self: center; margin: 22px auto; width: 30px; height: 30px;
-    border-radius: 50%; border: 3px solid var(--divider-color);
-    border-top-color: var(--primary-color); animation: axium-spin 0.8s linear infinite;
-  }
-  @keyframes axium-spin { to { transform: rotate(360deg); } }
-  .ssback {
-    align-self: flex-start; background: none; border: none; cursor: pointer; font: inherit;
-    color: var(--secondary-text-color); padding: 4px 2px; margin-bottom: 2px;
-  }
-  .ssback:hover { color: var(--primary-color); }
-  .srow { display: flex; align-items: center; gap: 2px; }
-  .sr-play {
-    flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px;
-    text-align: left; background: none; border: none; cursor: pointer; font: inherit;
-    color: var(--primary-text-color); padding: 6px; border-radius: 8px;
-  }
-  .sr-play:hover { background: var(--secondary-background-color); }
-  .sr-art {
-    flex: 0 0 auto; width: 40px; height: 40px; border-radius: 6px;
-    background: var(--secondary-background-color) center/cover no-repeat;
-    display: flex; align-items: center; justify-content: center;
-    color: var(--secondary-text-color); --mdc-icon-size: 22px;
-  }
-  .sr-body { min-width: 0; display: flex; flex-direction: column; }
-  .sr-title {
-    font-size: 0.92rem; color: var(--primary-text-color);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .sr-sub {
-    font-size: 0.78rem; color: var(--secondary-text-color);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .sr-exp {
-    flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
-    width: 34px; height: 34px; border-radius: 50%; border: none; background: none;
-    cursor: pointer; color: var(--secondary-text-color); --mdc-icon-size: 22px;
-  }
-  .sr-exp:hover { background: var(--secondary-background-color); color: var(--primary-color); }
   .overlay {
     position: fixed; inset: 0; z-index: 9999;
     display: flex; align-items: stretch; justify-content: stretch;
@@ -3064,9 +3070,16 @@ AxiumMatrixCard.styles = `
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .volrow { display: flex; align-items: center; gap: 10px; }
+  .slidwrap { position: relative; flex: 1 1 auto; min-width: 120px; display: flex; align-items: center; }
   .slider {
-    flex: 1 1 auto; min-width: 120px; height: 24px;
+    flex: 1 1 auto; min-width: 0; height: 24px;
     accent-color: var(--primary-color); cursor: pointer;
+  }
+  /* Greyed-out region above the zone's max volume. */
+  .slidcap {
+    position: absolute; top: 0; bottom: 0; right: 0; width: 0;
+    background: var(--divider-color); opacity: 0.5; border-radius: 4px;
+    pointer-events: none;
   }
   .volval {
     width: 40px; text-align: right; font-size: 0.85rem;
@@ -3684,34 +3697,8 @@ AxiumAlarmsCard.styles = `
   .mediasel { color: var(--primary-color); font-size: 0.9rem; }
   .mediabrowse {
     border: 1px solid var(--divider-color); border-radius: 8px; padding: 6px;
-    max-height: 300px; overflow-y: auto; background: var(--secondary-background-color);
+    background: var(--secondary-background-color);
   }
-  .msearch { display: flex; gap: 6px; margin-bottom: 6px; }
-  .msearchin {
-    flex: 1 1 auto; min-width: 0; font: inherit; padding: 6px 8px; border-radius: 8px;
-    border: 1px solid var(--divider-color); background: var(--card-background-color);
-    color: var(--primary-text-color);
-  }
-  .msearchbtn {
-    display: inline-flex; align-items: center; justify-content: center;
-    border: 1px solid var(--divider-color); border-radius: 8px; cursor: pointer;
-    background: var(--card-background-color); color: var(--primary-text-color);
-    padding: 0 10px; --mdc-icon-size: 20px;
-  }
-  .msearchbtn:hover { border-color: var(--primary-color); color: var(--primary-color); }
-  .crumbs { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 4px; }
-  .crumb {
-    background: none; border: none; color: var(--secondary-text-color);
-    cursor: pointer; font-size: 0.85rem; padding: 2px 4px;
-  }
-  .crumb:hover { color: var(--primary-color); }
-  .mlist { display: flex; flex-direction: column; }
-  .mitem {
-    text-align: left; background: none; border: none; cursor: pointer;
-    color: var(--primary-text-color); padding: 6px 4px; border-radius: 6px;
-    font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .mitem:hover { background: var(--card-background-color); }
   .rows { display: flex; flex-direction: column; gap: 10px; }
   .row { display: flex; align-items: center; gap: 10px; }
   .mid { flex: 1 1 auto; min-width: 0; }
@@ -4357,11 +4344,17 @@ class AxiumVolumesCard extends HTMLElement {
       col.className = "col";
       col.innerHTML = `
         <div class="pct"></div>
-        <input type="range" class="vol" min="0" max="100" step="1" orient="vertical">
+        <div class="volwrap">
+          <div class="volcap"></div>
+          <input type="range" class="vol" min="0" max="100" step="1" orient="vertical">
+        </div>
         <button class="mute iconbtn" title="Mute"><ha-icon icon="mdi:volume-high"></ha-icon></button>
         <div class="zn"></div>`;
       const slider = col.querySelector(".vol");
       slider.addEventListener("input", () => {
+        // Can't drag past the zone's max volume (the greyed cap).
+        const maxv = axiumMaxVolume(this._hass, z);
+        if (Number(slider.value) > maxv) slider.value = maxv;
         this._drag[z] = true;
         col.querySelector(".pct").textContent = slider.value + "%";
         this._scheduleVolume(z, Number(slider.value) / 100);
@@ -4396,9 +4389,10 @@ class AxiumVolumesCard extends HTMLElement {
       clearTimeout(this._timers[z]);
       this._timers[z] = null;
     }
+    const maxv = axiumMaxVolume(this._hass, z) / 100;
     this._hass.callService("media_player", "volume_set", {
       entity_id: z,
-      volume_level: Math.max(0, Math.min(1, level)),
+      volume_level: Math.max(0, Math.min(maxv, level)),
     });
   }
 
@@ -4420,6 +4414,9 @@ class AxiumVolumesCard extends HTMLElement {
         slider.value = pctv;
         col.querySelector(".pct").textContent = pctv + "%";
       }
+      // Grey out the range above the zone's max volume.
+      const cap = col.querySelector(".volcap");
+      if (cap) cap.style.height = Math.max(0, 100 - axiumMaxVolume(this._hass, z)) + "%";
       const zn = col.querySelector(".zn");
       zn.textContent = this._name(z);
       zn.title = this._name(z);
@@ -4437,10 +4434,17 @@ AxiumVolumesCard.styles = `
   .cols { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
   .col { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 58px; }
   .pct { font-size: 0.8rem; color: var(--secondary-text-color); min-height: 1em; }
+  .volwrap { position: relative; width: 28px; height: 150px; }
   .vol {
     writing-mode: vertical-lr; direction: rtl;
     -webkit-appearance: slider-vertical; appearance: slider-vertical;
-    width: 28px; height: 150px; accent-color: var(--primary-color); cursor: pointer;
+    width: 28px; height: 150px; margin: 0; accent-color: var(--primary-color); cursor: pointer;
+  }
+  /* Greyed-out region above the zone's max volume. */
+  .volcap {
+    position: absolute; top: 0; left: 0; right: 0; height: 0;
+    background: var(--divider-color); opacity: 0.55; border-radius: 6px;
+    pointer-events: none;
   }
   .col.off .vol { opacity: 0.45; }
   .zn {

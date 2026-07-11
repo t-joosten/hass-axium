@@ -236,9 +236,12 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   model/fw/zones-on/temp/clipping + all-off; tap opens the hub device page); and
   `axium-matrix-card` (zones × sources routing grid; tap a cell to route a zone to a
   source, tap the zone's currently-active cell to turn that zone off — no Off column).
-  The matrix headers are interactive too (a **full-screen** popover overlay, `#overlay`/`#sheet`:
-  `.overlay` is `position:fixed; inset:0` and `.sheet` fills the viewport — a flex column whose
-  `.ssresults` flexes so a long search list uses the whole screen; closed by tapping the backdrop):
+  The matrix headers are interactive too (a popover overlay, `#overlay`/`#sheet`, covering the **dashboard
+  content but NOT HA's sidebar/header**: `.overlay` is `position:fixed`, and `_showOverlay` measures
+  `ha-sidebar` (`document.querySelector("home-assistant")…ha-sidebar` bounding rect) to set the overlay's
+  `left`, and offsets `top` by `var(--header-height,56px)` — best-effort, falls back to full-viewport if
+  HA internals moved. `.sheet` fills that region as a flex column whose `.ssresults` flexes; closed by the
+  backdrop. It used to be `inset:0` full-viewport, which covered the menus — the user didn't want that.):
   **tap a zone name** → the zone popover (`_openZonePanel`): a
   **power** toggle (`_togglePower`), a **volume** slider + mute, and the zone's **tone/EQ** controls —
   **bass/treble/balance** sliders (`number.set_value`) + **loudness** and **mono** toggles
@@ -301,7 +304,12 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   sped up). **Do NOT re-add a `media_play` nudge** in play mode: this MA player reports `state:"playing"`
   even while paused (DLNA desync, verified via `media_position` freezing), so a nudge un-pauses a
   just-paused stream (the old "pause doesn't work" bug); `enqueue:"play"` reliably auto-starts without one
-  (`"replace"` was flaky for a lone track). **DO NOT prefetch per-row browses** (an old `_streamItemCount`
+  (`"replace"` was flaky for a lone track). **Switch-from-playing double-fire** (`_activate`): verified on
+  hardware that a `play_media` arriving while the amp's renderer is already PLAYING **stops it (→ idle)
+  instead of switching** — and a second `play_media` from the now-idle state actually plays the new track
+  (the user's "tap once → music stops, tap again → plays"). So `_activate` fires `play_media`, and **if the
+  player state was "playing", fires it again ~1.5s later**. From idle it's a single fire (no double). Don't
+  "simplify" this to a single call. **DO NOT prefetch per-row browses** (an old `_streamItemCount`
   fired a `browse_media` per album/playlist row for a track count — a burst of ~10-15 concurrent
   `browse_media` calls **hangs Music Assistant**; removed). The WS calls are the module fns
   `axiumMaSearch`/`axiumMaBrowse`. NB: `search_media`/`browse_media` return items whose
@@ -460,7 +468,11 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   slider-vertical` for WebKit) plus a mute button; drags are debounced (`_scheduleVolume`, 200ms)
   and the final `change` still fires. Filterable via its own editor (`axium-volumes-card-editor`:
   hub/zones/name) — the `zones` whitelist (empty = all). Reads/writes only the zones'
-  media_player state.
+  media_player state. **Max-volume cap:** the region above a zone's max volume is **greyed out** on the
+  slider (a `.volcap`/`.slidcap` overlay sized to `100 − max`), and drags/sets are **clamped** to it. The
+  max is `axiumMaxVolume(hass, zoneId)` (0-100) — read from the zone's `number.*_max_volume` entity (found
+  by matching the `_max_volume` entity-id suffix on the zone media_player's own device; 100 if absent).
+  Same greying is applied to the **matrix zone popover** volume slider (`_openZonePanel`/`_refreshPanel`).
 - **The internal Media Player source is SPLIT per amp everywhere** (id ≥ `STREAM_SOURCE_MIN`):
   `axiumSourceChoices` emits **one choice per amp** ("Axium 1", "Axium 2" — NOT one combined
   "Media Player" or "Axium 1 / Axium 2"), each amp-scoped by a 3-part token
