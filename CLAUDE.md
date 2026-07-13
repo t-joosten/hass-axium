@@ -683,9 +683,11 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   a source's `out` is the `select_source` name. The media_player only lists the ONE generic "Media
   Player" (not per-amp), so `_collect_vocab` adds each **amp device name ("Axium 1"/"Axium 2") as a
   spoken alias whose `out` is the Media Player source name** — so "zet de keuken op axium 1" →
-  `select_source("Media Player")` routes the zone to its stream. (It selects the source with turn-on;
-  it does NOT auto-start MA — if the amp stream is idle there's no audio.) Amp names also go in the
-  Whisper prompt sources.
+  `select_source("Media Player")` routes the zone to its stream. `SetSourceIntent` then, when the
+  chosen source is the zone's Media Player stream (`_is_stream_source`), also **`media_play`s the
+  zone's amp MA player** (`_amp_device_for_entity` via_device → `_ma_player_by_name`) so the music
+  actually starts (like tapping a stream cell), and answers with the amp name, not "Media Player".
+  Amp names also go in the Whisper prompt sources.
 - Test live via `POST /api/conversation/process {text, language}`: check `response.speech.plain.speech`
   == our localized reply (proves OUR intent ran, not a builtin) and that the side effect happened.
   **All 4 verified nl+en on hardware** (source-select, sleep incl. "over N min" + "overal", preset);

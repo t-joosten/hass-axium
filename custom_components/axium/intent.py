@@ -194,6 +194,50 @@ def _zone_target(intent_obj: intent.Intent) -> list[str]:
     return []
 
 
+@callback
+def _is_stream_source(hass: HomeAssistant, zone_entity: str, source: str) -> bool:
+    """Whether ``source`` selects the zone's (Media Player) stream, not an input."""
+    state = hass.states.get(zone_entity)
+    if not state:
+        return False
+    names = state.attributes.get("source_list") or []
+    ids = state.attributes.get("source_ids") or []
+    return any(
+        nm == source and sid == SOURCE_MEDIA_PLAYER_BYTE
+        for nm, sid in zip(names, ids)
+    )
+
+
+@callback
+def _amp_device_for_entity(hass: HomeAssistant, zone_entity: str):
+    """The amp device a zone media_player hangs off (its ``via_device``)."""
+    reg = er.async_get(hass)
+    ent = reg.async_get(zone_entity)
+    if not ent or not ent.device_id:
+        return None
+    dev_reg = dr.async_get(hass)
+    dev = dev_reg.async_get(ent.device_id)
+    if not dev or not dev.via_device_id:
+        return None
+    return dev_reg.async_get(dev.via_device_id)
+
+
+@callback
+def _ma_player_by_name(hass: HomeAssistant, name: str) -> str | None:
+    """The Music Assistant player whose friendly name equals ``name``."""
+    want = (name or "").strip().lower()
+    if not want:
+        return None
+    reg = er.async_get(hass)
+    for ent in reg.entities.values():
+        if ent.domain != "media_player" or ent.platform != "music_assistant":
+            continue
+        state = hass.states.get(ent.entity_id)
+        if state and (state.name or "").strip().lower() == want:
+            return ent.entity_id
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # Intent handlers
 # --------------------------------------------------------------------------- #
@@ -229,13 +273,30 @@ class SetSourceIntent(_AxiumIntent):
             {"entity_id": zones, "source": source},
             blocking=True,
         )
+        # When we route a zone to its amp's Media Player stream, also START that
+        # stream (like tapping a stream cell) so music actually plays, and answer
+        # with the amp's name instead of the generic "Media Player".
+        reply_source = source
+        for zone_entity in zones:
+            if not _is_stream_source(hass, zone_entity, source):
+                continue
+            amp = _amp_device_for_entity(hass, zone_entity)
+            amp_name = (amp.name_by_user or amp.name) if amp else None
+            if not isinstance(amp_name, str) or not amp_name:
+                continue
+            reply_source = amp_name
+            player = _ma_player_by_name(hass, amp_name)
+            if player:
+                await hass.services.async_call(
+                    "media_player", "media_play", {"entity_id": player}, blocking=False
+                )
         return self._speak(
             intent_obj,
             _t(
                 intent_obj.language,
                 "set_source",
                 zones=_friendly(hass, zones),
-                source=source,
+                source=reply_source,
             ),
         )
 
