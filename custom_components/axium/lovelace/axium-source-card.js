@@ -4598,11 +4598,18 @@ class AxiumVolumesCard extends HTMLElement {
       if (!col) continue;
       const st = this._hass.states[z];
       const off = !st || OFF_STATES.includes(st.state);
-      const muted = !!(st && st.attributes.is_volume_muted);
+      const a = st ? st.attributes : {};
+      // HA strips volume_level/is_volume_muted from an OFF media_player, so fall
+      // back to axium_volume/axium_muted to still show an off zone's real level.
+      const muted = !!(
+        typeof a.is_volume_muted === "boolean" ? a.is_volume_muted : a.axium_muted
+      );
       const lvl =
-        st && typeof st.attributes.volume_level === "number"
-          ? st.attributes.volume_level
-          : 0;
+        typeof a.volume_level === "number"
+          ? a.volume_level
+          : typeof a.axium_volume === "number"
+            ? a.axium_volume
+            : 0;
       const pctv = Math.round(lvl * 100);
       col.classList.toggle("off", off);
       const slider = col.querySelector(".vol");

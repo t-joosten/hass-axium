@@ -535,7 +535,11 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   slider-vertical` for WebKit) plus a mute button; drags are debounced (`_scheduleVolume`, 200ms)
   and the final `change` still fires. Filterable via its own editor (`axium-volumes-card-editor`:
   hub/zones/name) — the `zones` whitelist (empty = all). Reads/writes only the zones'
-  media_player state. **Max-volume cap:** the region above a zone's max volume is **greyed out** on the
+  media_player state. **Off zones still show their real level:** HA's media_player base **strips
+  `volume_level`/`is_volume_muted` from an OFF player** (`state_attributes` returns None when off), so
+  the media_player also exposes `axium_volume`/`axium_muted` in `extra_state_attributes` (unrecorded;
+  these survive the off state) and the card falls back to them when the standard attrs are absent —
+  otherwise off zones read 0%. **Max-volume cap:** the region above a zone's max volume is **greyed out** on the
   slider (`axiumApplyVolCap` sizes a `.volcap`/`.slidcap` overlay to `100 − max`), and drags/sets are
   **clamped** to it. The max is `axiumMaxVolume(hass, zoneId)` (0-100) from the zone's `number.*_max_volume`
   entity. **Fast path** derives the number id from the zone id (`number.<zone-slug>_max_volume`, O(1) — it

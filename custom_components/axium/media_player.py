@@ -146,7 +146,9 @@ class AxiumZone(MediaPlayerEntity):
     _attr_name = None
     _attr_should_poll = False
     # These list attributes are static config, not history worth recording.
-    _unrecorded_attributes = frozenset({"source_ids", "axium_presets", "zone_number"})
+    _unrecorded_attributes = frozenset(
+        {"source_ids", "axium_presets", "zone_number", "axium_volume", "axium_muted"}
+    )
 
     def __init__(
         self,
@@ -296,12 +298,18 @@ class AxiumZone(MediaPlayerEntity):
         ``source_list`` (``source_ids[i]`` matches ``source_list[i]``) — the
         dashboard card stores the id, not the display name, so renaming a source
         on the amp doesn't break a card. ``axium_presets`` are the hub-wide zone
-        presets a source card can activate.
+        presets a source card can activate. ``axium_volume``/``axium_muted``
+        mirror the zone's volume/mute so a card can still show them when the zone
+        is OFF (HA strips the standard ``volume_level``/``is_volume_muted``
+        attributes from an off media_player).
         """
+        state = self._controller.zone_state(self._zone)
         return {
             "source_ids": self._effective_source_ids(),
             "axium_presets": self._presets,
             "zone_number": self._zone,
+            "axium_volume": state.volume,
+            "axium_muted": state.muted,
         }
 
     @property

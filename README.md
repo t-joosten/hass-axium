@@ -662,7 +662,8 @@ volume lives on each zone's device page.
 The **Axium Volumes Card** (`type: custom:axium-volumes-card`) shows a **vertical
 volume slider per zone** (plus a mute button and the live level) — a quick way to
 balance the whole house at a glance. Drag a slider to set that room's absolute
-volume. If a zone has a **max volume** set (its *Max volume* number), the range
+volume. **Zones that are off still show their real volume** (dimmed), so you can
+pre-set a room's level before turning it on. If a zone has a **max volume** set (its *Max volume* number), the range
 above it is **greyed out** and the slider won't go past it — the same cap now
 shows on the matrix zone popover's volume slider too. Its visual editor has a
 **Zones to show** field to pick exactly which rooms appear (empty = all); in YAML
