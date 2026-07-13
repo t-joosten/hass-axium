@@ -130,21 +130,44 @@ def _axium_media_players(hass: HomeAssistant) -> list[str]:
 
 
 @callback
-def _pipeline_tts_engine(hass: HomeAssistant) -> str | None:
-    """The TTS engine of the preferred Assist pipeline (e.g. Piper), if any.
+def _pipeline_tts_engine(hass: HomeAssistant, language: str | None = None) -> str | None:
+    """An Assist pipeline's TTS engine (e.g. Piper), matching ``language`` if we can.
 
     A spoken announcement should use the same local voice as the assistant's own
     replies — not whatever ``tts.*`` happens to be first (which may be a cloud
-    engine like Google Translate). Best-effort: assist_pipeline is optional.
+    engine like Google Translate). The *preferred* pipeline may have no TTS engine
+    (the user's Whisper+Piper pipeline isn't always the default), so fall back to
+    any pipeline that has one, preferring a language match. Best-effort:
+    assist_pipeline is optional and its API can drift.
     """
     try:
         from homeassistant.components import assist_pipeline
-
-        pipeline = assist_pipeline.async_get_pipeline(hass)
-    except Exception:  # noqa: BLE001 - optional integration / API drift
+    except Exception:  # noqa: BLE001
         return None
-    engine = getattr(pipeline, "tts_engine", None) if pipeline else None
-    return engine if isinstance(engine, str) and engine else None
+
+    def _engine(pipeline: Any) -> str | None:
+        engine = getattr(pipeline, "tts_engine", None) if pipeline else None
+        return engine if isinstance(engine, str) and engine else None
+
+    try:
+        preferred = assist_pipeline.async_get_pipeline(hass)
+    except Exception:  # noqa: BLE001
+        preferred = None
+    if _engine(preferred):
+        return _engine(preferred)
+
+    try:
+        pipelines = list(assist_pipeline.async_get_pipelines(hass))
+    except Exception:  # noqa: BLE001
+        return None
+    wanted = _lang(language)
+    # Language-matching pipelines first, then any — return the first with a TTS engine.
+    pipelines.sort(key=lambda p: _lang(getattr(p, "language", None)) != wanted)
+    for pipeline in pipelines:
+        engine = _engine(pipeline)
+        if engine:
+            return engine
+    return None
 
 
 @callback
@@ -330,7 +353,7 @@ class AnnounceIntent(_AxiumIntent):
             "message": message,
             "language": _lang(intent_obj.language),
         }
-        engine = _pipeline_tts_engine(hass)
+        engine = _pipeline_tts_engine(hass, intent_obj.language)
         if engine:
             data["tts_engine"] = engine
         await hass.services.async_call(DOMAIN, "play_notification", data, blocking=False)
