@@ -470,7 +470,14 @@ def async_add_voice_aliases(hass: HomeAssistant) -> None:
         alias = _readable(name)
         if not alias or alias.casefold() == name.casefold():
             continue
-        existing = set(ent.aliases or [])
+        # Keep only real string aliases (a set element can be a computed-name
+        # sentinel, not a str, in current HA).
+        raw = ent.aliases
+        existing = (
+            {a for a in raw if isinstance(a, str)}
+            if isinstance(raw, (set, frozenset, list, tuple))
+            else set()
+        )
         if any(a.casefold() == alias.casefold() for a in existing):
             continue
         try:
