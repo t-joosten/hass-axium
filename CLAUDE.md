@@ -108,8 +108,13 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   (one byte) was wrong. Now `ZoneState.source_delays` = `[ms per source, S1 first]`; the setter
   `async_set_source_delay(zone, index, ms)` resends the WHOLE 8-byte array (others from cache) with just
   one entry changed, then re-reads (the amp doesn't echo a set). Exposed as **`AxiumSourceDelay` numbers,
-  one per source (S1..S8) per zone**, on the ZONE device (`number.py`, `EntityCategory.CONFIG`, mode BOX,
-  0-1275 ms / 5 ms steps). "No delay for the media player source" (protocol), so only the 8 analog
+  one per source (S1..S8) per zone**, on the ZONE device (`number.py`, `EntityCategory.CONFIG`, **mode
+  SLIDER**, 0-1275 ms / 5 ms steps). The entity **`name` is a live property** = `<source name> delay` —
+  it maps its source number → byte (`SOURCE_NUMBER_TO_BYTE`) → `controller.source_name(byte)` (the amp's
+  renamed name, e.g. "PC delay"), falling back to `SOURCE_BYTE_TO_NAME` ("Source N"); it registers a
+  **diagnostic listener** (as well as the zone listener) so a source rename refreshes the label. The
+  entity_id stays the `..._source_N_delay` original (registered in v0.0.103), so the rename-driven label
+  only changes the friendly name. "No delay for the media player source" (protocol), so only the 8 analog
   sources. Simulator: `Zone.source_delays` (list of 8); 0x31 handled separately (reply lists all sources;
   a single-byte command sets all — the protocol's back-compat rule).
 - **What the control protocol can/can't do** (AxiumCommsProtocol.pdf, 25pp): network config IS

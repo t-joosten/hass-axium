@@ -45,6 +45,7 @@ from .const import (
     SOURCE_BYTE_TO_NAME,
     SOURCE_GAIN_MAX,
     SOURCE_GAIN_MIN,
+    SOURCE_NUMBER_TO_BYTE,
     TREBLE_MAX,
     TREBLE_MIN,
     VOLUME_MAX,
@@ -552,7 +553,7 @@ class AxiumSourceDelay(NumberEntity):
     _attr_native_max_value = AUDIO_DELAY_MAX
     _attr_native_step = AUDIO_DELAY_STEP
     _attr_native_unit_of_measurement = "ms"
-    _attr_mode = NumberMode.BOX
+    _attr_mode = NumberMode.SLIDER
     _attr_icon = "mdi:timer-outline"
 
     def __init__(
@@ -566,7 +567,9 @@ class AxiumSourceDelay(NumberEntity):
         self._controller = controller
         self._zone = zone
         self._index = source_number - 1  # S1 -> index 0
-        self._attr_name = f"Source {source_number} delay"
+        self._source_number = source_number
+        # The protocol data byte for this source, used to look up its live name.
+        self._source_byte = SOURCE_NUMBER_TO_BYTE.get(source_number)
         self._attr_unique_id = (
             f"{entry.entry_id}_zone_{zone}_source_{source_number}_delay"
         )
@@ -574,10 +577,24 @@ class AxiumSourceDelay(NumberEntity):
             identifiers={(DOMAIN, f"{entry.entry_id}_zone_{zone}")}
         )
 
+    @property
+    def name(self) -> str:
+        """Label the slider by the source's current (renamed) name."""
+        label = None
+        if self._source_byte is not None:
+            label = self._controller.source_name(self._source_byte) or (
+                SOURCE_BYTE_TO_NAME.get(self._source_byte)
+            )
+        return f"{label or f'Source {self._source_number}'} delay"
+
     async def async_added_to_hass(self) -> None:
-        """Subscribe to zone updates and request the current delays."""
+        """Subscribe to zone + source-name updates and request the delays."""
         self.async_on_remove(
             self._controller.register_listener(self._zone, self._handle_update)
+        )
+        # Source names arrive as diagnostics; refresh the label when they change.
+        self.async_on_remove(
+            self._controller.register_diagnostic_listener(self._handle_update)
         )
         # One request returns every source's delay for the zone.
         await self._controller.async_request_source_delays(self._zone)
