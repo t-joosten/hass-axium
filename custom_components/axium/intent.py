@@ -375,10 +375,13 @@ def _collect_vocab(
     for ent in _axium_zone_entries(hass):
         state = hass.states.get(ent.entity_id)
         display = (state.name if state else None) or ent.name or ent.original_name
-        spoken = _spoken(display or "")
-        if spoken and spoken not in seen_spoken:
-            seen_spoken.add(spoken)
-            zones.append((spoken, ent.entity_id))
+        # The friendly name plus any aliases (so an English alias like "Kitchen"
+        # works alongside the Dutch zone name) — all pointing at this entity.
+        for label in [display, *(ent.aliases or [])]:
+            spoken = _spoken(label or "")
+            if spoken and spoken not in seen_spoken:
+                seen_spoken.add(spoken)
+                zones.append((spoken, ent.entity_id))
         for name in (state.attributes.get("source_list") or []) if state else []:
             if name and name not in sources:
                 sources.append(name)

@@ -620,29 +620,39 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
     (→ `media_player.select_source`), `AxiumSleep` (→ the zone's `_sleep` number, or every
     `_sleep_all` number when the `everywhere` slot is set), `AxiumPreset` (→ `select_source` if a
     source was named, else `media_player.turn_on` the preset's zones), `AxiumAnnounce`
-    (→ `axium.play_notification` with `language`). Zone/area targets resolve via
-    `intent.async_match_targets` (respects exposure via `assistant=intent_obj.assistant`) then
-    filter to `platform == "axium"`. Sleep number for a zone = the media_player's `unique_id` +
-    `"_sleep"` (`reg.async_get_entity_id("number", DOMAIN, …)`). Responses are localized in code
-    (`_RESPONSES`, keyed nl/en) so they can't drift from the sentences.
+    (→ `axium.play_notification` with `language`). Sleep number for a zone = the media_player's
+    `unique_id` + `"_sleep"` (`reg.async_get_entity_id("number", DOMAIN, …)`). Responses are
+    localized in code (`_RESPONSES`, keyed nl/en) so they can't drift from the sentences.
+  - **CRITICAL — target zones via a baked `axium_zone` list, NOT the builtin `{name}`/`{area}`
+    slots.** Verified live: builtin `{name}` sentences LOSE to HA's own intents — a plain "zet de
+    keuken op de pc" gets grabbed by a builtin (greedy `{name}` = the whole tail), and a trailing
+    "over N minuten" is eaten by HA's **delayed-command** feature ("Opdracht wordt uitgevoerd over
+    15 minuten"), so our handler never runs. A fully custom-slot sentence (like the all-zones
+    `everywhere` one) matches cleanly. So `axium_zone` bakes **spoken zone name → `entity_id`**
+    (`out` = the entity id; handler reads it straight from the slot via `_zone_target`, validates
+    `platform=="axium"`), and each zone bakes its friendly name **plus its registry `aliases`** (so
+    an English alias "Kitchen" works next to Dutch "Keuken"). Trade-off: targeting is by zone NAME,
+    not area/alias-resolution — no `async_match_targets`. Disabled zones are skipped
+    (`_axium_zone_entries` filters `disabled_by`).
   - **The built-in agent only reads sentences from `<config>/custom_sentences/<lang>/`** — NOT from
     the integration folder. So `async_update_sentences` writes `custom_sentences/nl/axium.yaml` +
-    `…/en/axium.yaml` (**a folder per language**) with the **live** source names
-    (`controller.source_name` ∪ each zone's `source_list`) and preset names **baked into hassil
-    lists**, then calls `conversation.reload`. Called at `async_setup_entry` end AND from a
-    controller **diagnostic listener** (so a source rename refreshes the phrases); guarded by a
-    `(sources,presets)` signature in `hass.data["axium_voice"]` + a file-content compare, so it only
-    rewrites/reloads on a real change. `{name}`/`{area}` are the agent's own builtins (live,
-    exposure-aware); only `axium_source`/`axium_preset`/`minutes`(range 0-180)/`everywhere`/`message`
-    (wildcard) are baked. Empty presets → the `AxiumPreset` intent + list are omitted (no dangling
-    `{list}`). `voice_sentences.build_language_doc` is **pure/stdlib-only** (no HA import) so it's
-    unit-testable directly; sanitize each list value's spoken `in` form (strip hassil specials
-    `()[]{}<>|:`).
+    `…/en/axium.yaml` (**a folder per language**) with the live zones (name+aliases→entity_id),
+    source names (`controller.source_name` ∪ each zone's `source_list`) and preset names **baked
+    into hassil lists**, then calls `conversation.reload`. Called at `async_setup_entry` end AND
+    from a controller **diagnostic listener** (so a rename refreshes the phrases); guarded by a
+    `(zones,sources,presets)` signature in `hass.data["axium_voice"]` + a file-content compare, so
+    it only rewrites/reloads on a real change. Only `axium_zone`/`axium_source`/`axium_preset`/
+    `minutes`(range 0-180)/`everywhere`/`message`(wildcard) are baked. Empty presets → the
+    `AxiumPreset` intent + list are omitted (no dangling `{list}`); no zones → source/announce-zone
+    sentences drop too. `voice_sentences.build_language_doc(language, zones, sources, presets)` is
+    **pure/stdlib-only** (no HA import) so it's unit-testable directly; sanitize each spoken `in`
+    form (`_spoken`, strips hassil specials `()[]{}<>|:`).
 - Spoken numbers must be **digits** ("30", not "dertig") — hassil range lists match digits; note this
   as a limitation. `manifest.json after_dependencies` includes `conversation` so it's set up first.
-- Test live via `POST /api/conversation/process {text, language}` — but the target zone must be
-  **exposed to Assist** or `async_match_targets` returns no match (handler then speaks the localized
-  "no zone" reply, which still proves the sentence matched).
+- Test live via `POST /api/conversation/process {text, language}`: check `response.speech.plain.speech`
+  == our localized reply (proves OUR intent ran, not a builtin) and that the side effect happened.
+  **All 4 verified nl+en on hardware** (source-select, sleep incl. "over N min" + "overal", preset);
+  announce is audible so it's demoed only on request.
 
 ## Deploying to / debugging the user's live HA
 

@@ -723,33 +723,39 @@ The integration adds **Dutch and English** voice commands to Home Assistant's
 built-in **Assist** (works with a local Whisper + Piper pipeline — no cloud, no
 LLM required).
 
-**Set-up:** expose your zones to Assist (**Settings → Voice assistants → Expose**)
-and give each zone an **Area** and, if you like, aliases. That alone gives you the
-built-in commands in both languages — power, volume, mute, pause/next:
+**Set-up:** expose your zones to Assist (**Settings → Voice assistants → Expose**).
+That alone gives you Home Assistant's own commands in both languages — power,
+volume, mute, pause/next:
 
 - 🇳🇱 "Zet de keuken aan" · "Zet het volume in de woonkamer op 30 procent"
 - 🇬🇧 "Turn on the kitchen" · "Pause the music in the living room"
 
-On top of that, these **Axium-specific** commands are added automatically:
+On top of that, these **Axium-specific** commands are added automatically (each
+verified working in both languages):
 
 | What | 🇳🇱 Dutch | 🇬🇧 English |
 | --- | --- | --- |
-| Pick a source | "Zet de keuken op de pc" | "Switch the kitchen to the PC" |
-| Sleep a zone | "Zet slaaptimer voor de slaapkamer over 30 minuten" | "Sleep the bedroom in 30 minutes" |
+| Pick a source | "Zet de keuken op de pc" | "Switch the keuken to S3" |
+| Sleep a zone | "Zet slaaptimer voor de keuken over 30 minuten" | "Sleep the keuken for 30 minutes" |
 | Sleep everything | "Zet slaaptimer voor overal over 30 minuten" | "Set a sleep timer everywhere for 30 minutes" |
-| Activate a preset | "Activeer preset filmavond" | "Activate the movie preset" |
-| Announce (TTS) | "Roep om in de keuken: eten is klaar" | "Announce in the kitchen: dinner is ready" |
+| Activate a preset | "Activeer preset living" | "Activate the living preset" |
+| Announce (TTS) | "Roep om in de keuken: eten is klaar" | "Announce in the keuken: dinner is ready" |
 
-The phrases are generated with **your live zone, source and preset names baked in**
-(rename a source on the amp and the command follows it), written to
-`config/custom_sentences/nl/axium.yaml` and `…/en/axium.yaml` — one folder per
-language — and the conversation agent is reloaded automatically. Nothing to copy
-by hand.
+Commands **name a zone** (not an area): the phrases are generated with **your live
+zone, source and preset names baked in** — rename a source on the amp, or a zone in
+HA, and the command follows it. They're written to `config/custom_sentences/nl/axium.yaml`
+and `…/en/axium.yaml` — one folder per language — and the conversation agent is
+reloaded automatically. Nothing to copy by hand.
 
-Announcements route through the `axium.play_notification` service (spoken in the
-same language you asked in) and restore each zone afterwards. Numbers are best
-spoken as digits ("30"), and "everywhere / overal" targets the all-zones sleep
-timer.
+**Zone names & English:** a command uses the zone's own name, so with Dutch zone
+names ("Keuken") the English commands use that same word. Want to say "kitchen"?
+Add an **alias** to the zone (its device/entity → *Aliases*); aliases are baked in
+too, so both names work.
+
+Notes: numbers are best spoken as **digits** ("30", not "dertig"); "everywhere /
+overal" targets the all-zones sleep timer; announcements route through
+`axium.play_notification` (spoken in the language you asked in) and restore each
+zone afterwards.
 
 ## How it works
 
