@@ -61,9 +61,13 @@ CMD_AUDIO_DELAY: Final = 0x31
 CMD_POWER_ON_VOLUME: Final = 0x48
 
 # Audio delay (0x31): a 5 ms-step byte PER SOURCE (first byte = S1, then S2, …;
-# a single byte applies to all sources). Per zone. Max 255 -> 1275 ms.
+# a single byte applies to all sources). Per zone. The protocol byte allows up to
+# 255 (1275 ms), but the AX-800(-X) firmware/web app cap at 120 -> 600 ms and
+# SILENTLY REJECT anything higher (verified on hardware: a set of 605 ms+ leaves
+# the value unchanged), so we cap the entity there to match.
 AUDIO_DELAY_STEP: Final = 5
-AUDIO_DELAY_MAX: Final = 255 * AUDIO_DELAY_STEP
+AUDIO_DELAY_MAX_BYTE: Final = 120  # 600 ms — the amp's accepted maximum
+AUDIO_DELAY_MAX: Final = AUDIO_DELAY_MAX_BYTE * AUDIO_DELAY_STEP
 CMD_REQUEST_PROTOCOL: Final = 0x08
 CMD_AUTO_POWER: Final = 0x16
 CMD_PRESET: Final = 0x1E

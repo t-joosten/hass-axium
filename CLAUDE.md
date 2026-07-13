@@ -109,7 +109,12 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `async_set_source_delay(zone, index, ms)` resends the WHOLE 8-byte array (others from cache) with just
   one entry changed, then re-reads (the amp doesn't echo a set). Exposed as **`AxiumSourceDelay` numbers,
   one per source (S1..S8) per zone**, on the ZONE device (`number.py`, `EntityCategory.CONFIG`, **mode
-  SLIDER**, 0-1275 ms / 5 ms steps). The entity **`name` is a live property** = `<source name> delay` —
+  SLIDER**, **0-600 ms / 5 ms steps**). **MAX IS 600 ms (byte 120), NOT 1275** — verified on hardware: the
+  AX-800(-X) firmware/web app cap at 600 ms and **silently reject** a set of 605 ms+ (the delay stays at
+  its previous value, no error). A 1275 ms slider was the "after sliding I can't update again" bug: any
+  drag above 600 ms was rejected so the value never moved. `AUDIO_DELAY_MAX_BYTE=120` caps the entity and
+  clamps the outgoing bytes (`async_set_source_delay`); the sim models the reject (ignores per-source bytes
+  >120, keeping the prior value). The entity **`name` is a live property** = `<source name> delay` —
   it maps its source number → byte (`SOURCE_NUMBER_TO_BYTE`) → `controller.source_name(byte)` (the amp's
   renamed name, e.g. "PC delay"), falling back to `SOURCE_BYTE_TO_NAME` ("Source N"); it registers a
   **diagnostic listener** (as well as the zone listener) so a source rename refreshes the label. The

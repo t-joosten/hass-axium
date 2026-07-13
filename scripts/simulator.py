@@ -415,10 +415,12 @@ class Simulator:
             for z in self._resolve_zones(zone_byte):
                 if data:  # set (silent); short commands set remaining to the last
                     last = data[-1]
-                    z.source_delays = [
-                        data[i] if i < len(data) else last
-                        for i in range(len(z.source_delays))
-                    ]
+                    for i in range(len(z.source_delays)):
+                        val = data[i] if i < len(data) else last
+                        # The real amp caps at 120 (600 ms) and rejects (keeps the
+                        # previous value for) anything higher — model that.
+                        if val <= 120:
+                            z.source_delays[i] = val
                 else:  # request -> reply with every source's delay
                     reply = encode(0x31, z.number, *z.source_delays)
                     writer.write(reply)

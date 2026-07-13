@@ -18,6 +18,7 @@ import re
 
 from . import protocol
 from .const import (
+    AUDIO_DELAY_MAX_BYTE,
     AUDIO_DELAY_STEP,
     AUTO_POWER_ON_BIT,
     AUTO_STANDBY_BIT,
@@ -983,7 +984,12 @@ class AxiumController:
         count = max(len(cur), index + 1, DEFAULT_SOURCE_COUNT)
         delays = [cur[i] if i < len(cur) else 0 for i in range(count)]
         delays[index] = ms
-        body = [max(0, min(255, round(d / AUDIO_DELAY_STEP))) for d in delays]
+        # The amp rejects (ignores) bytes above its max, so clamp — otherwise an
+        # out-of-range request silently leaves the delay unchanged.
+        body = [
+            max(0, min(AUDIO_DELAY_MAX_BYTE, round(d / AUDIO_DELAY_STEP)))
+            for d in delays
+        ]
         await self.async_send(CMD_AUDIO_DELAY, zone, *body)
         await self.async_send(CMD_AUDIO_DELAY, zone)  # read-back
 

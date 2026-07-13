@@ -284,10 +284,11 @@ Each zone's device page exposes these sliders:
 - **Bass**, **Treble**, **Balance** (`0x05`/`0x06`/`0x07`)
 - **Maximum volume** — a volume limit, e.g. for kids' rooms (`0x0D`)
 - **<source> delay** — a **per-source** audio (lip-sync) delay slider for that zone,
-  in 5 ms steps (the amp's *Delays* screen), one per source and **labelled by the
-  source's own name** (e.g. "PC delay"). Each source can be delayed independently
-  per room — e.g. delay the TV's source in the living room to match the picture,
-  without affecting the same source elsewhere (`0x31`)
+  **0–600 ms in 5 ms steps** (the amp's *Delays* screen; 600 ms is the amp's max),
+  one per source and **labelled by the source's own name** (e.g. "PC delay"). Each
+  source can be delayed independently per room — e.g. delay the TV's source in the
+  living room to match the picture, without affecting the same source elsewhere
+  (`0x31`)
 - **Loudness** and **Mono** toggles (`0x0C`)
 
 **Advanced (opt-in) controls** — hidden until you enable them (see below):
