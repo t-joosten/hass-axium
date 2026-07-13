@@ -333,9 +333,14 @@ def _preset_zones(hass: HomeAssistant, name: str) -> list[str]:
     return []
 
 
-@callback
-def async_register_intents(hass: HomeAssistant) -> None:
-    """Register the Axium voice intents (idempotent)."""
+async def async_setup_intents(hass: HomeAssistant) -> None:
+    """Register the Axium voice intents.
+
+    Named ``async_setup_intents`` because Home Assistant's ``intent`` component
+    auto-discovers each integration's ``intent.py`` as an intent platform and
+    awaits this hook — so it is the idiomatic registration point (and the module
+    MUST expose it, or platform processing raises AttributeError). Idempotent.
+    """
     for handler in (
         SetSourceIntent(),
         SleepIntent(),

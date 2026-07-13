@@ -615,8 +615,13 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   zone media_players (+ areas/aliases) already gives power/volume/mute/transport in both languages
   via HA's own localized intents. We only add the **Axium verbs**.
 - **Two halves** (`intent.py` handlers + `voice_sentences.py` pure builder):
-  - `intent.py` registers 4 `IntentHandler`s in **`async_setup`** (global, once — added an
-    `async_setup` that just calls `axium_intent.async_register_intents`): `AxiumSetSource`
+  - **The module MUST be `intent.py` AND expose `async def async_setup_intents(hass)`** — HA's
+    `intent` component auto-discovers each integration's `intent.py` as an intent platform and
+    awaits that hook; a module named `intent.py` WITHOUT it raises `AttributeError: ... has no
+    attribute 'async_setup_intents'` during platform processing, which fails the config entry
+    (`setup_error`) even though the entities already loaded (this bit us — voice worked but the
+    entry errored). Do NOT register intents from a custom `async_setup` instead; use this hook. It
+    registers 4 `IntentHandler`s (idempotent): `AxiumSetSource`
     (→ `media_player.select_source`), `AxiumSleep` (→ the zone's `_sleep` number, or every
     `_sleep_all` number when the `everywhere` slot is set), `AxiumPreset` (→ `select_source` if a
     source was named, else `media_player.turn_on` the preset's zones), `AxiumAnnounce`

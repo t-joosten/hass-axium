@@ -262,12 +262,6 @@ async def _async_migrate_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> 
     hass.config_entries.async_update_entry(entry, **updates)
 
 
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Register the voice-assistant intents (global, once per HA start)."""
-    axium_intent.async_register_intents(hass)
-    return True
-
-
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Axium from a config entry."""
     host = entry.data[CONF_HOST]
@@ -550,7 +544,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Voice: (re)generate the per-language sentence files with the live zone/
     # source/preset names, and refresh them when a source is renamed on the amp.
-    await axium_intent.async_update_sentences(hass)
+    # Best-effort — a voice-generation hiccup must never fail the whole entry.
+    try:
+        await axium_intent.async_update_sentences(hass)
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("Axium: could not generate voice sentences")
 
     @callback
     def _regenerate_sentences() -> None:
