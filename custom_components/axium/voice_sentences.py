@@ -117,30 +117,36 @@ def build_whisper_prompt(
 ) -> str:
     """A Whisper ``initial_prompt`` priming STT for the Axium vocabulary.
 
-    Whisper transcribes unusual words far better when the prompt already contains
-    them, so this lists the room, source and preset names plus a few example
-    commands (priming the trigger words like "slaaptimer", "preset", "roep om").
-    Dutch — the user's primary language; proper nouns carry over to English.
-    Kept short: Whisper only conditions on ~224 tokens of prompt.
+    Whisper conditions on this text, so it transcribes unusual words far better
+    when they already appear here — ideally in natural, fully punctuated example
+    sentences (that primes the *trigger* words like "Roep om"/"Omroepen"/
+    "slaaptimer", not just the nouns). We LEAD with the examples for that reason,
+    then list the room/source/preset names. Dutch — the user's primary language;
+    proper nouns carry over to English. Kept short (Whisper conditions on ~224
+    tokens).
     """
     rooms = [_readable(z) for z in zone_names]
-    parts = ["Spraakbesturing voor de Axium multiroom versterker."]
+    first_room = rooms[0].lower() if rooms else "de keuken"
+    examples: list[str] = []
+    if sources:
+        examples.append(f"Zet de {first_room} op de {sources[0]}.")
+    examples.append(f"Zet een slaaptimer voor de {first_room} over 30 minuten.")
+    examples.append("Zet slaaptimer voor overal.")
+    if presets:
+        examples.append(f"Activeer preset {presets[0]}.")
+    examples.append(f"Roep om in de {first_room}: het eten is klaar.")
+    examples.append("Omroepen: hallo allemaal.")
+
+    parts = [
+        "Spraakcommando's voor de Axium multiroom versterker.",
+        "Voorbeelden: " + " ".join(examples),
+    ]
     if rooms:
         parts.append("Kamers: " + ", ".join(rooms) + ".")
     if sources:
         parts.append("Bronnen: " + ", ".join(sources) + ".")
     if presets:
         parts.append("Presets: " + ", ".join(presets) + ".")
-    examples: list[str] = []
-    first_room = rooms[0].lower() if rooms else "de keuken"
-    if rooms and sources:
-        examples.append(f"zet de {first_room} op de {sources[0]}")
-    examples.append(f"zet een slaaptimer voor de {first_room} over 30 minuten")
-    examples.append("zet slaaptimer voor overal")
-    if presets:
-        examples.append(f"activeer preset {presets[0]}")
-    examples.append(f"roep om in de {first_room}: het eten is klaar")
-    parts.append("Voorbeelden: " + "; ".join(examples) + ".")
     return " ".join(parts)
 
 

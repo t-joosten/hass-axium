@@ -758,13 +758,14 @@ overal" targets the all-zones sleep timer; announcements route through
 Piper) and restore each zone afterwards. Announce also has a **no-zone** form that
 covers **all** zones: "Roep om: het eten is klaar" / "Announce: dinner's ready".
 
-**Better speech recognition (Whisper):** Whisper transcribes unusual words —
-room, source and preset names, and words like *Axium*, *slaaptimer*, *preset* —
-much better when you prime it. The integration writes a ready-made **initial
-prompt** to `config/axium_whisper_prompt.txt` (regenerated from your live names).
-Paste its contents into your Whisper/faster-whisper STT config's *initial prompt*
-field ("Description of audio that can help Whisper transcribe unusual words
-better").
+**Better speech recognition (Whisper):** if Whisper mis-hears the command words
+or room names (e.g. "Roep om" → "groep om"), prime it. The integration writes a
+ready-made **initial prompt** (example commands + your live room/source/preset
+names) to `config/axium_whisper_prompt.txt`, regenerated on any rename. Paste its
+contents into your Whisper/faster-whisper STT config's *initial prompt* field
+("Description of audio that can help Whisper transcribe unusual words better").
+For Dutch, also use at least a **`small`** faster-whisper model — `tiny`/`base`
+mangle Dutch badly; `small`/`medium` (int8) are far more accurate.
 
 ## How it works
 
