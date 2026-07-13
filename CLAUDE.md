@@ -471,6 +471,14 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   Uses only existing control commands for override/restore (no sim change; DLNA push is real-amp
   only — sim is control-protocol-only). Needs the amp on the main LAN so HA can reach its HTTP/UPnP
   port (the 17037-only bridge doesn't pass UPnP). Verified push on AX-800-X fw 5.6.0.
+  **Resume the amp MA stream after a notification**: the direct push hijacks the amp's *shared* MA
+  renderer (its 8 zone renderers alias one stream), and `dlna.async_stop` + restoring the control
+  source to Media Player does NOT restart Music Assistant — so the streams (Axium 1/2) stayed silent
+  after a notification. Fix: snapshot which amp MA players were active (`_amp_ma_player_for_zone`:
+  zone device → `via_device` amp device → the MA player named after it; state in
+  playing/paused/buffering) BEFORE, and `media_play` them in the `finally` after restore so MA
+  re-pushes its flow. Only for the default push path (`renderer is None`); an explicit renderer
+  override is the caller's own.
 - **Time-left is exposed as `device_class: timestamp` sensors** (automation-usable):
   `AxiumAlarmSensor` (per alarm, next fire via `helpers.next_alarm_fire`; recomputes on a
   minute tick + `SIGNAL_ALARM_UPDATE` from the switch) and `AxiumSleepSensor` (per zone,
@@ -625,10 +633,14 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
     (→ `media_player.select_source`), `AxiumSleep` (→ the zone's `_sleep` number, or every
     `_sleep_all` number when the `everywhere` slot is set), `AxiumPreset` (→ `select_source` if a
     source was named, else `media_player.turn_on` the preset's zones), `AxiumAnnounce`
-    (→ `axium.play_notification` with `language` AND the **preferred Assist pipeline's `tts_engine`**
-    via `_pipeline_tts_engine` — so announcements use the local pipeline voice (Piper), not
-    `play_notification`'s default "first `tts.*`" which may be a **cloud** engine; the user runs
-    local no-cloud TTS). Sleep number for a zone = the media_player's
+    (→ `axium.play_notification`). **Announce TTS-engine rule (learned the hard way):** it passes the
+    Assist pipeline's `tts_engine` (via `_pipeline_tts_engine`, which scans pipelines for one that
+    HAS an engine — the *preferred* pipeline often has none; the user's Piper pipeline "Whispiper"
+    isn't the default) so announcements use the LOCAL voice (Piper), not `play_notification`'s default
+    "first `tts.*`" which may be a **cloud** engine. **When passing that engine, do NOT also pass
+    `language`** — Piper rejects a bare `nl` ("Language 'nl' not supported"; it wants a full locale
+    `nl_NL`), which makes TTS resolve to NO media → the zones activate but stay **silent** (the
+    reported bug). Only the fallback (no pipeline engine → e.g. Google Translate) gets `language`. Sleep number for a zone = the media_player's
     `unique_id` + `"_sleep"` (`reg.async_get_entity_id("number", DOMAIN, …)`). Responses are
     localized in code (`_RESPONSES`, keyed nl/en) so they can't drift from the sentences.
   - **CRITICAL — target zones via a baked `axium_zone` list, NOT the builtin `{name}`/`{area}`

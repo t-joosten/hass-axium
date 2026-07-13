@@ -349,14 +349,17 @@ class AnnounceIntent(_AxiumIntent):
         # Speak with the pipeline's own engine (Piper) when we can find it, so an
         # announcement matches the assistant's local voice instead of a cloud
         # default. The announcement may take a while (play + restore); don't block.
-        data: dict[str, Any] = {
-            "zones": zones,
-            "message": message,
-            "language": _lang(intent_obj.language),
-        }
+        data: dict[str, Any] = {"zones": zones, "message": message}
         engine = _pipeline_tts_engine(hass, intent_obj.language)
         if engine:
+            # Use the pipeline engine's OWN configured voice — do NOT force a
+            # language. A bare code ("nl") makes engines like Piper fail
+            # ("Language 'nl' not supported"; it wants a full locale "nl_NL"),
+            # which resolves to no media -> the zones activate but stay silent.
             data["tts_engine"] = engine
+        else:
+            # A fallback default engine (e.g. Google Translate) does need it.
+            data["language"] = _lang(intent_obj.language)
         await hass.services.async_call(DOMAIN, "play_notification", data, blocking=False)
         return self._speak(
             intent_obj,

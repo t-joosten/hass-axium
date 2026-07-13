@@ -21,7 +21,11 @@ from homeassistant.components.media_player import async_process_play_media_url
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import (
+    config_validation as cv,
+    device_registry as dr,
+    entity_registry as er,
+)
 
 from . import dlna
 from .const import (
@@ -208,6 +212,37 @@ def _renderer_url_for_zone(controller, entry: ConfigEntry, zone: int) -> str | N
     return f"http://{ip}/upnp/av_transport_ctrl{position - 1}"
 
 
+def _amp_ma_player_for_zone(
+    hass: HomeAssistant, entry: ConfigEntry, zone: int
+) -> str | None:
+    """The Music Assistant player feeding a zone's amp stream, matched by name.
+
+    A zone device's ``via_device`` is its amp device; the user renames the amp's
+    MA player to that device's name (e.g. "Axium 1"). Returns the MA media_player
+    whose friendly name equals the amp device name, or None.
+    """
+    dev_reg = dr.async_get(hass)
+    zone_dev = dev_reg.async_get_device(
+        identifiers={(DOMAIN, f"{entry.entry_id}_zone_{zone}")}
+    )
+    if zone_dev is None or zone_dev.via_device_id is None:
+        return None
+    amp_dev = dev_reg.async_get(zone_dev.via_device_id)
+    if amp_dev is None:
+        return None
+    want = (amp_dev.name_by_user or amp_dev.name or "").strip().lower()
+    if not want:
+        return None
+    ent_reg = er.async_get(hass)
+    for ent in ent_reg.entities.values():
+        if ent.domain != "media_player" or ent.platform != "music_assistant":
+            continue
+        state = hass.states.get(ent.entity_id)
+        if state and (state.name or "").strip().lower() == want:
+            return ent.entity_id
+    return None
+
+
 async def _resolve_media(
     hass: HomeAssistant, content_id: str, content_type: str | None
 ) -> tuple[str, str]:
@@ -353,6 +388,20 @@ async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> No
             state = controller.zone_state(zone)
             snapshot[zone] = (state.power, state.source, state.volume, state.muted)
 
+        # The default push hijacks each amp's shared Music Assistant stream, and
+        # restoring the control-protocol source doesn't restart it — so remember
+        # which amp MA players were streaming and resume them afterwards. Only for
+        # the direct-push path (an explicit renderer override is the caller's own).
+        resume_players: set[str] = set()
+        if renderer is None:
+            for zone in zones:
+                player = _amp_ma_player_for_zone(hass, entry, zone)
+                if not player:
+                    continue
+                st = hass.states.get(player)
+                if st and st.state in ("playing", "paused", "buffering"):
+                    resume_players.add(player)
+
         pushed_urls: list[str] = []
         try:
             # Override: power on, unmute, select the source, set the volume.
@@ -450,6 +499,13 @@ async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> No
                     await controller.async_send(CMD_POWER, zone, POWER_OFF)
             for zone in zones:
                 await controller.async_request_zone_state(zone)
+            # Resume any amp Music Assistant streams the notification interrupted
+            # (the push replaced the shared renderer; restoring the source can't
+            # restart MA). media_play re-pushes MA's flow so the music comes back.
+            for player in resume_players:
+                await hass.services.async_call(
+                    "media_player", "media_play", {"entity_id": player}, blocking=False
+                )
 
 
 def async_register_services(hass: HomeAssistant) -> None:
