@@ -625,7 +625,10 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
     (→ `media_player.select_source`), `AxiumSleep` (→ the zone's `_sleep` number, or every
     `_sleep_all` number when the `everywhere` slot is set), `AxiumPreset` (→ `select_source` if a
     source was named, else `media_player.turn_on` the preset's zones), `AxiumAnnounce`
-    (→ `axium.play_notification` with `language`). Sleep number for a zone = the media_player's
+    (→ `axium.play_notification` with `language` AND the **preferred Assist pipeline's `tts_engine`**
+    via `_pipeline_tts_engine` — so announcements use the local pipeline voice (Piper), not
+    `play_notification`'s default "first `tts.*`" which may be a **cloud** engine; the user runs
+    local no-cloud TTS). Sleep number for a zone = the media_player's
     `unique_id` + `"_sleep"` (`reg.async_get_entity_id("number", DOMAIN, …)`). Responses are
     localized in code (`_RESPONSES`, keyed nl/en) so they can't drift from the sentences.
   - **CRITICAL — target zones via a baked `axium_zone` list, NOT the builtin `{name}`/`{area}`

@@ -130,6 +130,24 @@ def _axium_media_players(hass: HomeAssistant) -> list[str]:
 
 
 @callback
+def _pipeline_tts_engine(hass: HomeAssistant) -> str | None:
+    """The TTS engine of the preferred Assist pipeline (e.g. Piper), if any.
+
+    A spoken announcement should use the same local voice as the assistant's own
+    replies — not whatever ``tts.*`` happens to be first (which may be a cloud
+    engine like Google Translate). Best-effort: assist_pipeline is optional.
+    """
+    try:
+        from homeassistant.components import assist_pipeline
+
+        pipeline = assist_pipeline.async_get_pipeline(hass)
+    except Exception:  # noqa: BLE001 - optional integration / API drift
+        return None
+    engine = getattr(pipeline, "tts_engine", None) if pipeline else None
+    return engine if isinstance(engine, str) and engine else None
+
+
+@callback
 def _zone_target(intent_obj: intent.Intent) -> list[str]:
     """The zone entity id named by the command (baked into the axium_zone slot)."""
     eid = _slot(intent_obj, "axium_zone")
@@ -304,18 +322,18 @@ class AnnounceIntent(_AxiumIntent):
             zones = _axium_media_players(hass)
         if not zones:
             return self._speak(intent_obj, _t(intent_obj.language, "no_zone"))
-        # The announcement itself may take a while (play + restore); don't block
-        # the spoken confirmation on it.
-        await hass.services.async_call(
-            DOMAIN,
-            "play_notification",
-            {
-                "zones": zones,
-                "message": message,
-                "language": _lang(intent_obj.language),
-            },
-            blocking=False,
-        )
+        # Speak with the pipeline's own engine (Piper) when we can find it, so an
+        # announcement matches the assistant's local voice instead of a cloud
+        # default. The announcement may take a while (play + restore); don't block.
+        data: dict[str, Any] = {
+            "zones": zones,
+            "message": message,
+            "language": _lang(intent_obj.language),
+        }
+        engine = _pipeline_tts_engine(hass)
+        if engine:
+            data["tts_engine"] = engine
+        await hass.services.async_call(DOMAIN, "play_notification", data, blocking=False)
         return self._speak(
             intent_obj,
             _t(intent_obj.language, "announce", zones=_friendly(hass, zones)),
