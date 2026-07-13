@@ -15,6 +15,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -97,10 +98,31 @@ async def async_setup_entry(
             hass, entry, "all", name="All zones sleep ends", hub_device=True
         )
     )
+    _prune_orphan_alarm_sensors(hass, entry)
     entities.extend(
         AxiumAlarmSensor(hass, entry, alarm) for alarm in get_alarms(entry)
     )
     async_add_entities(entities)
+
+
+def _prune_orphan_alarm_sensors(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove alarm next-fire sensors whose alarm was deleted.
+
+    Deleting an alarm drops it from the config, so its sensor is no longer
+    created — but the entity-registry entry lingers as a stale, permanently
+    ``unavailable`` sensor on the hub device. Prune any ``_alarm_<name>`` sensor
+    whose name is no longer a configured alarm.
+    """
+    registry = er.async_get(hass)
+    valid = {f"{entry.entry_id}_alarm_{a['name']}" for a in get_alarms(entry)}
+    prefix = f"{entry.entry_id}_alarm_"
+    for ent in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if (
+            ent.domain == "sensor"
+            and ent.unique_id.startswith(prefix)
+            and ent.unique_id not in valid
+        ):
+            registry.async_remove(ent.entity_id)
 
 
 class AxiumSleepSensor(SensorEntity):

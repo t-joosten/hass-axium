@@ -472,6 +472,12 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   minute tick + `SIGNAL_ALARM_UPDATE` from the switch) and `AxiumSleepSensor` (per zone,
   reads `DATA_SLEEP_DEADLINES` written by the sleep-timer number, updated via
   `SIGNAL_SLEEP_UPDATE`). Both carry an `axium_kind` attribute ("alarm"/"sleep").
+  **Deleting an alarm leaves a stale `unavailable` sensor** — its config drops so the sensor
+  isn't recreated, but the entity-registry entry lingers on the hub device. `sensor.py`
+  `_prune_orphan_alarm_sensors` (called each `async_setup_entry`) removes any `sensor` whose
+  unique id is `<entry>_alarm_<name>` for a name no longer in `get_alarms` — so orphaned alarm
+  sensors clean themselves up on reload. (Scoped to `domain=="sensor"`; the alarms master switch
+  is `<entry>_alarms_enabled`, a different prefix, so it's never touched.)
 - Cards `axium-alarms-card` / `axium-sleep-card` (bundle now has SIX cards) find those
   sensors via `axiumKindSensors(hass, hub, kind)` and render a live countdown
   (`axiumCountdown`, `setInterval` in connectedCallback, cleared in disconnectedCallback);
