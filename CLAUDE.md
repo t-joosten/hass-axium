@@ -623,6 +623,18 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   3. REST `homeassistant/restart` — applies (running code changes need a restart).
   Verify by fetching the new version-stamped card path (only exists in the new code)
   and grepping the index HTML for the injected `/axium/axium-source-card-<ver>.js`.
+- **ALWAYS verify AFTER the restart that the entry actually loaded** — check
+  `config_entries/get` shows the axium entry `state: "loaded"` AND the versioned card path
+  returns 200, not just that `update.install` returned 200. **`update/install` can silently
+  fail** (returns HTTP 200, `update` entity flips to `installed=<sha>`, but writes nothing —
+  seen when the box had a DNS/GitHub hiccup mid-download). The symptom: after restart the entry
+  is `not_loaded` (reason None), every `/axium/...js` path 404s, and the log shows **"Unable to
+  get manifest for integration axium: Integration 'axium' not found"** — HA scanned
+  `custom_components/` before/without the files. A plain restart does NOT fix it (files are
+  genuinely absent). **Recovery: force a re-download** — WS `hacs/repository/download`
+  `{repository: 1285095493}` (returns `success: True` when done), then restart. (HACS's
+  `hacs/repository/info` may report `installed: None` in this broken state — trust the card-path
+  200 + entry `loaded`, not HACS's own flags.)
 - Restarting HA is disruptive; the user has delegated updates, but keep them informed.
 
 ## Other
