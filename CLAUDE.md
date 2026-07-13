@@ -264,8 +264,15 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   content but NOT HA's sidebar/header**: `.overlay` is `position:fixed`, and `_showOverlay` measures
   `ha-sidebar` (`document.querySelector("home-assistant")…ha-sidebar` bounding rect) to set the overlay's
   `left`, and offsets `top` by `var(--header-height,56px)` — best-effort, falls back to full-viewport if
-  HA internals moved. `.sheet` fills that region as a flex column whose `.ssresults` flexes; closed by the
-  backdrop. It used to be `inset:0` full-viewport, which covered the menus — the user didn't want that.):
+  HA internals moved. **The `.sheet` is a SIZED, centered popover, not a fill** (`.ssresults` still
+  flexes): mobile = almost-full (`width:94%`, `max-height:88vh`, rounded) with a backdrop margin so you
+  can **tap outside to close** (the overlay-target click handler now actually reaches the backdrop);
+  desktop (`@media min-width:768px`) = small (`width:360px`, `max-height:72vh`) and **anchored just below
+  the tapped header** — `_showOverlay(anchorEl)` measures the anchor's rect vs the overlay's and clamps
+  the sheet into view (`sheet.style.left/top`, `transform:none`), so the cursor barely moves; no anchor
+  or mobile → CSS-centered. The three openers (`_openZonePanel`/`_openStreamPanel`/`_openPresetPanel`)
+  take the clicked `rh`/`ch` element and forward it. It used to `width/height:100%`-fill the region (an
+  earlier `inset:0` full-viewport covered the menus — the user didn't want that either).):
   **tap a zone name** → the zone popover (`_openZonePanel`): a
   **power** toggle (`_togglePower`), a **volume** slider + mute, and the zone's **tone/EQ** controls —
   **bass/treble/balance** sliders (`number.set_value`) + **loudness** and **mono** toggles

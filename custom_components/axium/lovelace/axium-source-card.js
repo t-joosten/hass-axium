@@ -2100,7 +2100,7 @@ class AxiumMatrixCard extends HTMLElement {
     for (const rh of this.shadowRoot.querySelectorAll(".rowhead[data-zone]")) {
       this._attachHold(
         rh,
-        () => this._openZonePanel(rh.dataset.zone),
+        () => this._openZonePanel(rh.dataset.zone, rh),
         () => this._openZoneDevice(rh.dataset.zone)
       );
     }
@@ -2108,8 +2108,8 @@ class AxiumMatrixCard extends HTMLElement {
     // plain source header opens its preset picker.
     for (const ch of this.shadowRoot.querySelectorAll(".colhead")) {
       const open = ch.dataset.amp
-        ? () => this._openStreamPanel(ch.dataset.amp)
-        : () => this._openPresetPanel(ch.dataset.src);
+        ? () => this._openStreamPanel(ch.dataset.amp, ch)
+        : () => this._openPresetPanel(ch.dataset.src, ch);
       ch.addEventListener("click", open);
       ch.addEventListener("keydown", (ev) => {
         // Only when the header itself is focused — not the nested power button
@@ -2144,8 +2144,10 @@ class AxiumMatrixCard extends HTMLElement {
   /** Show the popover overlay covering the DASHBOARD content, but not HA's
    *  sidebar/header (best-effort: measure the sidebar for the left offset, and
    *  offset the top by the header height). Falls back to full-viewport if the
-   *  HA layout can't be measured. */
-  _showOverlay() {
+   *  HA layout can't be measured. The sheet is a centered near-full sheet on
+   *  mobile; on desktop it's small and anchored just below the tapped element
+   *  (`anchorEl`) so the cursor barely has to move — clamped into view. */
+  _showOverlay(anchorEl) {
     const overlay = this.shadowRoot.getElementById("overlay");
     if (!overlay) return;
     let left = 0;
@@ -2166,6 +2168,28 @@ class AxiumMatrixCard extends HTMLElement {
     overlay.style.left = left + "px";
     overlay.style.top = "var(--header-height, 56px)";
     overlay.hidden = false;
+
+    // Reset to the CSS default (centered) so mobile / no-anchor stays centered.
+    const sheet = overlay.querySelector(".sheet");
+    if (sheet) {
+      sheet.style.left = "";
+      sheet.style.top = "";
+      sheet.style.transform = "";
+      const desktop =
+        window.matchMedia && window.matchMedia("(min-width: 768px)").matches;
+      if (desktop && anchorEl) {
+        // Measure now that it's visible (synchronous, before paint = no flicker),
+        // then place it just under the tapped header and clamp inside the overlay.
+        const oR = overlay.getBoundingClientRect();
+        const aR = anchorEl.getBoundingClientRect();
+        const sR = sheet.getBoundingClientRect();
+        const l = Math.max(8, Math.min(aR.left - oR.left, Math.max(8, oR.width - sR.width - 8)));
+        const t = Math.max(8, Math.min(aR.bottom - oR.top + 6, Math.max(8, oR.height - sR.height - 8)));
+        sheet.style.left = l + "px";
+        sheet.style.top = t + "px";
+        sheet.style.transform = "none";
+      }
+    }
   }
 
   /** Corner power button: if any zone is on, turn them all off; else all on. */
@@ -2407,7 +2431,7 @@ class AxiumMatrixCard extends HTMLElement {
     return out;
   }
 
-  _openZonePanel(zoneId) {
+  _openZonePanel(zoneId, anchorEl) {
     const sheet = this.shadowRoot.getElementById("sheet");
     const tone = this._toneEntities(zoneId);
     const row = (key, label, icon) =>
@@ -2490,13 +2514,13 @@ class AxiumMatrixCard extends HTMLElement {
     }
     sheet.querySelector(".close").addEventListener("click", () => this._closePanel());
     this._panel = { type: "zone", zoneId, dragging: false, toneDrag: null };
-    this._showOverlay();
+    this._showOverlay(anchorEl);
     this._refreshPanel();
   }
 
   /** Amp stream popover: now-playing + transport + volume for the amp's Music
    *  Assistant stream, and a button to browse MA for playlists. */
-  _openStreamPanel(ampId) {
+  _openStreamPanel(ampId, anchorEl) {
     const amp = this._amps().find((a) => a.id === ampId);
     if (!amp) return;
     const ma = this._ampStreamPlayerByName(amp.name);
@@ -2616,7 +2640,7 @@ class AxiumMatrixCard extends HTMLElement {
       // intent and only trust a definite off/idle state to clear it.
       streamPlaying: st0 ? !OFF_STATES.includes(st0.state) : false,
     };
-    this._showOverlay();
+    this._showOverlay(anchorEl);
     this._refreshPanel();
   }
 
@@ -2888,7 +2912,7 @@ class AxiumMatrixCard extends HTMLElement {
   }
 
   /** Preset picker for one source column, in the popover. */
-  _openPresetPanel(sourceId) {
+  _openPresetPanel(sourceId, anchorEl) {
     const sid = Number(sourceId);
     const sheet = this.shadowRoot.getElementById("sheet");
     const presets = this._presets();
@@ -2923,7 +2947,7 @@ class AxiumMatrixCard extends HTMLElement {
     }
     sheet.querySelector(".close").addEventListener("click", () => this._closePanel());
     this._panel = { type: "preset", sourceId: sid };
-    this._showOverlay();
+    this._showOverlay(anchorEl);
   }
 
   /** Keep an open popover (zone or amp stream) in step with live state. */
@@ -3117,16 +3141,24 @@ AxiumMatrixCard.styles = `
   .browse ha-icon { --mdc-icon-size: 20px; }
   .overlay {
     position: fixed; inset: 0; z-index: 9999;
-    display: flex; align-items: stretch; justify-content: stretch;
     background: rgba(0, 0, 0, 0.5);
   }
   .overlay[hidden] { display: none; }
+  /* Mobile: an almost-full-screen sheet, centered, with a backdrop margin to tap
+     outside and close. Desktop (below) shrinks it and JS anchors it near the tap. */
   .sheet {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 94%; max-width: 94%; max-height: 88vh;
     background: var(--card-background-color, var(--ha-card-background, #fff));
-    border: none; border-radius: 0; box-shadow: none;
-    width: 100%; height: 100%; max-width: 100%; box-sizing: border-box;
+    border-radius: 16px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45);
+    box-sizing: border-box;
     padding: max(14px, env(safe-area-inset-top)) 16px 16px;
     display: flex; flex-direction: column; overflow-y: auto;
+  }
+  @media (min-width: 768px) {
+    .sheet {
+      width: 360px; max-width: 92%; max-height: 72vh; border-radius: 12px;
+    }
   }
   .sheet-head {
     display: flex; align-items: center; justify-content: space-between;
