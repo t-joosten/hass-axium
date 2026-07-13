@@ -36,6 +36,7 @@ from .voice_sentences import (
     INTENT_SLEEP,
     LANGUAGES,
     SLEEP_MAX_MIN,
+    _spoken,
     build_language_doc,
 )
 
@@ -110,38 +111,34 @@ def _friendly(hass: HomeAssistant, entity_ids: list[str]) -> str:
 
 
 @callback
-def _axium_media_players(hass: HomeAssistant) -> list[str]:
-    """Every Axium zone media_player entity id."""
+def _axium_zone_entries(hass: HomeAssistant) -> list[Any]:
+    """Registry entries for the enabled Axium zone media_players."""
     reg = er.async_get(hass)
     return [
-        ent.entity_id
+        ent
         for ent in reg.entities.values()
-        if ent.platform == DOMAIN and ent.domain == "media_player"
+        if ent.platform == DOMAIN
+        and ent.domain == "media_player"
+        and not ent.disabled_by
     ]
 
 
-async def _match_zones(
-    intent_obj: intent.Intent, name: str | None, area: str | None
-) -> list[str]:
-    """Resolve the Axium zone media_players named/located by the command."""
-    if not name and not area:
+@callback
+def _axium_media_players(hass: HomeAssistant) -> list[str]:
+    """Every enabled Axium zone media_player entity id."""
+    return [ent.entity_id for ent in _axium_zone_entries(hass)]
+
+
+@callback
+def _zone_target(intent_obj: intent.Intent) -> list[str]:
+    """The zone entity id named by the command (baked into the axium_zone slot)."""
+    eid = _slot(intent_obj, "axium_zone")
+    if not eid:
         return []
-    constraints = intent.MatchTargetsConstraints(
-        name=name,
-        area_name=area,
-        domains=["media_player"],
-        assistant=intent_obj.assistant,
-    )
-    result = intent.async_match_targets(intent_obj.hass, constraints)
-    if not result.is_match:
-        return []
-    reg = er.async_get(intent_obj.hass)
-    matched = []
-    for state in result.states:
-        ent = reg.async_get(state.entity_id)
-        if ent and ent.platform == DOMAIN:
-            matched.append(state.entity_id)
-    return matched
+    ent = er.async_get(intent_obj.hass).async_get(eid)
+    if ent and ent.platform == DOMAIN and ent.domain == "media_player":
+        return [eid]
+    return []
 
 
 # --------------------------------------------------------------------------- #
@@ -161,19 +158,16 @@ class SetSourceIntent(_AxiumIntent):
     """Route a zone/area to a named source (e.g. "zet de keuken op de pc")."""
 
     intent_type = INTENT_SET_SOURCE
-    description = "Route an Axium zone or area to a named audio source"
+    description = "Route an Axium zone to a named audio source"
     slot_schema = {
-        vol.Optional("name"): cv.string,
-        vol.Optional("area"): cv.string,
+        vol.Required("axium_zone"): cv.string,
         vol.Required("axium_source"): cv.string,
     }
 
     async def async_handle(self, intent_obj: intent.Intent) -> intent.IntentResponse:
         hass = intent_obj.hass
         source = _slot(intent_obj, "axium_source")
-        zones = await _match_zones(
-            intent_obj, _slot(intent_obj, "name"), _slot(intent_obj, "area")
-        )
+        zones = _zone_target(intent_obj)
         if not zones:
             return self._speak(intent_obj, _t(intent_obj.language, "no_zone"))
         await hass.services.async_call(
@@ -197,10 +191,9 @@ class SleepIntent(_AxiumIntent):
     """Set a zone (or all-zones) sleep timer."""
 
     intent_type = INTENT_SLEEP
-    description = "Set an Axium sleep timer for a zone, area, or all zones"
+    description = "Set an Axium sleep timer for a zone or all zones"
     slot_schema = {
-        vol.Optional("name"): cv.string,
-        vol.Optional("area"): cv.string,
+        vol.Optional("axium_zone"): cv.string,
         vol.Optional("everywhere"): cv.string,
         vol.Required("minutes"): vol.All(vol.Coerce(int), vol.Range(0, SLEEP_MAX_MIN)),
     }
@@ -230,9 +223,7 @@ class SleepIntent(_AxiumIntent):
                 intent_obj, _t(intent_obj.language, "sleep_all", minutes=minutes)
             )
 
-        zones = await _match_zones(
-            intent_obj, _slot(intent_obj, "name"), _slot(intent_obj, "area")
-        )
+        zones = _zone_target(intent_obj)
         # Each zone's sleep-timer number shares the media_player's unique id + "_sleep".
         targets = []
         for eid in zones:
@@ -300,24 +291,19 @@ class AnnounceIntent(_AxiumIntent):
     intent_type = INTENT_ANNOUNCE
     description = "Announce a spoken message on Axium zones"
     slot_schema = {
-        vol.Optional("name"): cv.string,
-        vol.Optional("area"): cv.string,
+        vol.Optional("axium_zone"): cv.string,
         vol.Required("message"): cv.string,
     }
 
     async def async_handle(self, intent_obj: intent.Intent) -> intent.IntentResponse:
         hass = intent_obj.hass
         message = str(_slot(intent_obj, "message")).strip()
-        name = _slot(intent_obj, "name")
-        area = _slot(intent_obj, "area")
-        if name or area:
-            zones = await _match_zones(intent_obj, name, area)
-            if not zones:
-                return self._speak(intent_obj, _t(intent_obj.language, "no_zone"))
+        if _slot(intent_obj, "axium_zone"):
+            zones = _zone_target(intent_obj)
         else:
             zones = _axium_media_players(hass)
-            if not zones:
-                return self._speak(intent_obj, _t(intent_obj.language, "no_zone"))
+        if not zones:
+            return self._speak(intent_obj, _t(intent_obj.language, "no_zone"))
         # The announcement itself may take a while (play + restore); don't block
         # the spoken confirmation on it.
         await hass.services.async_call(
@@ -363,8 +349,10 @@ def async_register_intents(hass: HomeAssistant) -> None:
 # Sentence-file generation
 # --------------------------------------------------------------------------- #
 @callback
-def _collect_names(hass: HomeAssistant) -> tuple[list[str], list[str]]:
-    """Live source names and preset names across all loaded Axium entries."""
+def _collect_vocab(
+    hass: HomeAssistant,
+) -> tuple[list[tuple[str, str]], list[str], list[str]]:
+    """Live (spoken, entity_id) zones, source names and preset names."""
     sources: list[str] = []
     presets: list[str] = []
     controllers = hass.data.get(DOMAIN, {})
@@ -380,13 +368,21 @@ def _collect_names(hass: HomeAssistant) -> tuple[list[str], list[str]]:
         for preset in get_presets(entry):
             if preset["name"] not in presets:
                 presets.append(preset["name"])
-    # A zone's live source_list also carries the per-amp stream names.
-    for eid in _axium_media_players(hass):
-        state = hass.states.get(eid)
+    # Zones are targeted by their (renameable) friendly name -> entity_id; a zone's
+    # live source_list also carries the per-amp stream names.
+    zones: list[tuple[str, str]] = []
+    seen_spoken: set[str] = set()
+    for ent in _axium_zone_entries(hass):
+        state = hass.states.get(ent.entity_id)
+        display = (state.name if state else None) or ent.name or ent.original_name
+        spoken = _spoken(display or "")
+        if spoken and spoken not in seen_spoken:
+            seen_spoken.add(spoken)
+            zones.append((spoken, ent.entity_id))
         for name in (state.attributes.get("source_list") or []) if state else []:
             if name and name not in sources:
                 sources.append(name)
-    return sources, presets
+    return zones, sources, presets
 
 
 def _write_if_changed(path: str, text: str) -> bool:
@@ -410,8 +406,8 @@ async def async_update_sentences(hass: HomeAssistant) -> None:
     is unchanged, and only reloads the conversation agent when a file's contents
     actually change.
     """
-    sources, presets = _collect_names(hass)
-    signature = (tuple(sources), tuple(presets))
+    zones, sources, presets = _collect_vocab(hass)
+    signature = (tuple(zones), tuple(sources), tuple(presets))
     store = hass.data.setdefault(f"{DOMAIN}_voice", {})
     if store.get("signature") == signature:
         return
@@ -419,7 +415,7 @@ async def async_update_sentences(hass: HomeAssistant) -> None:
 
     changed = False
     for language in LANGUAGES:
-        doc = build_language_doc(language, sources, presets)
+        doc = build_language_doc(language, zones, sources, presets)
         text = yaml.safe_dump(doc, allow_unicode=True, sort_keys=False)
         path = hass.config.path("custom_sentences", language, "axium.yaml")
         try:
