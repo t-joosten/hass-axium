@@ -690,6 +690,13 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
 - **Announce has a no-zone → ALL zones form** (`(roep om|omroepen|…) {message}`); trigger phrases were
   widened (announce: `omroep`/`kondig aan`/`zeg tegen iedereen`/`meld overal`; source: `doe`/`put`/`on`;
   preset: `zet aan`). Add more synonyms in `voice_sentences._SENTENCES`.
+- **Built-in intents need de-punctuated aliases.** HA's OWN intents (turn on/off, set volume…) match
+  the exact entity name, so "PC-Edifier" only answers to "PC-Edifier", never the natural "PC Edifier"
+  (you don't speak the hyphen) — "turn off PC Edifier" → "not aware of any device called PC Edifier".
+  `intent.async_add_voice_aliases` (called each setup) adds `_readable(name)` ("PC Edifier",
+  "Slaapkamer Groot", "Gang WC") as an **entity alias** via `registry.async_update_entity` — additive/
+  idempotent (never removes the user's, skips if present). This fixes the built-ins; our custom intents
+  already handle it via the sanitized `axium_zone` list. (Aliases are also baked into `axium_zone`.)
 - **`axium_source` and `axium_zone` are `(spoken, out)` PAIRS** (`build_language_doc` bakes `{in,out}`);
   a source's `out` is the `select_source` name. The media_player only lists the ONE generic "Media
   Player" (not per-amp), so `_collect_vocab` adds each **amp device name ("Axium 1"/"Axium 2") as a

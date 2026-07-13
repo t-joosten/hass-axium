@@ -546,6 +546,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # source/preset names, and refresh them when a source is renamed on the amp.
     # Best-effort — a voice-generation hiccup must never fail the whole entry.
     try:
+        # De-punctuated aliases so the built-in intents match natural zone names.
+        axium_intent.async_add_voice_aliases(hass)
         await axium_intent.async_update_sentences(hass)
     except Exception:  # noqa: BLE001
         _LOGGER.exception("Axium: could not generate voice sentences")

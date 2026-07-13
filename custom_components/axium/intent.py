@@ -47,6 +47,7 @@ from .voice_sentences import (
     INTENT_SLEEP,
     LANGUAGES,
     SLEEP_MAX_MIN,
+    _readable,
     _spoken,
     build_language_doc,
     build_whisper_prompt,
@@ -448,6 +449,34 @@ def _preset_zones(hass: HomeAssistant, name: str) -> list[str]:
             if preset["name"].casefold() == wanted:
                 return list(preset["zones"])
     return []
+
+
+@callback
+def async_add_voice_aliases(hass: HomeAssistant) -> None:
+    """Give each zone media_player a de-punctuated alias.
+
+    Home Assistant's BUILT-IN voice intents (turn on/off, volume…) match the exact
+    entity name, so "PC-Edifier" only responds to "PC-Edifier", not the natural
+    "PC Edifier" (you don't say the hyphen). Add "PC Edifier" / "Slaapkamer Groot"
+    / "Gang WC" as an alias so those commands work. Additive and idempotent — we
+    never remove a user's aliases and skip if it's already there.
+    """
+    registry = er.async_get(hass)
+    for ent in _axium_zone_entries(hass):
+        state = hass.states.get(ent.entity_id)
+        name = (state.name if state else None) or ent.original_name
+        if not isinstance(name, str) or not name:
+            continue
+        alias = _readable(name)
+        if not alias or alias.casefold() == name.casefold():
+            continue
+        existing = set(ent.aliases or [])
+        if any(a.casefold() == alias.casefold() for a in existing):
+            continue
+        try:
+            registry.async_update_entity(ent.entity_id, aliases=existing | {alias})
+        except Exception:  # noqa: BLE001 - alias is best-effort
+            LOGGER.exception("Axium: could not add voice alias for %s", ent.entity_id)
 
 
 async def async_setup_intents(hass: HomeAssistant) -> None:
