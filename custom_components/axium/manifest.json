@@ -1,7 +1,7 @@
 {
   "domain": "axium",
   "name": "Axium Amplifier",
-  "after_dependencies": ["frontend", "lovelace", "conversation"],
+  "after_dependencies": ["frontend", "lovelace", "conversation", "assist_pipeline"],
   "codeowners": ["@t-joosten"],
   "config_flow": true,
   "dependencies": ["http"],
