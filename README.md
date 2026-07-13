@@ -717,6 +717,40 @@ sleep-timer number entity.
 > implemented. Use the per-zone **bass / treble / balance / loudness** controls,
 > which the amplifier does honour.
 
+## Voice control (Assist)
+
+The integration adds **Dutch and English** voice commands to Home Assistant's
+built-in **Assist** (works with a local Whisper + Piper pipeline — no cloud, no
+LLM required).
+
+**Set-up:** expose your zones to Assist (**Settings → Voice assistants → Expose**)
+and give each zone an **Area** and, if you like, aliases. That alone gives you the
+built-in commands in both languages — power, volume, mute, pause/next:
+
+- 🇳🇱 "Zet de keuken aan" · "Zet het volume in de woonkamer op 30 procent"
+- 🇬🇧 "Turn on the kitchen" · "Pause the music in the living room"
+
+On top of that, these **Axium-specific** commands are added automatically:
+
+| What | 🇳🇱 Dutch | 🇬🇧 English |
+| --- | --- | --- |
+| Pick a source | "Zet de keuken op de pc" | "Switch the kitchen to the PC" |
+| Sleep a zone | "Zet slaaptimer voor de slaapkamer over 30 minuten" | "Sleep the bedroom in 30 minutes" |
+| Sleep everything | "Zet slaaptimer voor overal over 30 minuten" | "Set a sleep timer everywhere for 30 minutes" |
+| Activate a preset | "Activeer preset filmavond" | "Activate the movie preset" |
+| Announce (TTS) | "Roep om in de keuken: eten is klaar" | "Announce in the kitchen: dinner is ready" |
+
+The phrases are generated with **your live zone, source and preset names baked in**
+(rename a source on the amp and the command follows it), written to
+`config/custom_sentences/nl/axium.yaml` and `…/en/axium.yaml` — one folder per
+language — and the conversation agent is reloaded automatically. Nothing to copy
+by hand.
+
+Announcements route through the `axium.play_notification` service (spoken in the
+same language you asked in) and restore each zone afterwards. Numbers are best
+spoken as digits ("30"), and "everywhere / overal" targets the all-zones sleep
+timer.
+
 ## How it works
 
 Commands use the frame format `<command><zone>[<data>...]`. Every byte is sent

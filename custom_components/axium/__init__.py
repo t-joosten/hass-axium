@@ -49,6 +49,7 @@ from .helpers import (
     zone_device_model,
     zones_from_units,
 )
+from . import intent as axium_intent
 from .protocol import level_to_volume
 from .services import async_register_services
 
@@ -259,6 +260,12 @@ async def _async_migrate_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> 
             "Axium: renamed %d entity ids to the '%s' prefix", len(id_map), prefix
         )
     hass.config_entries.async_update_entry(entry, **updates)
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Register the voice-assistant intents (global, once per HA start)."""
+    axium_intent.async_register_intents(hass)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -539,6 +546,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry.async_on_unload(
         async_track_time_interval(hass, _poll_zones, timedelta(seconds=30))
+    )
+
+    # Voice: (re)generate the per-language sentence files with the live zone/
+    # source/preset names, and refresh them when a source is renamed on the amp.
+    await axium_intent.async_update_sentences(hass)
+
+    @callback
+    def _regenerate_sentences() -> None:
+        hass.async_create_task(axium_intent.async_update_sentences(hass))
+
+    entry.async_on_unload(
+        controller.register_diagnostic_listener(_regenerate_sentences)
     )
     return True
 

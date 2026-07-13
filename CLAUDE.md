@@ -608,6 +608,42 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `_applyPreset`) that applies **set-exactly**: preset zones → this source,
   other zones on this source → off. Changing presets reloads the entry (update listener).
 
+## Voice control (Assist / hassil, NOT LLM)
+
+- The user runs **Whisper + Piper with HA's built-in conversation agent** (template/hassil,
+  not an LLM), and wants **Dutch (primary) + English**. Voice is **entity-driven**: exposing the
+  zone media_players (+ areas/aliases) already gives power/volume/mute/transport in both languages
+  via HA's own localized intents. We only add the **Axium verbs**.
+- **Two halves** (`intent.py` handlers + `voice_sentences.py` pure builder):
+  - `intent.py` registers 4 `IntentHandler`s in **`async_setup`** (global, once — added an
+    `async_setup` that just calls `axium_intent.async_register_intents`): `AxiumSetSource`
+    (→ `media_player.select_source`), `AxiumSleep` (→ the zone's `_sleep` number, or every
+    `_sleep_all` number when the `everywhere` slot is set), `AxiumPreset` (→ `select_source` if a
+    source was named, else `media_player.turn_on` the preset's zones), `AxiumAnnounce`
+    (→ `axium.play_notification` with `language`). Zone/area targets resolve via
+    `intent.async_match_targets` (respects exposure via `assistant=intent_obj.assistant`) then
+    filter to `platform == "axium"`. Sleep number for a zone = the media_player's `unique_id` +
+    `"_sleep"` (`reg.async_get_entity_id("number", DOMAIN, …)`). Responses are localized in code
+    (`_RESPONSES`, keyed nl/en) so they can't drift from the sentences.
+  - **The built-in agent only reads sentences from `<config>/custom_sentences/<lang>/`** — NOT from
+    the integration folder. So `async_update_sentences` writes `custom_sentences/nl/axium.yaml` +
+    `…/en/axium.yaml` (**a folder per language**) with the **live** source names
+    (`controller.source_name` ∪ each zone's `source_list`) and preset names **baked into hassil
+    lists**, then calls `conversation.reload`. Called at `async_setup_entry` end AND from a
+    controller **diagnostic listener** (so a source rename refreshes the phrases); guarded by a
+    `(sources,presets)` signature in `hass.data["axium_voice"]` + a file-content compare, so it only
+    rewrites/reloads on a real change. `{name}`/`{area}` are the agent's own builtins (live,
+    exposure-aware); only `axium_source`/`axium_preset`/`minutes`(range 0-180)/`everywhere`/`message`
+    (wildcard) are baked. Empty presets → the `AxiumPreset` intent + list are omitted (no dangling
+    `{list}`). `voice_sentences.build_language_doc` is **pure/stdlib-only** (no HA import) so it's
+    unit-testable directly; sanitize each list value's spoken `in` form (strip hassil specials
+    `()[]{}<>|:`).
+- Spoken numbers must be **digits** ("30", not "dertig") — hassil range lists match digits; note this
+  as a limitation. `manifest.json after_dependencies` includes `conversation` so it's set up first.
+- Test live via `POST /api/conversation/process {text, language}` — but the target zone must be
+  **exposed to Assist** or `async_match_targets` returns no match (handler then speaks the localized
+  "no zone" reply, which still proves the sentence matched).
+
 ## Deploying to / debugging the user's live HA
 
 - Test instance: `http://192.168.1.119:8123` (LAN, reachable from the user's PC).
