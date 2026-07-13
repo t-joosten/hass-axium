@@ -27,9 +27,10 @@ INTENT_SLEEP = "AxiumSleep"
 INTENT_PRESET = "AxiumPreset"
 INTENT_ANNOUNCE = "AxiumAnnounce"
 
-# hassil template metacharacters — stripped from the spoken ("in") form of a
-# baked list value so a zone/source/preset name can't break the sentence grammar.
-_HASSIL_SPECIALS = str.maketrans({c: " " for c in "()[]{}<>|:"})
+# hassil template metacharacters (so a baked name can't break the grammar) plus
+# separators, all mapped to spaces so the spoken ("in") form is natural — e.g.
+# "Slaapkamer - Groot" -> "slaapkamer groot", "Gang / WC" -> "gang wc".
+_HASSIL_SPECIALS = str.maketrans({c: " " for c in "()[]{}<>|:-/._,"})
 
 # Sentence templates per language. Braces reference baked hassil lists:
 # {axium_zone} (spoken->entity_id), {axium_source}, {axium_preset}, {everywhere},
@@ -95,7 +96,7 @@ _EVERYWHERE = {
 
 def _spoken(name: str) -> str:
     """The sanitised, lowercase form a user would say for a baked name."""
-    return " ".join(name.translate(_HASSIL_SPECIALS).lower().split())
+    return " ".join(str(name).translate(_HASSIL_SPECIALS).lower().split())
 
 
 def _list_value(name: str) -> dict[str, str]:
