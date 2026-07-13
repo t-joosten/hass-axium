@@ -38,7 +38,7 @@ _HASSIL_SPECIALS = str.maketrans({c: " " for c in "()[]{}<>|:-/._,"})
 _SENTENCES: dict[str, dict[str, list[str]]] = {
     "nl": {
         INTENT_SET_SOURCE: [
-            "(zet|schakel|verander) [de|het] {axium_zone} (op|naar) "
+            "(zet|schakel|verander|doe) [de|het] {axium_zone} (op|naar) "
             "[de|het] {axium_source}",
             "kies [de|het] {axium_source} (voor|in) [de|het] {axium_zone}",
         ],
@@ -52,18 +52,20 @@ _SENTENCES: dict[str, dict[str, list[str]]] = {
             "{everywhere} (over|van) {minutes} (minuten|minuut)",
         ],
         INTENT_PRESET: [
-            "(activeer|start) [de|het] preset {axium_preset}",
+            "(activeer|start|zet aan) [de|het] preset {axium_preset}",
             "(activeer|zet) [de|het] preset {axium_preset} (op|naar) "
             "[de|het] {axium_source}",
         ],
         INTENT_ANNOUNCE: [
-            "(roep om|omroepen) in [de|het] {axium_zone} {message}",
-            "(roep om|omroepen) {message}",
+            "(roep om|omroepen|omroep|kondig aan) in [de|het] {axium_zone} {message}",
+            "(roep om|omroepen|omroep|kondig aan) {message}",
+            "(zeg|vertel) (tegen|aan) iedereen {message}",
+            "meld overal {message}",
         ],
     },
     "en": {
         INTENT_SET_SOURCE: [
-            "(set|switch|change) [the] {axium_zone} to [the] {axium_source}",
+            "(set|switch|change|put) [the] {axium_zone} (to|on) [the] {axium_source}",
             "select [the] {axium_source} (for|in) [the] {axium_zone}",
         ],
         INTENT_SLEEP: [
@@ -84,6 +86,8 @@ _SENTENCES: dict[str, dict[str, list[str]]] = {
         INTENT_ANNOUNCE: [
             "(announce|broadcast) in [the] {axium_zone} {message}",
             "(announce|broadcast) {message}",
+            "tell everyone {message}",
+            "tell (all rooms|the house) {message}",
         ],
     },
 }
@@ -97,6 +101,47 @@ _EVERYWHERE = {
 def _spoken(name: str) -> str:
     """The sanitised, lowercase form a user would say for a baked name."""
     return " ".join(str(name).translate(_HASSIL_SPECIALS).lower().split())
+
+
+def _readable(name: str) -> str:
+    """A display name with separators smoothed for the Whisper prompt.
+
+    "Slaapkamer - Groot" -> "Slaapkamer Groot", "Gang / WC" -> "Gang WC" — keeps
+    the original capitalisation so Whisper is primed with the proper spelling.
+    """
+    return " ".join(str(name).replace("-", " ").replace("/", " ").split())
+
+
+def build_whisper_prompt(
+    zone_names: list[str], sources: list[str], presets: list[str]
+) -> str:
+    """A Whisper ``initial_prompt`` priming STT for the Axium vocabulary.
+
+    Whisper transcribes unusual words far better when the prompt already contains
+    them, so this lists the room, source and preset names plus a few example
+    commands (priming the trigger words like "slaaptimer", "preset", "roep om").
+    Dutch — the user's primary language; proper nouns carry over to English.
+    Kept short: Whisper only conditions on ~224 tokens of prompt.
+    """
+    rooms = [_readable(z) for z in zone_names]
+    parts = ["Spraakbesturing voor de Axium multiroom versterker."]
+    if rooms:
+        parts.append("Kamers: " + ", ".join(rooms) + ".")
+    if sources:
+        parts.append("Bronnen: " + ", ".join(sources) + ".")
+    if presets:
+        parts.append("Presets: " + ", ".join(presets) + ".")
+    examples: list[str] = []
+    first_room = rooms[0].lower() if rooms else "de keuken"
+    if rooms and sources:
+        examples.append(f"zet de {first_room} op de {sources[0]}")
+    examples.append(f"zet een slaaptimer voor de {first_room} over 30 minuten")
+    examples.append("zet slaaptimer voor overal")
+    if presets:
+        examples.append(f"activeer preset {presets[0]}")
+    examples.append(f"roep om in de {first_room}: het eten is klaar")
+    parts.append("Voorbeelden: " + "; ".join(examples) + ".")
+    return " ".join(parts)
 
 
 def _list_value(name: str) -> dict[str, str]:

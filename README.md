@@ -754,8 +754,17 @@ too, so both names work.
 
 Notes: numbers are best spoken as **digits** ("30", not "dertig"); "everywhere /
 overal" targets the all-zones sleep timer; announcements route through
-`axium.play_notification` (spoken in the language you asked in) and restore each
-zone afterwards.
+`axium.play_notification` (spoken with your Assist pipeline's TTS engine, e.g.
+Piper) and restore each zone afterwards. Announce also has a **no-zone** form that
+covers **all** zones: "Roep om: het eten is klaar" / "Announce: dinner's ready".
+
+**Better speech recognition (Whisper):** Whisper transcribes unusual words —
+room, source and preset names, and words like *Axium*, *slaaptimer*, *preset* —
+much better when you prime it. The integration writes a ready-made **initial
+prompt** to `config/axium_whisper_prompt.txt` (regenerated from your live names).
+Paste its contents into your Whisper/faster-whisper STT config's *initial prompt*
+field ("Description of audio that can help Whisper transcribe unusual words
+better").
 
 ## How it works
 

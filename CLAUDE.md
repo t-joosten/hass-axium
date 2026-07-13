@@ -656,7 +656,17 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
     **pure/stdlib-only** (no HA import) so it's unit-testable directly; sanitize each spoken `in`
     form (`_spoken`, strips hassil specials `()[]{}<>|:`).
 - Spoken numbers must be **digits** ("30", not "dertig") — hassil range lists match digits; note this
-  as a limitation. `manifest.json after_dependencies` includes `conversation` so it's set up first.
+  as a limitation. `manifest.json after_dependencies` includes `conversation` + `assist_pipeline` so
+  they're set up first (assist_pipeline is imported lazily in `_pipeline_tts_engine`; hassfest requires
+  the dep declared).
+- **Whisper `initial_prompt`**: `voice_sentences.build_whisper_prompt(zone_names, sources, presets)`
+  (pure) builds a short Dutch STT-priming prompt (room/source/preset names + example commands) so
+  Whisper transcribes the unusual words. STT config lives in ANOTHER integration (can't set it), so
+  `async_update_sentences` writes it to `config/axium_whisper_prompt.txt` for the user to paste into
+  their faster-whisper "initial prompt" field; regenerated with the sentences (kept current on rename).
+- **Announce has a no-zone → ALL zones form** (`(roep om|omroepen|…) {message}`); trigger phrases were
+  widened (announce: `omroep`/`kondig aan`/`zeg tegen iedereen`/`meld overal`; source: `doe`/`put`/`on`;
+  preset: `zet aan`). Add more synonyms in `voice_sentences._SENTENCES`.
 - Test live via `POST /api/conversation/process {text, language}`: check `response.speech.plain.speech`
   == our localized reply (proves OUR intent ran, not a builtin) and that the side effect happened.
   **All 4 verified nl+en on hardware** (source-select, sleep incl. "over N min" + "overal", preset);

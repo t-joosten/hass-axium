@@ -38,6 +38,7 @@ from .voice_sentences import (
     SLEEP_MAX_MIN,
     _spoken,
     build_language_doc,
+    build_whisper_prompt,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -397,8 +398,8 @@ async def async_setup_intents(hass: HomeAssistant) -> None:
 @callback
 def _collect_vocab(
     hass: HomeAssistant,
-) -> tuple[list[tuple[str, str]], list[str], list[str]]:
-    """Live (spoken, entity_id) zones, source names and preset names."""
+) -> tuple[list[tuple[str, str]], list[str], list[str], list[str]]:
+    """Live zones ``(spoken, entity_id)``, zone display names, sources, presets."""
     sources: list[str] = []
     presets: list[str] = []
     controllers = hass.data.get(DOMAIN, {})
@@ -417,6 +418,7 @@ def _collect_vocab(
     # Zones are targeted by their (renameable) friendly name -> entity_id; a zone's
     # live source_list also carries the per-amp stream names.
     zones: list[tuple[str, str]] = []
+    zone_names: list[str] = []
     seen_spoken: set[str] = set()
     for ent in _axium_zone_entries(hass):
         state = hass.states.get(ent.entity_id)
@@ -424,7 +426,10 @@ def _collect_vocab(
         # works alongside the Dutch zone name) — all pointing at this entity.
         # Keep only real strings: registry `name` can be a computed-name sentinel,
         # not a str, in current HA.
-        labels = [state.name if state else ent.original_name, *(ent.aliases or [])]
+        primary = state.name if state else ent.original_name
+        if isinstance(primary, str) and primary and primary not in zone_names:
+            zone_names.append(primary)
+        labels = [primary, *(ent.aliases or [])]
         for label in labels:
             if not isinstance(label, str) or not label:
                 continue
@@ -435,7 +440,7 @@ def _collect_vocab(
         for name in (state.attributes.get("source_list") or []) if state else []:
             if name and name not in sources:
                 sources.append(name)
-    return zones, sources, presets
+    return zones, zone_names, sources, presets
 
 
 def _write_if_changed(path: str, text: str) -> bool:
@@ -459,8 +464,8 @@ async def async_update_sentences(hass: HomeAssistant) -> None:
     is unchanged, and only reloads the conversation agent when a file's contents
     actually change.
     """
-    zones, sources, presets = _collect_vocab(hass)
-    signature = (tuple(zones), tuple(sources), tuple(presets))
+    zones, zone_names, sources, presets = _collect_vocab(hass)
+    signature = (tuple(zones), tuple(zone_names), tuple(sources), tuple(presets))
     store = hass.data.setdefault(f"{DOMAIN}_voice", {})
     if store.get("signature") == signature:
         return
@@ -476,6 +481,16 @@ async def async_update_sentences(hass: HomeAssistant) -> None:
                 changed = True
         except OSError as err:
             LOGGER.warning("Could not write Axium voice sentences to %s: %s", path, err)
+
+    # A suggested Whisper initial_prompt (STT config lives in another integration,
+    # so we can't set it — write it where the user can copy it, kept current).
+    prompt_path = hass.config.path("axium_whisper_prompt.txt")
+    try:
+        await hass.async_add_executor_job(
+            _write_if_changed, prompt_path, build_whisper_prompt(zone_names, sources, presets)
+        )
+    except OSError as err:
+        LOGGER.warning("Could not write Axium Whisper prompt to %s: %s", prompt_path, err)
 
     if changed and hass.services.has_service("conversation", "reload"):
         await hass.services.async_call("conversation", "reload", {}, blocking=False)
