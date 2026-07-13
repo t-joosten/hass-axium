@@ -15,6 +15,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
+    async_call_later,
     async_track_time_change,
     async_track_time_interval,
 )
@@ -545,15 +546,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Voice: (re)generate the per-language sentence files with the live zone/
     # source/preset names, and refresh them when a source is renamed on the amp.
     # Best-effort — a voice-generation hiccup must never fail the whole entry.
-    # De-punctuated aliases so the built-in intents match natural zone names.
-    try:
-        axium_intent.async_add_voice_aliases(hass)
-    except Exception:  # noqa: BLE001
-        _LOGGER.exception("Axium: could not add voice aliases")
     try:
         await axium_intent.async_update_sentences(hass)
     except Exception:  # noqa: BLE001
         _LOGGER.exception("Axium: could not generate voice sentences")
+
+    # De-punctuated aliases so the built-in intents match natural zone names —
+    # deferred, because the zone states/names aren't reliably written at setup
+    # (running it now skipped most zones).
+    @callback
+    def _add_aliases(_now: datetime | None = None) -> None:
+        try:
+            axium_intent.async_add_voice_aliases(hass)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Axium: could not add voice aliases")
+
+    entry.async_on_unload(async_call_later(hass, 8, _add_aliases))
 
     @callback
     def _regenerate_sentences() -> None:
