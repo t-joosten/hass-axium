@@ -462,9 +462,18 @@ def async_add_voice_aliases(hass: HomeAssistant) -> None:
     never remove a user's aliases and skip if it's already there.
     """
     registry = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
     for ent in _axium_zone_entries(hass):
-        state = hass.states.get(ent.entity_id)
-        name = (state.name if state else None) or ent.original_name
+        # Prefer the zone DEVICE name — it's always present at setup, whereas the
+        # entity state may not be written yet (that skipped most zones before).
+        name = None
+        if ent.device_id:
+            dev = dev_reg.async_get(ent.device_id)
+            if dev:
+                name = dev.name_by_user or dev.name
+        if not isinstance(name, str) or not name:
+            state = hass.states.get(ent.entity_id)
+            name = state.name if state else None
         if not isinstance(name, str) or not name:
             continue
         alias = _readable(name)
