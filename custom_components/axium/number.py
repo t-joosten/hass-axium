@@ -27,7 +27,6 @@ from .const import (
     BALANCE_MIN,
     BASS_MAX,
     BASS_MIN,
-    CMD_AUDIO_DELAY,
     CMD_BALANCE,
     CMD_BASS,
     CMD_MAX_VOLUME,
@@ -38,6 +37,7 @@ from .const import (
     CMD_VOLUME,
     CMD_ZONE_GAIN,
     DATA_SLEEP_DEADLINES,
+    DEFAULT_SOURCE_COUNT,
     DOMAIN,
     ID_KEY,
     POWER_OFF,
@@ -72,11 +72,6 @@ def _signed_byte(value: float) -> int:
 def _percent_to_volume(value: float) -> int:
     """Encode a 0-100 percentage as a 0-160 volume byte."""
     return max(0, min(VOLUME_MAX, round(value / 100 * VOLUME_MAX)))
-
-
-def _ms_to_delay(value: float) -> int:
-    """Encode milliseconds as a 5 ms-step byte."""
-    return max(0, min(255, round(value / AUDIO_DELAY_STEP)))
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -123,11 +118,6 @@ NUMBERS: tuple[AxiumNumberDescription, ...] = (
         advanced=True,
     ),
     AxiumNumberDescription(
-        key="audio_delay", name="Audio delay", command=CMD_AUDIO_DELAY,
-        min_value=0, max_value=AUDIO_DELAY_MAX, step=AUDIO_DELAY_STEP, unit="ms",
-        getter=lambda s: s.audio_delay, to_byte=_ms_to_delay,
-    ),
-    AxiumNumberDescription(
         key="zone_gain", name="Zone gain", command=CMD_ZONE_GAIN,
         min_value=ZONE_GAIN_MIN, max_value=ZONE_GAIN_MAX, step=1, unit="dB",
         getter=lambda s: s.zone_gain, to_byte=_signed_byte, advanced=True,
@@ -154,6 +144,12 @@ async def async_setup_entry(
     ]
     entities.extend(
         AxiumSleepTimer(controller, entry, item[ZONE_KEY]) for item in get_zones(entry)
+    )
+    # Per-zone, per-source audio (lip-sync) delay — one number per source (S1..).
+    entities.extend(
+        AxiumSourceDelay(controller, entry, item[ZONE_KEY], n)
+        for item in get_zones(entry)
+        for n in range(1, DEFAULT_SOURCE_COUNT + 1)
     )
     entities.append(
         AxiumAllZonesSleepTimer(
@@ -539,3 +535,70 @@ class AxiumNumber(NumberEntity):
             self._desc.command, self._zone, self._desc.to_byte(value)
         )
         await self._controller.async_send(self._desc.command, self._zone)
+
+
+class AxiumSourceDelay(NumberEntity):
+    """Per-zone, per-source audio (lip-sync) delay — the amp's Delays (0x31).
+
+    Each zone can delay each analog source independently (e.g. to align a room
+    with its TV). One number per source (S1..S8); the media-player source has no
+    delay.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_native_min_value = 0
+    _attr_native_max_value = AUDIO_DELAY_MAX
+    _attr_native_step = AUDIO_DELAY_STEP
+    _attr_native_unit_of_measurement = "ms"
+    _attr_mode = NumberMode.BOX
+    _attr_icon = "mdi:timer-outline"
+
+    def __init__(
+        self,
+        controller: AxiumController,
+        entry: ConfigEntry,
+        zone: int,
+        source_number: int,
+    ) -> None:
+        """Initialise the delay for one source (1-based) on one zone."""
+        self._controller = controller
+        self._zone = zone
+        self._index = source_number - 1  # S1 -> index 0
+        self._attr_name = f"Source {source_number} delay"
+        self._attr_unique_id = (
+            f"{entry.entry_id}_zone_{zone}_source_{source_number}_delay"
+        )
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_zone_{zone}")}
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to zone updates and request the current delays."""
+        self.async_on_remove(
+            self._controller.register_listener(self._zone, self._handle_update)
+        )
+        # One request returns every source's delay for the zone.
+        await self._controller.async_request_source_delays(self._zone)
+
+    @callback
+    def _handle_update(self) -> None:
+        """Write state when the zone changes."""
+        self.async_write_ha_state()
+
+    @property
+    def available(self) -> bool:
+        """Return whether the amplifier connection is up."""
+        return self._controller.available
+
+    @property
+    def native_value(self) -> int | None:
+        """Return this source's delay for this zone (ms), if known."""
+        return self._controller.source_delay(self._zone, self._index)
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set this source's delay for this zone (ms), then read it back."""
+        await self._controller.async_set_source_delay(
+            self._zone, self._index, int(value)
+        )

@@ -56,6 +56,7 @@ from .const import (
     CMD_ZONE_ASSIGN,
     CMD_ZONE_GAIN,
     CMD_ZONE_NAME,
+    DEFAULT_SOURCE_COUNT,
     DEVICE_INFO_LIST_ZONES,
     DEVICE_INFO_REPLY_ON_PORT_ONLY,
     DEVICE_MODELS,
@@ -118,7 +119,8 @@ class ZoneState:
     balance: int | None = None
     max_volume: int | None = None  # percent
     power_on_volume: int | None = None  # percent
-    audio_delay: int | None = None  # milliseconds
+    # Per-source audio (lip-sync) delay in ms; index 0 = S1, 1 = S2, … (0x31).
+    source_delays: list[int] | None = None
     zone_gain: int | None = None  # dB
     loudness: bool | None = None
     mono: bool | None = None
@@ -612,7 +614,8 @@ class AxiumController:
             state.power_on_volume = round(data[0] / VOLUME_MAX * 100)
             changed = True
         elif command == CMD_AUDIO_DELAY and data:
-            state.audio_delay = data[0] * AUDIO_DELAY_STEP
+            # A delay byte per source (first = S1); 5 ms steps.
+            state.source_delays = [b * AUDIO_DELAY_STEP for b in data]
             changed = True
         elif command == CMD_ZONE_GAIN and data:
             state.zone_gain = protocol.from_signed_byte(data[0])
@@ -957,6 +960,32 @@ class AxiumController:
     def source_gain(self, source_id: int) -> int | None:
         """Return the gain (dB) for a source, if known."""
         return self._source_gain.get(source_id)
+
+    def source_delay(self, zone: int, index: int) -> int | None:
+        """Return a zone's audio delay (ms) for source index (0 = S1), if known."""
+        delays = self.zone_state(zone).source_delays
+        if delays is None or index >= len(delays):
+            return None
+        return delays[index]
+
+    async def async_request_source_delays(self, zone: int) -> None:
+        """Request a zone's per-source audio delays (one reply lists them all)."""
+        await self.async_send(CMD_AUDIO_DELAY, zone)
+
+    async def async_set_source_delay(self, zone: int, index: int, ms: int) -> None:
+        """Set one source's audio (lip-sync) delay for a zone, then read it back.
+
+        The 0x31 command carries a delay byte per source (first = S1), so to
+        change one source we resend the whole array with just that entry updated
+        (the others come from our cache). 5 ms steps.
+        """
+        cur = self.zone_state(zone).source_delays or []
+        count = max(len(cur), index + 1, DEFAULT_SOURCE_COUNT)
+        delays = [cur[i] if i < len(cur) else 0 for i in range(count)]
+        delays[index] = ms
+        body = [max(0, min(255, round(d / AUDIO_DELAY_STEP))) for d in delays]
+        await self.async_send(CMD_AUDIO_DELAY, zone, *body)
+        await self.async_send(CMD_AUDIO_DELAY, zone)  # read-back
 
     def set_extended_info_callback(
         self, callback: Callable[[str | None, str | None], None]

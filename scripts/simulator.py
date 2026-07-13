@@ -109,10 +109,12 @@ class Zone:
         self.volume = 80  # v1 (0..160), ~50%
         self.source = 0x05  # Source 1
         # Single-byte per-zone settings keyed by command byte (raw values):
-        # bass/treble/balance, max volume, audio delay, power-on volume, gain.
+        # bass/treble/balance, max volume, power-on volume, gain.
         self.settings = {
-            0x05: 0, 0x06: 0, 0x07: 0, 0x0D: 0xA0, 0x31: 0, 0x48: 0x40, 0x44: 0,
+            0x05: 0, 0x06: 0, 0x07: 0, 0x0D: 0xA0, 0x48: 0x40, 0x44: 0,
         }
+        # Per-source audio delay (0x31), one 5 ms-step byte per source (S1..S8).
+        self.source_delays = [0] * 8
         self.special = [0, 0]  # 0x0C special-feature bytes (loudness, mono, ...)
 
     def describe(self) -> str:
@@ -409,9 +411,24 @@ class Simulator:
                 log("-> reply  ", reply, f"source {data[0]} gain")
                 await self._safe_drain(writer)
             return
+        if command == 0x31:  # Audio delay — a 5ms-step byte per source (S1 first)
+            for z in self._resolve_zones(zone_byte):
+                if data:  # set (silent); short commands set remaining to the last
+                    last = data[-1]
+                    z.source_delays = [
+                        data[i] if i < len(data) else last
+                        for i in range(len(z.source_delays))
+                    ]
+                else:  # request -> reply with every source's delay
+                    reply = encode(0x31, z.number, *z.source_delays)
+                    writer.write(reply)
+                    log("-> reply  ", reply, f"{z.name} delays")
+            if not data:
+                await self._safe_drain(writer)
+            return
         # Single-byte per-zone settings: bass/treble/balance, max volume,
-        # audio delay, power-on volume, zone gain.
-        if command in (0x05, 0x06, 0x07, 0x0D, 0x31, 0x48, 0x44):
+        # power-on volume, zone gain.
+        if command in (0x05, 0x06, 0x07, 0x0D, 0x48, 0x44):
             for z in self._resolve_zones(zone_byte):
                 if data:  # set (silent; the client re-reads)
                     z.settings[command] = data[0]

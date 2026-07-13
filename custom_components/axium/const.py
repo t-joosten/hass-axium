@@ -60,7 +60,8 @@ CMD_MAX_VOLUME: Final = 0x0D
 CMD_AUDIO_DELAY: Final = 0x31
 CMD_POWER_ON_VOLUME: Final = 0x48
 
-# Audio delay (0x31) is in 5 ms steps, one byte (max 255 -> 1275 ms).
+# Audio delay (0x31): a 5 ms-step byte PER SOURCE (first byte = S1, then S2, …;
+# a single byte applies to all sources). Per zone. Max 255 -> 1275 ms.
 AUDIO_DELAY_STEP: Final = 5
 AUDIO_DELAY_MAX: Final = 255 * AUDIO_DELAY_STEP
 CMD_REQUEST_PROTOCOL: Final = 0x08

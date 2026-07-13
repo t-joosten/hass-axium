@@ -102,6 +102,16 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   so reading it before power made those off zones report `PLAYING` — which lit up every zone's Media
   Player cell in the matrix. So: `power is None`→None, `not power`→OFF, else check the media source. An
   off zone is OFF regardless of the shared player.
+- **Per-source audio delay is per-ZONE (0x31)** — verified on real hardware (probed the amp:
+  each zone replies with a delay byte PER SOURCE; zone 2 had `[0,0,0,0,0,0,0,120]` = S8 600 ms,
+  matching the amp web app's *Delays* screen). NOT a single per-zone value — the OLD `state.audio_delay`
+  (one byte) was wrong. Now `ZoneState.source_delays` = `[ms per source, S1 first]`; the setter
+  `async_set_source_delay(zone, index, ms)` resends the WHOLE 8-byte array (others from cache) with just
+  one entry changed, then re-reads (the amp doesn't echo a set). Exposed as **`AxiumSourceDelay` numbers,
+  one per source (S1..S8) per zone**, on the ZONE device (`number.py`, `EntityCategory.CONFIG`, mode BOX,
+  0-1275 ms / 5 ms steps). "No delay for the media player source" (protocol), so only the 8 analog
+  sources. Simulator: `Zone.source_delays` (list of 8); 0x31 handled separately (reply lists all sources;
+  a single-byte command sets all — the protocol's back-compat rule).
 - **What the control protocol can/can't do** (AxiumCommsProtocol.pdf, 25pp): network config IS
   settable — `0x3A`: setting `01h` = amp network name, `02h` = NTP time server, `03h` = flags
   (bit0 0=DHCP/1=Static) + 16 bytes IP/subnet/DNS/router; `83h` reads the IP config back;
