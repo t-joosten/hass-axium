@@ -25,9 +25,20 @@ import voluptuous as vol
 import yaml
 
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import config_validation as cv, entity_registry as er, intent
+from homeassistant.helpers import (
+    config_validation as cv,
+    device_registry as dr,
+    entity_registry as er,
+    intent,
+)
 
-from .const import DOMAIN, ID_KEY, NAME_KEY
+from .const import (
+    DOMAIN,
+    ID_KEY,
+    NAME_KEY,
+    SOURCE_BYTE_TO_NAME,
+    SOURCE_MEDIA_PLAYER_BYTE,
+)
 from .helpers import get_presets, get_sources
 from .voice_sentences import (
     INTENT_ANNOUNCE,
@@ -401,10 +412,31 @@ async def async_setup_intents(hass: HomeAssistant) -> None:
 @callback
 def _collect_vocab(
     hass: HomeAssistant,
-) -> tuple[list[tuple[str, str]], list[str], list[str], list[str]]:
-    """Live zones ``(spoken, entity_id)``, zone display names, sources, presets."""
-    sources: list[str] = []
+) -> tuple[
+    list[tuple[str, str]], list[str], list[tuple[str, str]], list[str], list[str]
+]:
+    """Live vocabulary for the sentence files and Whisper prompt.
+
+    Returns ``(zones, zone_names, source_pairs, prompt_sources, presets)`` where
+    ``zones``/``source_pairs`` are ``(spoken, out)`` pairs. A source's ``out`` is
+    the ``select_source`` name; the amp stream names ("Axium 1"/"Axium 2") are
+    added as spoken aliases pointing at the shared "Media Player" source, since
+    the media_player only lists that one generic name.
+    """
     presets: list[str] = []
+    source_pairs: list[tuple[str, str]] = []
+    prompt_sources: list[str] = []
+    seen_source: set[str] = set()
+    media_source_name: str | None = None
+
+    def _add_source(display: str, out: str) -> None:
+        spoken = _spoken(display)
+        if spoken and spoken not in seen_source:
+            seen_source.add(spoken)
+            source_pairs.append((spoken, out))
+        if display and display not in prompt_sources:
+            prompt_sources.append(display)
+
     controllers = hass.data.get(DOMAIN, {})
     for entry in hass.config_entries.async_entries(DOMAIN):
         controller = controllers.get(entry.entry_id)
@@ -413,15 +445,19 @@ def _collect_vocab(
             if controller is not None:
                 name = controller.source_name(src[ID_KEY])
             name = name or src[NAME_KEY]
-            if name and name not in sources:
-                sources.append(name)
+            if name:
+                _add_source(name, name)
         for preset in get_presets(entry):
             if preset["name"] not in presets:
                 presets.append(preset["name"])
-    # Zones are targeted by their (renameable) friendly name -> entity_id; a zone's
-    # live source_list also carries the per-amp stream names.
+
+    # Zones are targeted by their (renameable) friendly name -> entity_id; each
+    # zone's live source_list carries the selectable source names (incl. the
+    # generic "Media Player"), and its amp device name is a stream alias.
+    dev_reg = dr.async_get(hass)
     zones: list[tuple[str, str]] = []
     zone_names: list[str] = []
+    amp_names: list[str] = []
     seen_spoken: set[str] = set()
     for ent in _axium_zone_entries(hass):
         state = hass.states.get(ent.entity_id)
@@ -432,18 +468,35 @@ def _collect_vocab(
         primary = state.name if state else ent.original_name
         if isinstance(primary, str) and primary and primary not in zone_names:
             zone_names.append(primary)
-        labels = [primary, *(ent.aliases or [])]
-        for label in labels:
+        for label in [primary, *(ent.aliases or [])]:
             if not isinstance(label, str) or not label:
                 continue
             spoken = _spoken(label)
             if spoken and spoken not in seen_spoken:
                 seen_spoken.add(spoken)
                 zones.append((spoken, ent.entity_id))
-        for name in (state.attributes.get("source_list") or []) if state else []:
-            if name and name not in sources:
-                sources.append(name)
-    return zones, zone_names, sources, presets
+        names = (state.attributes.get("source_list") or []) if state else []
+        ids = (state.attributes.get("source_ids") or []) if state else []
+        for name, sid in zip(names, ids):
+            if media_source_name is None and sid == SOURCE_MEDIA_PLAYER_BYTE:
+                media_source_name = name
+            if name:
+                _add_source(name, name)
+        # The zone's amp device name (via_device) is a spoken alias for the stream.
+        dev = dev_reg.async_get(ent.device_id) if ent.device_id else None
+        amp = dev_reg.async_get(dev.via_device_id) if dev and dev.via_device_id else None
+        amp_name = (amp.name_by_user or amp.name) if amp else None
+        if isinstance(amp_name, str) and amp_name and amp_name not in amp_names:
+            amp_names.append(amp_name)
+
+    # Map each amp name (Axium 1/2) to the shared Media Player source so
+    # "zet de keuken op axium 1" routes the zone to its stream.
+    stream_out = media_source_name or SOURCE_BYTE_TO_NAME.get(SOURCE_MEDIA_PLAYER_BYTE)
+    if stream_out:
+        for amp_name in amp_names:
+            _add_source(amp_name, stream_out)
+
+    return zones, zone_names, source_pairs, prompt_sources, presets
 
 
 def _write_if_changed(path: str, text: str) -> bool:
@@ -467,8 +520,13 @@ async def async_update_sentences(hass: HomeAssistant) -> None:
     is unchanged, and only reloads the conversation agent when a file's contents
     actually change.
     """
-    zones, zone_names, sources, presets = _collect_vocab(hass)
-    signature = (tuple(zones), tuple(zone_names), tuple(sources), tuple(presets))
+    zones, zone_names, source_pairs, prompt_sources, presets = _collect_vocab(hass)
+    signature = (
+        tuple(zones),
+        tuple(zone_names),
+        tuple(source_pairs),
+        tuple(presets),
+    )
     store = hass.data.setdefault(f"{DOMAIN}_voice", {})
     if store.get("signature") == signature:
         return
@@ -476,7 +534,7 @@ async def async_update_sentences(hass: HomeAssistant) -> None:
 
     changed = False
     for language in LANGUAGES:
-        doc = build_language_doc(language, zones, sources, presets)
+        doc = build_language_doc(language, zones, source_pairs, presets)
         text = yaml.safe_dump(doc, allow_unicode=True, sort_keys=False)
         path = hass.config.path("custom_sentences", language, "axium.yaml")
         try:
@@ -490,7 +548,9 @@ async def async_update_sentences(hass: HomeAssistant) -> None:
     prompt_path = hass.config.path("axium_whisper_prompt.txt")
     try:
         await hass.async_add_executor_job(
-            _write_if_changed, prompt_path, build_whisper_prompt(zone_names, sources, presets)
+            _write_if_changed,
+            prompt_path,
+            build_whisper_prompt(zone_names, prompt_sources, presets),
         )
     except OSError as err:
         LOGGER.warning("Could not write Axium Whisper prompt to %s: %s", prompt_path, err)

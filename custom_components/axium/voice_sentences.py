@@ -159,14 +159,16 @@ def _list_value(name: str) -> dict[str, str]:
 def build_language_doc(
     language: str,
     zones: list[tuple[str, str]],
-    sources: list[str],
+    sources: list[tuple[str, str]],
     presets: list[str],
 ) -> dict[str, Any]:
     """Build the custom-sentences document for one language.
 
-    ``zones`` is a list of ``(spoken_name, entity_id)`` pairs; the ``entity_id`` is
-    baked as the slot ``out`` so a handler gets the target directly. Intents whose
-    baked list is empty are omitted so hassil never sees a dangling ``{list}``.
+    ``zones`` and ``sources`` are ``(spoken, out)`` pairs — the ``out`` is baked as
+    the slot value a handler receives (a zone ``entity_id``; a source's select
+    name, so amp names "Axium 1"/"Axium 2" can both point at "Media Player").
+    Intents whose baked list is empty are omitted so hassil never sees a dangling
+    ``{list}``.
     """
     lang = language if language in _SENTENCES else "en"
     templates = _SENTENCES[lang]
@@ -203,7 +205,9 @@ def build_language_doc(
             ]
         }
     if have_sources:
-        lists["axium_source"] = {"values": [_list_value(s) for s in sources]}
+        lists["axium_source"] = {
+            "values": [{"in": spoken, "out": out} for spoken, out in sources]
+        }
     if have_presets:
         lists["axium_preset"] = {"values": [_list_value(p) for p in presets]}
 
