@@ -15,6 +15,7 @@ from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -126,6 +127,23 @@ NUMBERS: tuple[AxiumNumberDescription, ...] = (
 )
 
 
+# Number unique-id suffixes that the integration no longer creates. Their
+# registry entries linger as permanently "unavailable" controls and are pruned
+# on setup. `audio_delay` was the single per-zone lip-sync delay replaced in
+# v0.0.103 by the per-source `source_<n>_delay` numbers.
+_OBSOLETE_NUMBER_SUFFIXES: tuple[str, ...] = ("_audio_delay",)
+
+
+def _prune_obsolete_numbers(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove registry entries for number controls the integration dropped."""
+    registry = er.async_get(hass)
+    for ent in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if ent.domain == "number" and ent.unique_id.endswith(
+            _OBSOLETE_NUMBER_SUFFIXES
+        ):
+            registry.async_remove(ent.entity_id)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -136,6 +154,7 @@ async def async_setup_entry(
     Risky level/gain controls are only created when advanced settings are on.
     """
     controller: AxiumController = hass.data[DOMAIN][entry.entry_id]
+    _prune_obsolete_numbers(hass, entry)
     advanced = get_advanced(entry)
     entities: list[NumberEntity] = [
         AxiumNumber(controller, entry, item[ZONE_KEY], desc)

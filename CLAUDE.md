@@ -121,7 +121,11 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   entity_id stays the `..._source_N_delay` original (registered in v0.0.103), so the rename-driven label
   only changes the friendly name. "No delay for the media player source" (protocol), so only the 8 analog
   sources. Simulator: `Zone.source_delays` (list of 8); 0x31 handled separately (reply lists all sources;
-  a single-byte command sets all — the protocol's back-compat rule).
+  a single-byte command sets all — the protocol's back-compat rule). **Replacing `audio_delay` left 16
+  orphaned `..._zone_N_audio_delay` numbers** (permanently `unavailable`, one per zone) — `number.py`
+  `_prune_obsolete_numbers` (called each `async_setup_entry`) removes any `number` whose unique id ends
+  with a suffix in `_OBSOLETE_NUMBER_SUFFIXES` (`("_audio_delay",)`), so a removed number-key self-cleans
+  on reload. Add future removed number keys to that tuple. (Same pattern as the alarm-sensor prune.)
 - **What the control protocol can/can't do** (AxiumCommsProtocol.pdf, 25pp): network config IS
   settable — `0x3A`: setting `01h` = amp network name, `02h` = NTP time server, `03h` = flags
   (bit0 0=DHCP/1=Static) + 16 bytes IP/subnet/DNS/router; `83h` reads the IP config back;
