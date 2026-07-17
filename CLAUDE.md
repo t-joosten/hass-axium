@@ -251,6 +251,18 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `perl -ne 'print "$." if /[\x00-\x08\x0b\x0c\x0e-\x1f]/'`. A null byte has twice
   slipped into a string literal that renders as a space (e.g. `.join(" ")`), making
   `file` report "data"/"binary" — replace the separator with a printable char.
+- **Shared card design system** (introduced with the Quick Play redesign, then applied
+  to ALL cards in v0.0.128, **one self-contained commit per card so any card's look can be
+  `git revert`ed on its own**): 16px `ha-card` padding, **1.25rem / weight-500** titles with
+  `letter-spacing:0.2px`, **full-round pills** (`border-radius:999px`, selected = `--primary-color`
+  bg + `--text-primary-color`) for chips/selectors, **rounded list surfaces / tiles**
+  (`border:1px --divider-color`, radius 12-14px, hover = primary border + soft shadow),
+  **circular icon buttons** (hover `--secondary-background-color`), primary accents, and larger
+  sheet radii (18px mobile). Each card keeps its OWN `Axium<Name>Card.styles` string. **The Sleep
+  card used to reuse `AxiumAlarmsCard.styles`** — it now has its own `AxiumSleepCard.styles` (a copy,
+  then redesigned) so alarms/sleep are independently revertible; don't re-point it back at the alarms
+  styles. When restyling, prefer **styles-only** edits (no markup/handler changes) so a card's
+  redesign is a clean, revertible diff.
 - Chip interactions: **tap** toggles the zone, **long-press (500ms)** opens the zone's
   device page (`_attachChipHandlers`/`_openZoneDevice`, pointer events; navigates to
   `/config/devices/device/<device_id>` via a `location-changed` event, more-info
