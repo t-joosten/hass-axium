@@ -4035,8 +4035,8 @@ AxiumAlarmsCard.styles = `
 `;
 
 AxiumSleepCard.styles = `
-  ha-card { padding: 12px 16px; position: relative; }
-  .title { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: var(--primary-text-color); }
+  ha-card { padding: 16px; position: relative; }
+  .title { font-size: 1.25rem; font-weight: 500; letter-spacing: 0.2px; margin-bottom: 12px; color: var(--primary-text-color); }
   .empty { color: var(--secondary-text-color); padding: 4px 0; }
   .f-media { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
   .mediabtn { align-self: flex-start; }
@@ -4045,10 +4045,16 @@ AxiumSleepCard.styles = `
     border: 1px solid var(--divider-color); border-radius: 8px; padding: 6px;
     background: var(--secondary-background-color);
   }
-  .rows { display: flex; flex-direction: column; gap: 10px; }
-  .row { display: flex; align-items: center; gap: 10px; }
+  .rows { display: flex; flex-direction: column; gap: 8px; }
+  .row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: 12px;
+    border: 1px solid var(--divider-color); background: var(--card-background-color);
+    transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  }
+  .row:hover { border-color: var(--primary-color); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); }
   .mid { flex: 1 1 auto; min-width: 0; }
-  .n { font-weight: 600; color: var(--primary-text-color); }
+  .n { font-weight: 500; color: var(--primary-text-color); }
   .sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
   .zn { font-size: 0.78rem; color: var(--secondary-text-color); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .src { font-size: 0.78rem; color: var(--primary-color); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -4123,33 +4129,35 @@ AxiumSleepCard.styles = `
   .addbtn:hover { filter: brightness(1.08); }
   .quick { display: inline-flex; gap: 4px; margin-top: 4px; }
   .q, .custom {
-    padding: 3px 10px; border-radius: 14px; border: 1px solid var(--divider-color);
+    padding: 4px 12px; border-radius: 999px; border: 1px solid var(--divider-color);
     background: none; cursor: pointer; font: inherit; font-size: 0.8rem;
-    color: var(--primary-text-color);
+    color: var(--primary-text-color); transition: border-color 0.15s ease;
   }
   .custom { border-style: dashed; }
   .q:hover, .custom:hover { border-color: var(--primary-color); }
   .overlay {
     position: absolute; inset: 0; z-index: 5; display: flex;
     align-items: center; justify-content: center;
-    background: rgba(0, 0, 0, 0.45); border-radius: var(--ha-card-border-radius, 12px);
+    background: rgba(0, 0, 0, 0.5); border-radius: var(--ha-card-border-radius, 12px);
   }
   .overlay[hidden] { display: none; }
   .sheet {
     width: min(320px, 92%); box-sizing: border-box; padding: 16px;
-    border-radius: 14px; background: var(--card-background-color, #fff);
+    border-radius: 18px; background: var(--card-background-color, #fff);
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
   }
   .sheet-head {
     display: flex; align-items: center; justify-content: space-between;
     gap: 8px; margin-bottom: 12px;
   }
-  .sheet-title { font-weight: 600; color: var(--primary-text-color); }
+  .sheet-title { font-weight: 500; font-size: 1.05rem; color: var(--primary-text-color); }
   .iconbtn {
+    display: inline-flex; align-items: center; justify-content: center;
     background: none; border: none; cursor: pointer; font: inherit;
-    color: var(--secondary-text-color); padding: 2px 6px; border-radius: 8px;
+    color: var(--secondary-text-color); width: 32px; height: 32px; border-radius: 50%;
+    transition: background 0.15s ease, color 0.15s ease;
   }
-  .iconbtn:hover { color: var(--primary-color); }
+  .iconbtn:hover { color: var(--primary-text-color); background: var(--secondary-background-color); }
   .cust-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
   .cust-input {
     flex: 1 1 auto; width: 100%; box-sizing: border-box; font: inherit;
