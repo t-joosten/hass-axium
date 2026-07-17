@@ -550,15 +550,22 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `_refreshPanel`).
 - **Quick-play card** (`axium-quickplay-card`, seventh card, `AxiumQuickPlayCard`): pick an amp stream
   (source select of the `axiumAmps` that resolve to an MA player by name via `_maByName`), then a grid
-  of **10 buttons** each set to a saved Music Assistant song/album/playlist. Tapping a set button
-  `media_player.play_media` (`enqueue:"play"`, with the same play-while-playing double-fire the stream
-  panel uses); an empty button (or any button in **Edit** mode, pencil toggle) opens a popover with the
-  shared **`<axium-ma-search mode="pick">`** — its `pick` event stores `{title, media_content_id,
+  of buttons each set to a saved Music Assistant song/album/playlist. **Unlimited buttons, and only
+  set ones are shown** (`_slots()` filters to entries with a `media_content_id`; no fixed 10 / null
+  padding). **Edit** mode (pencil toggle) appends an **Add** tile (`data-i="-1"` → `_openPicker(slots.length)`,
+  appends) and shows a **✕** on each button to remove it (`_clear` = `splice(i,1)`); tapping a filled
+  button in edit mode re-assigns it. Non-edit: tapping a button `media_player.play_media` (`enqueue:"play"`,
+  with the same play-while-playing double-fire the stream panel uses). The picker is the shared
+  **`<axium-ma-search mode="pick">`** — its `pick` event stores `{title, media_content_id,
   media_content_type, thumbnail}`. Assignments persist in **localStorage** keyed `axium-quickplay:<hubId>`
   (per-browser — NOT shared across devices; could move to options if the user wants sync), the selected
   stream in `axium-quickplay-src:<hubId>`. Reuses `axium-hub-card-editor` (hub + name). The picker
   overlay is the same responsive sheet pattern as the matrix (mobile almost-full, desktop ~480px). An
   open picker survives hass updates (`_render` refreshes the search's `.hass` instead of rebuilding).
+  **Sheet-scroll trap (fixed):** the sheet CSS must NOT set `display: block` on the embedded
+  `<axium-ma-search>` — that overrides the component's `:host{display:flex;flex-direction:column}`, which
+  collapses the flex chain so `.ssresults` (which has `overflow-y:auto`) never gets a bounded height and
+  the results can't scroll. Style it `flex:1 1 auto; min-height:0;` only (same as the matrix stream panel).
 - **The internal Media Player source is SPLIT per amp everywhere** (id ≥ `STREAM_SOURCE_MIN`):
   `axiumSourceChoices` emits **one choice per amp** ("Axium 1", "Axium 2" — NOT one combined
   "Media Player" or "Axium 1 / Axium 2"), each amp-scoped by a 3-part token

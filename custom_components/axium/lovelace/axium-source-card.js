@@ -4813,13 +4813,16 @@ class AxiumQuickPlayCard extends HTMLElement {
       arr = [];
     }
     if (!Array.isArray(arr)) arr = [];
-    while (arr.length < 10) arr.push(null);
-    return arr.slice(0, 10);
+    // Unlimited buttons; only assigned ones are kept (drops legacy null padding).
+    return arr.filter((s) => s && s.media_content_id);
   }
 
   _saveSlots(arr) {
     try {
-      localStorage.setItem(this._slotsKey(), JSON.stringify(arr.slice(0, 10)));
+      localStorage.setItem(
+        this._slotsKey(),
+        JSON.stringify((arr || []).filter((s) => s && s.media_content_id))
+      );
     } catch (e) {
       /* private mode / quota — buttons just won't persist */
     }
@@ -4878,7 +4881,17 @@ class AxiumQuickPlayCard extends HTMLElement {
             )
             .join("")}</select>`
         : `<div class="srcone">${escHtml(amps[0].name)}</div>`;
-    const grid = slots.map((s, i) => this._btnHtml(s, i)).join("");
+    const btns = slots.map((s, i) => this._btnHtml(s, i)).join("");
+    const addTile = this._edit
+      ? `<div class="qp add" role="button" tabindex="0" data-i="-1">
+          <ha-icon icon="mdi:plus"></ha-icon>
+          <div class="lbl">Add</div>
+        </div>`
+      : "";
+    const body =
+      slots.length || this._edit
+        ? `<div class="grid">${btns}${addTile}</div>`
+        : `<div class="empty">No quick-play buttons yet. Tap the pencil, then Add, to set one.</div>`;
     this.shadowRoot.innerHTML = `<style>${AxiumQuickPlayCard.styles}</style>
       <ha-card>
         <div class="head">
@@ -4889,7 +4902,7 @@ class AxiumQuickPlayCard extends HTMLElement {
               <ha-icon icon="mdi:pencil"></ha-icon></button>
           </div>
         </div>
-        <div class="grid">${grid}</div>
+        ${body}
         <div class="overlay" id="qpoverlay" hidden><div class="sheet" id="qpsheet"></div></div>
       </ha-card>`;
 
@@ -4927,30 +4940,27 @@ class AxiumQuickPlayCard extends HTMLElement {
   }
 
   _btnHtml(slot, i) {
-    const clr =
-      this._edit && slot
-        ? `<button class="clr" data-i="${i}" title="Clear"><ha-icon icon="mdi:close"></ha-icon></button>`
-        : "";
-    if (slot && slot.media_content_id) {
-      const art = slot.thumbnail
-        ? `style="background-image:url('${escHtml(slot.thumbnail)}')"`
-        : "";
-      return `<div class="qp filled" role="button" tabindex="0" data-i="${i}" title="${escHtml(slot.title || "Music")}">
-        ${clr}
-        <div class="art" ${art}></div>
-        <div class="lbl">${escHtml(slot.title || "Music")}</div>
-      </div>`;
-    }
-    return `<div class="qp empty" role="button" tabindex="0" data-i="${i}">
-      <ha-icon icon="mdi:plus"></ha-icon>
-      <div class="lbl">${this._edit ? "Set" : "Empty"}</div>
+    const clr = this._edit
+      ? `<button class="clr" data-i="${i}" title="Remove"><ha-icon icon="mdi:close"></ha-icon></button>`
+      : "";
+    const art = slot.thumbnail
+      ? `style="background-image:url('${escHtml(slot.thumbnail)}')"`
+      : "";
+    return `<div class="qp filled" role="button" tabindex="0" data-i="${i}" title="${escHtml(slot.title || "Music")}">
+      ${clr}
+      <div class="art" ${art}></div>
+      <div class="lbl">${escHtml(slot.title || "Music")}</div>
     </div>`;
   }
 
   _onButton(i) {
-    const slot = this._slots()[i];
-    if (this._edit || !slot || !slot.media_content_id) this._openPicker(i);
-    else this._play(this._sel, slot);
+    const slots = this._slots();
+    if (i < 0) {
+      this._openPicker(slots.length); // Add tile → append a new button
+      return;
+    }
+    if (this._edit) this._openPicker(i); // reassign an existing button
+    else if (slots[i]) this._play(this._sel, slots[i]);
   }
 
   _play(player, slot) {
@@ -4975,7 +4985,7 @@ class AxiumQuickPlayCard extends HTMLElement {
 
   _clear(i) {
     const slots = this._slots();
-    slots[i] = null;
+    slots.splice(i, 1);
     this._saveSlots(slots);
     this._sig = "";
     this._render();
@@ -4987,7 +4997,7 @@ class AxiumQuickPlayCard extends HTMLElement {
     if (!overlay || !sheet || !this._sel) return;
     sheet.innerHTML = `
       <div class="sheet-head">
-        <span class="sheet-title">Choose music for button ${i + 1}</span>
+        <span class="sheet-title">Choose music</span>
         <button class="close iconbtn"><ha-icon icon="mdi:close"></ha-icon></button>
       </div>
       <axium-ma-search></axium-ma-search>`;
@@ -5047,7 +5057,7 @@ AxiumQuickPlayCard.styles = `
   .qp:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
   .qp .art { width: 100%; aspect-ratio: 1 / 1; border-radius: 8px; background: var(--divider-color) center/cover no-repeat; }
   .qp .lbl { font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .qp.empty { align-items: center; justify-content: center; min-height: 120px; color: var(--secondary-text-color); border-style: dashed; --mdc-icon-size: 26px; }
+  .qp.add { align-items: center; justify-content: center; min-height: 120px; color: var(--secondary-text-color); border-style: dashed; --mdc-icon-size: 26px; }
   .qp .clr {
     position: absolute; top: 4px; right: 4px; z-index: 2; background: rgba(0,0,0,0.55); color: #fff;
     border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; display: inline-flex;
@@ -5066,7 +5076,7 @@ AxiumQuickPlayCard.styles = `
   @media (min-width: 768px) { .sheet { width: 480px; max-width: 92%; height: 70vh; } }
   .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
   .sheet-title { font-weight: 600; color: var(--primary-text-color); }
-  .sheet axium-ma-search { flex: 1 1 auto; min-height: 0; display: block; }
+  .sheet axium-ma-search { flex: 1 1 auto; min-height: 0; }
 `;
 
 if (!customElements.get("axium-source-card")) {
