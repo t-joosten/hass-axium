@@ -34,6 +34,7 @@ from .const import (
     CMD_SOURCE,
     CMD_VOLUME,
     CONF_ALARMS,
+    CONF_QUICKPLAY,
     DOMAIN,
     MUTE_ON,
     POWER_OFF,
@@ -42,13 +43,20 @@ from .const import (
     UNIT_KEY,
     ZONE_KEY,
 )
-from .helpers import amp_zone_positions, get_alarms, get_presets, get_zones
+from .helpers import (
+    amp_zone_positions,
+    get_alarms,
+    get_presets,
+    get_quickplay,
+    get_zones,
+)
 from .protocol import level_to_volume
 
 _LOGGER = logging.getLogger(__name__)
 
 SERVICE_SET_ALARM = "set_alarm"
 SERVICE_REMOVE_ALARM = "remove_alarm"
+SERVICE_SET_QUICKPLAY = "set_quickplay"
 SERVICE_PLAY_NOTIFICATION = "play_notification"
 
 _SET_ALARM_SCHEMA = vol.Schema(
@@ -134,6 +142,52 @@ async def _async_remove_alarm(hass: HomeAssistant, call: ServiceCall) -> None:
     remaining = [a for a in get_alarms(entry) if a["name"] != name]
     hass.config_entries.async_update_entry(
         entry, options={**entry.options, CONF_ALARMS: remaining}
+    )
+
+
+_QUICKPLAY_ITEM_SCHEMA = vol.Schema(
+    {
+        vol.Required("media_content_id"): cv.string,
+        vol.Optional("title"): cv.string,
+        vol.Optional("media_content_type"): cv.string,
+        vol.Optional("media_class"): cv.string,
+        vol.Optional("thumbnail"): cv.string,
+    },
+    extra=vol.REMOVE_EXTRA,
+)
+
+_SET_QUICKPLAY_SCHEMA = vol.Schema(
+    {
+        vol.Optional("hub"): cv.string,
+        vol.Required("items"): vol.All(cv.ensure_list, [_QUICKPLAY_ITEM_SCHEMA]),
+    }
+)
+
+
+async def _async_set_quickplay(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Replace the whole ordered Quick Play favourites list (synced storage).
+
+    The card sends the full list on every add/remove/reorder, so ordering is
+    whatever the caller passes. Items are normalised to the stored key set and
+    any without a ``media_content_id`` are dropped.
+    """
+    entry = _resolve_entry(hass, call.data.get("hub"))
+    items: list[dict] = []
+    for raw in call.data["items"]:
+        cid = str(raw.get("media_content_id", "") or "").strip()
+        if not cid:
+            continue
+        items.append(
+            {
+                "title": str(raw.get("title", "") or "Music"),
+                "media_content_id": cid,
+                "media_content_type": str(raw.get("media_content_type", "") or "playlist"),
+                "media_class": str(raw.get("media_class", "") or ""),
+                "thumbnail": str(raw.get("thumbnail", "") or ""),
+            }
+        )
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, CONF_QUICKPLAY: items}
     )
 
 
@@ -523,6 +577,12 @@ def async_register_services(hass: HomeAssistant) -> None:
         SERVICE_REMOVE_ALARM,
         partial(_async_remove_alarm, hass),
         schema=_REMOVE_ALARM_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_QUICKPLAY,
+        partial(_async_set_quickplay, hass),
+        schema=_SET_QUICKPLAY_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,

@@ -22,6 +22,7 @@ from homeassistant.components.media_player import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
@@ -47,6 +48,7 @@ from .const import (
     UNIT_KEY,
     POWER_OFF,
     POWER_ON,
+    SIGNAL_QUICKPLAY_UPDATE,
     SOURCE_BYTE_TO_NAME,
     SOURCE_FLAG_TURN_ON,
     ZONE_KEY,
@@ -55,6 +57,7 @@ from .controller import AxiumController
 from .helpers import (
     amp_zone_positions,
     get_presets,
+    get_quickplay,
     get_sources,
     get_units,
     get_zones,
@@ -147,7 +150,14 @@ class AxiumZone(MediaPlayerEntity):
     _attr_should_poll = False
     # These list attributes are static config, not history worth recording.
     _unrecorded_attributes = frozenset(
-        {"source_ids", "axium_presets", "zone_number", "axium_volume", "axium_muted"}
+        {
+            "source_ids",
+            "axium_presets",
+            "axium_quickplay",
+            "zone_number",
+            "axium_volume",
+            "axium_muted",
+        }
     )
 
     def __init__(
@@ -164,10 +174,14 @@ class AxiumZone(MediaPlayerEntity):
     ) -> None:
         """Initialise the zone entity."""
         self._controller = controller
+        self._entry = entry
         self._zone = zone
         self._source_ids = source_ids
         self._seed_names = seed_names
         self._presets = presets or []
+        # Quick Play favourites live in the entry options (synced across devices);
+        # re-read on SIGNAL_QUICKPLAY_UPDATE so edits reflect without a reload.
+        self._quickplay = get_quickplay(entry)
         self._media_position: int | None = None
         self._media_position_updated: datetime | None = None
         self._attr_unique_id = f"{entry.entry_id}_zone_{zone}"
@@ -187,7 +201,20 @@ class AxiumZone(MediaPlayerEntity):
         self.async_on_remove(
             self._controller.register_listener(self._zone, self._handle_update)
         )
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                f"{SIGNAL_QUICKPLAY_UPDATE}_{self._entry.entry_id}",
+                self._handle_quickplay_update,
+            )
+        )
         await self._controller.async_request_zone_state(self._zone)
+
+    @callback
+    def _handle_quickplay_update(self) -> None:
+        """Re-read the synced Quick Play favourites and re-expose them."""
+        self._quickplay = get_quickplay(self._entry)
+        self.async_write_ha_state()
 
     @callback
     def _handle_update(self) -> None:
@@ -298,7 +325,8 @@ class AxiumZone(MediaPlayerEntity):
         ``source_list`` (``source_ids[i]`` matches ``source_list[i]``) — the
         dashboard card stores the id, not the display name, so renaming a source
         on the amp doesn't break a card. ``axium_presets`` are the hub-wide zone
-        presets a source card can activate. ``axium_volume``/``axium_muted``
+        presets a source card can activate; ``axium_quickplay`` are the saved
+        Quick Play favourites (synced via options). ``axium_volume``/``axium_muted``
         mirror the zone's volume/mute so a card can still show them when the zone
         is OFF (HA strips the standard ``volume_level``/``is_volume_muted``
         attributes from an off media_player).
@@ -307,6 +335,7 @@ class AxiumZone(MediaPlayerEntity):
         return {
             "source_ids": self._effective_source_ids(),
             "axium_presets": self._presets,
+            "axium_quickplay": self._quickplay,
             "zone_number": self._zone,
             "axium_volume": state.volume,
             "axium_muted": state.muted,

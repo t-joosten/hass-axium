@@ -34,6 +34,7 @@ CONF_UNITS: Final = "units"  # amplifiers in the stack: [{unit_id, primary}]
 CONF_ADVANCED: Final = "advanced"  # expose risky level/gain controls
 CONF_PRESETS: Final = "presets"  # named zone sets a source card can activate
 CONF_ALARMS: Final = "alarms"  # scheduled wake-to-music alarms
+CONF_QUICKPLAY: Final = "quickplay"  # saved Music Assistant favourites (Quick Play card)
 
 # Runtime shared state (hass.data keys) and dispatcher signals (append entry id)
 DATA_ALARMS_ENABLED: Final = f"{DOMAIN}_alarms_enabled"  # {entry_id: bool}
@@ -41,6 +42,7 @@ DATA_SLEEP_DEADLINES: Final = f"{DOMAIN}_sleep_deadlines"  # {entry_id: {zone: d
 DATA_PREV_OPTIONS: Final = f"{DOMAIN}_prev_options"  # {entry_id: options snapshot}
 SIGNAL_SLEEP_UPDATE: Final = f"{DOMAIN}_sleep_update"  # + "_{entry_id}"
 SIGNAL_ALARM_UPDATE: Final = f"{DOMAIN}_alarm_update"  # + "_{entry_id}"
+SIGNAL_QUICKPLAY_UPDATE: Final = f"{DOMAIN}_quickplay_update"  # + "_{entry_id}"
 
 # Keys within a stored zone / source definition.
 ZONE_KEY: Final = "zone"

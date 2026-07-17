@@ -672,18 +672,26 @@ that's `zones:`.
 ### Quick Play card
 
 The **Axium Quick Play Card** (`type: custom:axium-quickplay-card`) is a grid of
-**favourite buttons**, each set to a Music Assistant song, album or playlist.
-Pick which **amp stream** to play on (e.g. *Axium 1* / *Axium 2*) at the top, then
-**tap a button to play** that favourite on it. Only buttons you've set are shown.
+**favourite tiles**, each set to a Music Assistant song, album or playlist. Pick
+which **amp stream** to play on with the pills at the top (e.g. *Axium 1* /
+*Axium 2*), then **tap a tile to play** that favourite on it. A **Now playing**
+strip shows the stream's current track, and the matching tile is highlighted.
+Only tiles you've set are shown, each with cover art, title and the source
+(Spotify · Playlist, …).
 
-To manage the buttons, tap the **✎ Edit** toggle: an **Add** tile appears — tap it
+To manage the tiles, tap the **✎ Edit** toggle: an **Add** tile appears — tap it
 to open a Music Assistant search (the same one used elsewhere in these cards) and
-pick a result to add a button. There's **no fixed limit** — add as many as you like.
-In edit mode each button gets a small **✕** to remove it, and tapping a button
-re-assigns it. The assignments are stored in your browser, per amplifier (so
-they're per-device, not synced across phones/tablets — ask if you'd like them
-shared). Requires the amp's Music Assistant player to be named after the amp
-device (e.g. rename it to "Axium 1" in Music Assistant).
+pick a result to add a favourite. There's **no fixed limit** — add as many as you
+like. In edit mode each tile gets a small **✕** to remove it, and tapping a tile
+re-assigns it.
+
+The favourites are **synced across every device** — they're stored in the
+integration (via the `axium.set_quickplay` service), not in one browser, so the
+same tiles appear on your phone, tablet and wall panel. (Any favourites you'd set
+up on an older, browser-only version are lifted into the synced store
+automatically the first time the new card loads.) Which stream is selected is a
+per-device convenience and stays local. Requires the amp's Music Assistant player
+to be named after the amp device (e.g. rename it to "Axium 1" in Music Assistant).
 
 ## Sleep timer & alarms
 

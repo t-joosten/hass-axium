@@ -17,6 +17,7 @@ from .const import (
     CONF_ADVANCED,
     CONF_ALARMS,
     CONF_PRESETS,
+    CONF_QUICKPLAY,
     CONF_SOURCES,
     CONF_UNITS,
     CONF_ZONES,
@@ -312,6 +313,38 @@ def get_presets(entry: ConfigEntry) -> list[dict[str, Any]]:
             continue
         presets.append({"name": name, "zones": [str(z) for z in zones]})
     return presets
+
+
+def get_quickplay(entry: ConfigEntry) -> list[dict[str, Any]]:
+    """Return the saved Quick Play favourites (synced across devices).
+
+    Each item is ``{title, media_content_id, media_content_type, media_class,
+    thumbnail}`` — a Music Assistant song/album/playlist the Quick Play card can
+    start on an amp stream. Order is preserved (it's the button order); malformed
+    entries and any without a ``media_content_id`` are dropped. Rebuilt from a
+    fixed key list so unknown keys can't leak into options (same must-preserve
+    discipline as ``get_alarms``).
+    """
+    raw = entry.options.get(CONF_QUICKPLAY, [])
+    if not isinstance(raw, list):
+        return []
+    items: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        cid = str(item.get("media_content_id", "") or "").strip()
+        if not cid:
+            continue
+        items.append(
+            {
+                "title": str(item.get("title", "") or "Music"),
+                "media_content_id": cid,
+                "media_content_type": str(item.get("media_content_type", "") or "playlist"),
+                "media_class": str(item.get("media_class", "") or ""),
+                "thumbnail": str(item.get("thumbnail", "") or ""),
+            }
+        )
+    return items
 
 
 def get_alarms(entry: ConfigEntry) -> list[dict[str, Any]]:

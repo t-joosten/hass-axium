@@ -130,6 +130,29 @@ remove_alarm:
       selector:
         text:
 
+set_quickplay:
+  name: Set Quick Play favourites
+  description: >-
+    Replace the whole ordered list of Quick Play favourites (the buttons on the
+    Quick Play card), stored in the config entry so they sync across every
+    device. Normally the card calls this for you.
+  fields:
+    hub:
+      name: Amplifier
+      description: Config entry id of the amplifier (only needed with more than one).
+      required: false
+      selector:
+        text:
+    items:
+      name: Favourites
+      description: >-
+        Ordered list of Music Assistant items, each an object with
+        media_content_id (required) plus optional title, media_content_type,
+        media_class and thumbnail. Any without a media_content_id are dropped.
+      required: true
+      selector:
+        object:
+
 play_notification:
   name: Play notification
   description: >-

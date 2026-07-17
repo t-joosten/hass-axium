@@ -549,19 +549,31 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   (returning the 100 default). Same greying on the **matrix zone popover** slider (`_openZonePanel`/
   `_refreshPanel`).
 - **Quick-play card** (`axium-quickplay-card`, seventh card, `AxiumQuickPlayCard`): pick an amp stream
-  (source select of the `axiumAmps` that resolve to an MA player by name via `_maByName`), then a grid
-  of buttons each set to a saved Music Assistant song/album/playlist. **Unlimited buttons, and only
-  set ones are shown** (`_slots()` filters to entries with a `media_content_id`; no fixed 10 / null
-  padding). **Edit** mode (pencil toggle) appends an **Add** tile (`data-i="-1"` → `_openPicker(slots.length)`,
-  appends) and shows a **✕** on each button to remove it (`_clear` = `splice(i,1)`); tapping a filled
-  button in edit mode re-assigns it. Non-edit: tapping a button `media_player.play_media` (`enqueue:"play"`,
-  with the same play-while-playing double-fire the stream panel uses). The picker is the shared
-  **`<axium-ma-search mode="pick">`** — its `pick` event stores `{title, media_content_id,
-  media_content_type, thumbnail}`. Assignments persist in **localStorage** keyed `axium-quickplay:<hubId>`
-  (per-browser — NOT shared across devices; could move to options if the user wants sync), the selected
-  stream in `axium-quickplay-src:<hubId>`. Reuses `axium-hub-card-editor` (hub + name). The picker
-  overlay is the same responsive sheet pattern as the matrix (mobile almost-full, desktop ~480px). An
-  open picker survives hass updates (`_render` refreshes the search's `.hass` instead of rebuilding).
+  (segmented **stream pills** of the `axiumAmps` that resolve to an MA player by name via `_maByName`),
+  a **Now playing** strip for the selected stream, then a grid of favourite **tiles** (cover art +
+  title + `provider · type` sub-label from `axiumProviderLabel`/`axiumMediaTypeLabel`/`axiumMediaTypeIcon`
+  — the three MA display helpers promoted to module-level free fns so the search element and this card
+  share them). The tile whose title matches the stream's live `media_title` gets a **playing** ring +
+  badge. **Unlimited tiles, only set ones shown.** **Edit** mode (pencil) appends an **Add** tile
+  (`data-i="-1"` → `_openPicker(items.length)`) and a per-tile **✕** remove (`_clear` = `splice`);
+  tapping a tile in edit mode re-assigns it. Non-edit: tap plays via `media_player.play_media`
+  (`enqueue:"play"`, same play-while-playing double-fire as the stream panel). Picker = the shared
+  **`<axium-ma-search mode="pick">`**; the `pick` event stores `{title, media_content_id,
+  media_content_type, media_class, thumbnail}`.
+  **Favourites are SYNCED across devices** (the user asked for this): stored in **entry options**
+  (`CONF_QUICKPLAY`, `helpers.get_quickplay`), written by the **`axium.set_quickplay`** service (replaces
+  the whole ordered list; the card sends the full list on every add/remove), and read by the card from
+  the **`axium_quickplay`** media_player attribute (exposed like `axium_presets`, in
+  `_unrecorded_attributes`; each zone re-reads on `SIGNAL_QUICKPLAY_UPDATE`). The **update listener does
+  NOT reload** on a quickplay-only change — it's in the no-reload live-keys set alongside `CONF_ALARMS`
+  and dispatches `SIGNAL_QUICKPLAY_UPDATE` instead (a reload on every button edit would be disruptive).
+  The card uses an **optimistic `_pending` list** reconciled against the server (`_sameSeq`) so edits feel
+  instant while options round-trip. **One-time localStorage→options migration** (`_migrateLegacy`, guarded
+  by `axium-quickplay-migrated:<hub>`) lifts any legacy per-browser `axium-quickplay:<hub>` list when the
+  server list is empty. Only the **selected stream** stays local (`axium-quickplay-src:<hub>`, a per-device
+  UI pref). Reuses `axium-hub-card-editor` (hub + name). The picker overlay is the responsive sheet pattern
+  (mobile almost-full, desktop ~520px); an open picker survives hass updates (`_render` refreshes the
+  search's `.hass`).
   **Sheet-scroll trap (fixed):** the sheet CSS must NOT set `display: block` on the embedded
   `<axium-ma-search>` — that overrides the component's `:host{display:flex;flex-direction:column}`, which
   collapses the flex chain so `.ssresults` (which has `overflow-y:auto`) never gets a bounded height and

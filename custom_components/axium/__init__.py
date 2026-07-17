@@ -26,6 +26,7 @@ from .const import (
     CMD_VOLUME,
     CONF_ALARMS,
     CONF_PRESETS,
+    CONF_QUICKPLAY,
     CONF_UNITS,
     CONF_ZONES,
     DATA_ALARMS_ENABLED,
@@ -35,6 +36,7 @@ from .const import (
     DOMAIN,
     POWER_OFF,
     SIGNAL_ALARM_UPDATE,
+    SIGNAL_QUICKPLAY_UPDATE,
     SOURCE_MEDIA_PLAYER_BYTE,
     UNIT_KEY,
     ZONE_KEY,
@@ -729,20 +731,27 @@ def _alarm_names(options: dict) -> list[str]:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload on option changes, except pure alarm field edits (refresh instead).
+    """Reload on option changes, except pure alarm/quick-play edits (refresh instead).
 
-    Editing an existing alarm's time/days/enabled (e.g. from the card) doesn't
-    change the set of entities, so we skip the disruptive full reload and just
-    nudge the alarm sensors to re-read.
+    Editing an existing alarm's time/days/enabled or the Quick Play favourites
+    (e.g. from a card) doesn't change the set of entities, so we skip the
+    disruptive full reload and just nudge the affected entities to re-read.
     """
     prev = hass.data.get(DATA_PREV_OPTIONS, {}).get(entry.entry_id, {})
     cur = dict(entry.options)
     hass.data.setdefault(DATA_PREV_OPTIONS, {})[entry.entry_id] = cur
 
+    # Alarm-field edits and Quick Play changes don't add/remove entities.
+    live_keys = (CONF_ALARMS, CONF_QUICKPLAY)
     same_alarm_set = _alarm_names(prev) == _alarm_names(cur)
-    other_prev = {k: v for k, v in prev.items() if k != CONF_ALARMS}
-    other_cur = {k: v for k, v in cur.items() if k != CONF_ALARMS}
+    other_prev = {k: v for k, v in prev.items() if k not in live_keys}
+    other_cur = {k: v for k, v in cur.items() if k not in live_keys}
     if same_alarm_set and other_prev == other_cur:
-        async_dispatcher_send(hass, f"{SIGNAL_ALARM_UPDATE}_{entry.entry_id}")
+        # Nudge only the entities whose data actually changed (an alarm-field
+        # edit and a Quick Play edit both land here, but each touches its own key).
+        if prev.get(CONF_ALARMS) != cur.get(CONF_ALARMS):
+            async_dispatcher_send(hass, f"{SIGNAL_ALARM_UPDATE}_{entry.entry_id}")
+        if prev.get(CONF_QUICKPLAY) != cur.get(CONF_QUICKPLAY):
+            async_dispatcher_send(hass, f"{SIGNAL_QUICKPLAY_UPDATE}_{entry.entry_id}")
         return
     await hass.config_entries.async_reload(entry.entry_id)

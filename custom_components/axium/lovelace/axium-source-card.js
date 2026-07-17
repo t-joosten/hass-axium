@@ -220,6 +220,42 @@ function axiumAmpNames(hass, hubId) {
     .filter(Boolean);
 }
 
+// Display helpers for Music Assistant items — shared by the search element and
+// the Quick Play card so a media_class/provider maps the same way everywhere.
+function axiumProviderLabel(id) {
+  const m = /^([a-z0-9_]+)(?:--[^:]*)?:\/\//i.exec(String(id || ""));
+  if (!m) return "";
+  const p = m[1].toLowerCase();
+  return (
+    {
+      spotify: "Spotify", radiobrowser: "Radio", tunein: "TuneIn",
+      library: "Library", filesystem_local: "Local", filesystem_smb: "Local",
+      qobuz: "Qobuz", tidal: "Tidal", ytmusic: "YT Music", deezer: "Deezer",
+      apple_music: "Apple Music", soundcloud: "SoundCloud", plex: "Plex",
+      jellyfin: "Jellyfin",
+    }[p] || p.charAt(0).toUpperCase() + p.slice(1)
+  );
+}
+
+function axiumMediaTypeIcon(c) {
+  return (
+    {
+      track: "mdi:music-note", album: "mdi:album", playlist: "mdi:playlist-music",
+      artist: "mdi:account-music", podcast: "mdi:podcast",
+      directory: "mdi:book-music", music: "mdi:radio",
+    }[c] || "mdi:music"
+  );
+}
+
+function axiumMediaTypeLabel(c) {
+  return (
+    {
+      track: "Track", album: "Album", playlist: "Playlist", artist: "Artist",
+      podcast: "Podcast", directory: "Audiobook", music: "Radio",
+    }[c] || ""
+  );
+}
+
 // Search a Music Assistant player; returns the flat result list (or []). Shared
 // by the matrix stream panel and the alarms card so the WS shape lives in one
 // place.
@@ -1696,35 +1732,13 @@ class AxiumMaSearch extends HTMLElement {
   }
 
   _providerLabel(id) {
-    const m = /^([a-z0-9_]+)(?:--[^:]*)?:\/\//i.exec(String(id || ""));
-    if (!m) return "";
-    const p = m[1].toLowerCase();
-    return (
-      {
-        spotify: "Spotify", radiobrowser: "Radio", tunein: "TuneIn",
-        library: "Library", filesystem_local: "Local", filesystem_smb: "Local",
-        qobuz: "Qobuz", tidal: "Tidal", ytmusic: "YT Music", deezer: "Deezer",
-        apple_music: "Apple Music", soundcloud: "SoundCloud", plex: "Plex",
-        jellyfin: "Jellyfin",
-      }[p] || p.charAt(0).toUpperCase() + p.slice(1)
-    );
+    return axiumProviderLabel(id);
   }
   _typeIcon(c) {
-    return (
-      {
-        track: "mdi:music-note", album: "mdi:album", playlist: "mdi:playlist-music",
-        artist: "mdi:account-music", podcast: "mdi:podcast",
-        directory: "mdi:book-music", music: "mdi:radio",
-      }[c] || "mdi:music"
-    );
+    return axiumMediaTypeIcon(c);
   }
   _typeLabel(c) {
-    return (
-      {
-        track: "Track", album: "Album", playlist: "Playlist", artist: "Artist",
-        podcast: "Podcast", directory: "Audiobook", music: "Radio",
-      }[c] || ""
-    );
+    return axiumMediaTypeLabel(c);
   }
 }
 
@@ -4734,10 +4748,13 @@ class AxiumVolumesCardEditor extends HTMLElement {
   }
 }
 
-/** Quick-play card: pick an amp stream (Music Assistant), then a grid of 10
- *  buttons each set to a saved MA song/album/playlist. Tapping a button plays it
- *  on the selected stream. Assignments persist in localStorage per hub. Reuses
- *  the shared <axium-ma-search> in "pick" mode to choose the media. */
+/** Quick Play card: pick an amp stream (Music Assistant), then a grid of
+ *  favourite tiles each set to a saved MA song/album/playlist. Tapping a tile
+ *  plays it on the selected stream. Favourites are stored in the config-entry
+ *  options (service `axium.set_quickplay`, read from the `axium_quickplay`
+ *  media_player attribute) so they SYNC across every device; a one-time
+ *  migration lifts any legacy per-browser localStorage list into that store.
+ *  Reuses the shared <axium-ma-search> in "pick" mode to choose media. */
 class AxiumQuickPlayCard extends HTMLElement {
   constructor() {
     super();
@@ -4745,6 +4762,8 @@ class AxiumQuickPlayCard extends HTMLElement {
     this._sig = "";
     this._edit = false;
     this._sel = null;
+    // Optimistic list shown until the synced options round-trip back to us.
+    this._pending = null;
   }
 
   setConfig(config) {
@@ -4801,31 +4820,100 @@ class AxiumQuickPlayCard extends HTMLElement {
       .filter((a) => a.player);
   }
 
-  _slotsKey() {
-    return `axium-quickplay:${this._hubId()}`;
+  /** The synced favourites, read from any Axium zone's `axium_quickplay` attr. */
+  _serverItems() {
+    const hub = this._hubId();
+    const reg = this._hass.entities || {};
+    for (const id of Object.keys(this._hass.states)) {
+      if (!id.startsWith("media_player.")) continue;
+      const e = reg[id];
+      if (!e || e.platform !== "axium") continue;
+      if (entityHub(this._hass, id) !== hub) continue;
+      const qp = this._hass.states[id].attributes.axium_quickplay;
+      if (Array.isArray(qp)) return qp.filter((s) => s && s.media_content_id);
+    }
+    return [];
   }
 
-  _slots() {
-    let arr = [];
-    try {
-      arr = JSON.parse(localStorage.getItem(this._slotsKey()) || "[]");
-    } catch (e) {
-      arr = [];
+  /** Effective list = optimistic pending (if the server hasn't caught up) else server. */
+  _items(server) {
+    server = server || this._serverItems();
+    if (this._pending) {
+      if (this._sameSeq(this._pending, server)) this._pending = null;
+      else return this._pending;
     }
-    if (!Array.isArray(arr)) arr = [];
-    // Unlimited buttons; only assigned ones are kept (drops legacy null padding).
-    return arr.filter((s) => s && s.media_content_id);
+    return server;
   }
 
-  _saveSlots(arr) {
-    try {
-      localStorage.setItem(
-        this._slotsKey(),
-        JSON.stringify((arr || []).filter((s) => s && s.media_content_id))
-      );
-    } catch (e) {
-      /* private mode / quota — buttons just won't persist */
+  _currentItems() {
+    return this._items(this._serverItems());
+  }
+
+  _sameSeq(a, b) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if ((a[i].media_content_id || "") !== ((b[i] || {}).media_content_id || "")) {
+        return false;
+      }
     }
+    return true;
+  }
+
+  /** Persist the whole ordered list to the synced options (no re-render). */
+  _pushItems(items) {
+    const clean = (items || []).filter((s) => s && s.media_content_id);
+    this._pending = clean;
+    if (this._hass) {
+      this._hass.callService("axium", "set_quickplay", {
+        hub: this._hubId(),
+        items: clean,
+      });
+    }
+  }
+
+  /** User edit: persist, then re-render optimistically. */
+  _writeItems(items) {
+    this._pushItems(items);
+    this._sig = "";
+    this._render();
+  }
+
+  /** One-time lift of a legacy per-browser list into the synced store. */
+  _migrateLegacy(server) {
+    const hub = this._hubId();
+    if (!hub) return;
+    const flag = `axium-quickplay-migrated:${hub}`;
+    let done = false;
+    try {
+      done = localStorage.getItem(flag) === "1";
+    } catch (e) {
+      /* ignore */
+    }
+    if (done || (server && server.length)) return;
+    let legacy = [];
+    try {
+      legacy = JSON.parse(localStorage.getItem(`axium-quickplay:${hub}`) || "[]");
+    } catch (e) {
+      legacy = [];
+    }
+    legacy = (Array.isArray(legacy) ? legacy : []).filter(
+      (s) => s && s.media_content_id
+    );
+    try {
+      localStorage.setItem(flag, "1");
+    } catch (e) {
+      /* ignore */
+    }
+    if (!legacy.length) return;
+    this._pushItems(
+      legacy.map((s) => ({
+        title: s.title || "Music",
+        media_content_id: s.media_content_id,
+        media_content_type: s.media_content_type || "playlist",
+        media_class: s.media_class || "",
+        thumbnail: s.thumbnail || "",
+      }))
+    );
   }
 
   _selPlayer(amps) {
@@ -4840,10 +4928,36 @@ class AxiumQuickPlayCard extends HTMLElement {
     return amps.length ? amps[0].player : null;
   }
 
+  _selectStream(player) {
+    if (!player) return;
+    this._sel = player;
+    try {
+      localStorage.setItem(`axium-quickplay-src:${this._hubId()}`, player);
+    } catch (e) {
+      /* ignore */
+    }
+    this._sig = "";
+    this._render();
+  }
+
+  /** Current media on the selected stream (for the now-playing strip + highlight). */
+  _nowPlaying() {
+    const st = this._sel && this._hass.states[this._sel];
+    if (!st) return null;
+    const active = ["playing", "paused", "buffering"].includes(st.state);
+    const title = st.attributes.media_title || "";
+    if (!active || !title) return null;
+    return {
+      title,
+      art: st.attributes.entity_picture || "",
+      artist: st.attributes.media_artist || "",
+      playing: st.state === "playing",
+    };
+  }
+
   _render() {
     const amps = this._amps();
     this._sel = this._selPlayer(amps);
-    const slots = this._slots();
     // Keep an open picker alive across hass updates — just refresh its search.
     const overlay = this.shadowRoot.getElementById("qpoverlay");
     if (overlay && !overlay.hidden) {
@@ -4851,71 +4965,100 @@ class AxiumQuickPlayCard extends HTMLElement {
       if (search) search.hass = this._hass;
       return;
     }
+    const server = this._serverItems();
+    this._migrateLegacy(server);
+    const items = this._items(server);
+    const np = this._nowPlaying();
     const sig = JSON.stringify({
       a: amps.map((x) => x.name + "|" + x.player),
       s: this._sel,
       e: this._edit,
-      slots,
+      items,
+      np,
       n: this._config.name || "",
     });
     if (sig !== this._sig) {
       this._sig = sig;
-      this._build(amps, slots);
+      this._build(amps, items, np);
     }
   }
 
-  _build(amps, slots) {
-    const title = this._config.name || "Quick play";
+  _build(amps, items, np) {
+    const title = this._config.name || "Quick Play";
     if (!amps.length) {
       this.shadowRoot.innerHTML = `<style>${AxiumQuickPlayCard.styles}</style>
-        <ha-card><div class="title">${escHtml(title)}</div>
-        <div class="empty">No Music Assistant stream player found. In Music Assistant, rename each amp's player to the amp's device name (e.g. "Axium 1").</div></ha-card>`;
+        <ha-card>
+          <div class="head"><div class="title">${escHtml(title)}</div></div>
+          <div class="nostream">No Music Assistant stream player found. In Music
+            Assistant, rename each amp's player to its device name (e.g.
+            &quot;Axium 1&quot;).</div>
+        </ha-card>`;
       return;
     }
-    const srcSel =
+
+    const streams =
       amps.length > 1
-        ? `<select class="src" title="Stream to play on">${amps
+        ? `<div class="streams" role="tablist" aria-label="Stream">${amps
             .map(
               (a) =>
-                `<option value="${escHtml(a.player)}"${a.player === this._sel ? " selected" : ""}>${escHtml(a.name)}</option>`
+                `<button class="stream${a.player === this._sel ? " on" : ""}" role="tab"
+                  aria-selected="${a.player === this._sel}" data-p="${escHtml(a.player)}">
+                  <ha-icon icon="mdi:speaker"></ha-icon><span>${escHtml(a.name)}</span></button>`
             )
-            .join("")}</select>`
-        : `<div class="srcone">${escHtml(amps[0].name)}</div>`;
-    const btns = slots.map((s, i) => this._btnHtml(s, i)).join("");
-    const addTile = this._edit
-      ? `<div class="qp add" role="button" tabindex="0" data-i="-1">
-          <ha-icon icon="mdi:plus"></ha-icon>
-          <div class="lbl">Add</div>
+            .join("")}</div>`
+        : `<div class="streamsone"><ha-icon icon="mdi:speaker"></ha-icon><span>${escHtml(
+            amps[0].name
+          )}</span></div>`;
+
+    const npHtml = np
+      ? `<div class="np">
+          <div class="np-art"${
+            np.art ? ` style="background-image:url('${escHtml(np.art)}')"` : ""
+          }>${np.art ? "" : `<ha-icon icon="mdi:music"></ha-icon>`}</div>
+          <div class="np-body">
+            <div class="np-label">Now playing</div>
+            <div class="np-title">${escHtml(np.title)}${
+              np.artist ? ` <span class="np-artist">· ${escHtml(np.artist)}</span>` : ""
+            }</div>
+          </div>
+          <ha-icon class="np-eq" icon="${
+            np.playing ? "mdi:volume-high" : "mdi:pause"
+          }"></ha-icon>
         </div>`
       : "";
+
+    const nowTitle = np && np.playing ? np.title : "";
+    const tiles = items.map((it, i) => this._tileHtml(it, i, nowTitle)).join("");
+    const addTile = this._edit
+      ? `<div class="qp add" role="button" tabindex="0" data-i="-1" aria-label="Add favourite">
+          <ha-icon icon="mdi:plus"></ha-icon><div class="lbl">Add</div></div>`
+      : "";
     const body =
-      slots.length || this._edit
-        ? `<div class="grid">${btns}${addTile}</div>`
-        : `<div class="empty">No quick-play buttons yet. Tap the pencil, then Add, to set one.</div>`;
+      items.length || this._edit
+        ? `<div class="grid">${tiles}${addTile}</div>`
+        : `<div class="empty">
+            <ha-icon icon="mdi:music-box-multiple-outline"></ha-icon>
+            <div>No favourites yet.</div>
+            <button class="addfirst">Add music</button>
+          </div>`;
+
     this.shadowRoot.innerHTML = `<style>${AxiumQuickPlayCard.styles}</style>
       <ha-card>
         <div class="head">
           <div class="title">${escHtml(title)}</div>
-          <div class="headright">
-            ${srcSel}
-            <button class="editbtn iconbtn${this._edit ? " on" : ""}" title="Edit buttons">
-              <ha-icon icon="mdi:pencil"></ha-icon></button>
-          </div>
+          <button class="editbtn iconbtn${this._edit ? " on" : ""}" title="Edit favourites"
+            aria-label="Edit favourites" aria-pressed="${this._edit}">
+            <ha-icon icon="mdi:pencil"></ha-icon></button>
         </div>
+        ${streams}
+        ${npHtml}
         ${body}
         <div class="overlay" id="qpoverlay" hidden><div class="sheet" id="qpsheet"></div></div>
       </ha-card>`;
 
-    const sel = this.shadowRoot.querySelector(".src");
-    if (sel)
-      sel.addEventListener("change", () => {
-        this._sel = sel.value;
-        try {
-          localStorage.setItem(`axium-quickplay-src:${this._hubId()}`, this._sel);
-        } catch (e) {
-          /* ignore */
-        }
-      });
+    for (const p of this.shadowRoot.querySelectorAll(".stream")) {
+      p.addEventListener("click", () => this._selectStream(p.dataset.p));
+    }
     this.shadowRoot.querySelector(".editbtn").addEventListener("click", () => {
       this._edit = !this._edit;
       this._sig = "";
@@ -4926,6 +5069,12 @@ class AxiumQuickPlayCard extends HTMLElement {
         if (ev.target.closest(".clr")) return;
         this._onButton(Number(btn.dataset.i));
       });
+      btn.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Enter" && ev.key !== " ") return;
+        if (ev.target.closest(".clr")) return;
+        ev.preventDefault();
+        this._onButton(Number(btn.dataset.i));
+      });
     }
     for (const x of this.shadowRoot.querySelectorAll(".clr")) {
       x.addEventListener("click", (ev) => {
@@ -4933,42 +5082,71 @@ class AxiumQuickPlayCard extends HTMLElement {
         this._clear(Number(x.dataset.i));
       });
     }
+    const addFirst = this.shadowRoot.querySelector(".addfirst");
+    if (addFirst)
+      addFirst.addEventListener("click", () => {
+        this._edit = true;
+        this._openPicker(this._currentItems().length);
+      });
     const overlay = this.shadowRoot.getElementById("qpoverlay");
     overlay.addEventListener("click", (ev) => {
       if (ev.target === overlay) this._closePicker();
     });
   }
 
-  _btnHtml(slot, i) {
+  _tileHtml(item, i, nowTitle) {
+    // Highlight by title, not media_content_id: for a saved album/playlist the
+    // player reports the currently-playing TRACK's id, which never equals the
+    // stored container id — so a title match is the practical "now playing" cue.
+    const playing = nowTitle && item.title && nowTitle === item.title;
     const clr = this._edit
-      ? `<button class="clr" data-i="${i}" title="Remove"><ha-icon icon="mdi:close"></ha-icon></button>`
+      ? `<button class="clr" data-i="${i}" title="Remove" aria-label="Remove">
+          <ha-icon icon="mdi:close"></ha-icon></button>`
       : "";
-    const art = slot.thumbnail
-      ? `style="background-image:url('${escHtml(slot.thumbnail)}')"`
+    const badge = playing
+      ? `<div class="badge"><ha-icon icon="mdi:play"></ha-icon></div>`
       : "";
-    return `<div class="qp filled" role="button" tabindex="0" data-i="${i}" title="${escHtml(slot.title || "Music")}">
-      ${clr}
-      <div class="art" ${art}></div>
-      <div class="lbl">${escHtml(slot.title || "Music")}</div>
+    const art = item.thumbnail
+      ? ` style="background-image:url('${escHtml(item.thumbnail)}')"`
+      : "";
+    const artInner = item.thumbnail
+      ? ""
+      : `<ha-icon icon="${axiumMediaTypeIcon(item.media_class)}"></ha-icon>`;
+    const sub = [
+      axiumProviderLabel(item.media_content_id),
+      axiumMediaTypeLabel(item.media_class),
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    return `<div class="qp filled${playing ? " playing" : ""}" role="button" tabindex="0"
+        data-i="${i}" title="${escHtml(item.title || "Music")}" aria-label="${escHtml(
+          item.title || "Music"
+        )}">
+      ${clr}${badge}
+      <div class="art"${art}>${artInner}</div>
+      <div class="meta">
+        <div class="lbl">${escHtml(item.title || "Music")}</div>
+        ${sub ? `<div class="sub">${escHtml(sub)}</div>` : ""}
+      </div>
     </div>`;
   }
 
   _onButton(i) {
-    const slots = this._slots();
+    const items = this._currentItems();
     if (i < 0) {
-      this._openPicker(slots.length); // Add tile → append a new button
+      this._openPicker(items.length); // Add tile → append a new favourite
       return;
     }
-    if (this._edit) this._openPicker(i); // reassign an existing button
-    else if (slots[i]) this._play(this._sel, slots[i]);
+    if (this._edit) this._openPicker(i); // reassign an existing tile
+    else if (items[i]) this._play(this._sel, items[i]);
   }
 
-  _play(player, slot) {
-    if (!player || !slot || !slot.media_content_id) return;
+  _play(player, item) {
+    if (!player || !item || !item.media_content_id) return;
     const args = {
       entity_id: player,
-      media_content_id: slot.media_content_id,
-      media_content_type: slot.media_content_type || "playlist",
+      media_content_id: item.media_content_id,
+      media_content_type: item.media_content_type || "playlist",
       enqueue: "play",
     };
     const st = this._hass.states[player];
@@ -4984,11 +5162,9 @@ class AxiumQuickPlayCard extends HTMLElement {
   }
 
   _clear(i) {
-    const slots = this._slots();
-    slots.splice(i, 1);
-    this._saveSlots(slots);
-    this._sig = "";
-    this._render();
+    const items = this._currentItems().slice();
+    items.splice(i, 1);
+    this._writeItems(items);
   }
 
   _openPicker(i) {
@@ -4998,7 +5174,7 @@ class AxiumQuickPlayCard extends HTMLElement {
     sheet.innerHTML = `
       <div class="sheet-head">
         <span class="sheet-title">Choose music</span>
-        <button class="close iconbtn"><ha-icon icon="mdi:close"></ha-icon></button>
+        <button class="close iconbtn" aria-label="Close"><ha-icon icon="mdi:close"></ha-icon></button>
       </div>
       <axium-ma-search></axium-ma-search>`;
     const search = sheet.querySelector("axium-ma-search");
@@ -5013,17 +5189,20 @@ class AxiumQuickPlayCard extends HTMLElement {
 
   _onPick(i, it) {
     if (!it || !it.media_content_id) return;
-    const slots = this._slots();
-    slots[i] = {
+    // Last-write-wins: `i` is resolved against the latest list at pick time. If
+    // another device shrank the list while this picker was open, clamp so an
+    // append index can't leave holes; an in-range i overwrites in place.
+    const items = this._currentItems().slice();
+    const idx = Math.min(Math.max(i, 0), items.length);
+    items[idx] = {
       title: it.title || "Music",
       media_content_id: it.media_content_id,
       media_content_type: it.media_content_type || "playlist",
+      media_class: it.media_class || "",
       thumbnail: it.thumbnail || "",
     };
-    this._saveSlots(slots);
     this._closePicker();
-    this._sig = "";
-    this._render();
+    this._writeItems(items);
   }
 
   _closePicker() {
@@ -5035,47 +5214,105 @@ class AxiumQuickPlayCard extends HTMLElement {
 }
 
 AxiumQuickPlayCard.styles = `
-  ha-card { padding: 12px 16px; }
-  .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
-  .title { font-size: 1.1rem; font-weight: 600; color: var(--primary-text-color); }
-  .headright { display: inline-flex; align-items: center; gap: 8px; }
-  .empty { color: var(--secondary-text-color); padding: 4px 0; }
-  .src {
-    background: var(--secondary-background-color); color: var(--primary-text-color);
-    border: 1px solid var(--divider-color); border-radius: 8px; padding: 5px 8px; font-size: 0.9rem;
+  :host { display: block; }
+  ha-card { padding: 16px; }
+  .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .title { font-size: 1.25rem; font-weight: 500; color: var(--primary-text-color); letter-spacing: 0.2px; }
+  .iconbtn {
+    background: none; border: none; cursor: pointer; color: var(--secondary-text-color);
+    padding: 6px; --mdc-icon-size: 22px; border-radius: 50%; display: inline-flex; align-items: center;
   }
-  .srcone { color: var(--secondary-text-color); font-size: 0.9rem; }
-  .iconbtn { background: none; border: none; cursor: pointer; color: var(--secondary-text-color); padding: 4px; --mdc-icon-size: 20px; border-radius: 8px; }
+  .iconbtn:hover { background: var(--secondary-background-color); color: var(--primary-text-color); }
   .editbtn.on { color: var(--primary-color); background: var(--secondary-background-color); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
-  .qp {
-    position: relative; display: flex; flex-direction: column; gap: 6px;
-    background: var(--secondary-background-color); border: 1px solid var(--divider-color);
-    border-radius: 12px; padding: 8px; cursor: pointer; color: var(--primary-text-color);
+
+  .streams { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+  .stream {
+    display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px;
+    border: 1px solid var(--divider-color); background: var(--card-background-color);
+    color: var(--secondary-text-color); font-size: 0.9rem; cursor: pointer;
+    --mdc-icon-size: 18px; transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
   }
-  .qp:hover { border-color: var(--primary-color); }
+  .stream:hover { border-color: var(--primary-color); color: var(--primary-text-color); }
+  .stream.on { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .streamsone {
+    display: inline-flex; align-items: center; gap: 6px; margin-top: 12px;
+    color: var(--secondary-text-color); font-size: 0.95rem; --mdc-icon-size: 18px;
+  }
+
+  .np {
+    display: flex; align-items: center; gap: 12px; margin-top: 14px; padding: 10px 12px;
+    border-radius: 12px; background: var(--secondary-background-color);
+  }
+  .np-art {
+    width: 44px; height: 44px; border-radius: 8px; flex: 0 0 auto; --mdc-icon-size: 22px;
+    background: var(--divider-color) center/cover no-repeat; display: flex;
+    align-items: center; justify-content: center; color: var(--secondary-text-color);
+  }
+  .np-body { flex: 1 1 auto; min-width: 0; }
+  .np-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.6px; color: var(--secondary-text-color); }
+  .np-title { font-size: 0.95rem; color: var(--primary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .np-artist { color: var(--secondary-text-color); }
+  .np-eq { color: var(--primary-color); flex: 0 0 auto; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 12px; margin-top: 16px; }
+  .qp {
+    position: relative; display: flex; flex-direction: column; gap: 8px; text-align: left;
+    background: var(--card-background-color); border: 1px solid var(--divider-color);
+    border-radius: 14px; padding: 8px; cursor: pointer; color: var(--primary-text-color);
+    transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+  }
+  .qp:hover { border-color: var(--primary-color); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.14); transform: translateY(-1px); }
+  .qp:active { transform: translateY(0); }
   .qp:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
-  .qp .art { width: 100%; aspect-ratio: 1 / 1; border-radius: 8px; background: var(--divider-color) center/cover no-repeat; }
-  .qp .lbl { font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .qp.add { align-items: center; justify-content: center; min-height: 120px; color: var(--secondary-text-color); border-style: dashed; --mdc-icon-size: 26px; }
+  .qp.playing { border-color: var(--primary-color); box-shadow: inset 0 0 0 1px var(--primary-color); }
+  .qp .art {
+    position: relative; width: 100%; aspect-ratio: 1 / 1; border-radius: 10px; overflow: hidden;
+    background: var(--divider-color) center/cover no-repeat; display: flex; align-items: center;
+    justify-content: center; color: var(--secondary-text-color); --mdc-icon-size: 32px;
+  }
+  .qp .meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .qp .lbl { font-size: 0.85rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .qp .sub { font-size: 0.72rem; color: var(--secondary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .qp .badge {
+    position: absolute; top: 6px; left: 6px; z-index: 2; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--primary-color); color: var(--text-primary-color, #fff); display: inline-flex;
+    align-items: center; justify-content: center; --mdc-icon-size: 14px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  }
   .qp .clr {
-    position: absolute; top: 4px; right: 4px; z-index: 2; background: rgba(0,0,0,0.55); color: #fff;
+    position: absolute; top: 6px; right: 6px; z-index: 3; background: rgba(0, 0, 0, 0.6); color: #fff;
     border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; display: inline-flex;
     align-items: center; justify-content: center; --mdc-icon-size: 16px;
   }
+  .qp.add {
+    align-items: center; justify-content: center; min-height: 150px; gap: 6px;
+    color: var(--secondary-text-color); border-style: dashed; --mdc-icon-size: 28px;
+  }
+  .qp.add .lbl { font-weight: 500; }
+  .qp.add:hover { color: var(--primary-color); }
+
+  .empty {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+    padding: 28px 12px; margin-top: 8px; color: var(--secondary-text-color); text-align: center; --mdc-icon-size: 40px;
+  }
+  .addfirst {
+    margin-top: 4px; padding: 8px 16px; border-radius: 999px; border: none; cursor: pointer;
+    background: var(--primary-color); color: var(--text-primary-color, #fff); font-size: 0.9rem;
+  }
+  .nostream { color: var(--secondary-text-color); padding: 8px 0; line-height: 1.4; }
+
   .overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0, 0, 0, 0.5); }
   .overlay[hidden] { display: none; }
   .sheet {
     position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
     width: 94%; max-width: 94%; height: 82vh; max-height: 88vh;
     background: var(--card-background-color, var(--ha-card-background, #fff));
-    border-radius: 16px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45);
-    box-sizing: border-box; padding: 12px 14px 14px;
+    border-radius: 18px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45);
+    box-sizing: border-box; padding: 14px 16px 16px;
     display: flex; flex-direction: column; overflow: hidden;
   }
-  @media (min-width: 768px) { .sheet { width: 480px; max-width: 92%; height: 70vh; } }
-  .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-  .sheet-title { font-weight: 600; color: var(--primary-text-color); }
+  @media (min-width: 768px) { .sheet { width: 520px; max-width: 92%; height: 70vh; } }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+  .sheet-title { font-weight: 500; font-size: 1.05rem; color: var(--primary-text-color); }
   .sheet axium-ma-search { flex: 1 1 auto; min-height: 0; }
 `;
 
