@@ -4734,6 +4734,341 @@ class AxiumVolumesCardEditor extends HTMLElement {
   }
 }
 
+/** Quick-play card: pick an amp stream (Music Assistant), then a grid of 10
+ *  buttons each set to a saved MA song/album/playlist. Tapping a button plays it
+ *  on the selected stream. Assignments persist in localStorage per hub. Reuses
+ *  the shared <axium-ma-search> in "pick" mode to choose the media. */
+class AxiumQuickPlayCard extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._sig = "";
+    this._edit = false;
+    this._sel = null;
+  }
+
+  setConfig(config) {
+    this._config = config || {};
+    this._sig = "";
+    this.shadowRoot.innerHTML = "";
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (hass && this._config) this._render();
+  }
+
+  getCardSize() {
+    return 5;
+  }
+
+  disconnectedCallback() {
+    if (this._playTimer) clearTimeout(this._playTimer);
+  }
+
+  static getConfigElement() {
+    return document.createElement("axium-hub-card-editor");
+  }
+
+  static getStubConfig(hass) {
+    const hubs = axiumHubs(hass);
+    return hubs.length ? { hub: hubs[0].id } : {};
+  }
+
+  _hubId() {
+    return this._config.hub || (axiumHubs(this._hass)[0] || {}).id;
+  }
+
+  /** The Music Assistant player whose friendly name equals `name`. */
+  _maByName(name) {
+    const want = (name || "").trim().toLowerCase();
+    if (!want) return null;
+    const reg = this._hass.entities || {};
+    for (const id of Object.keys(this._hass.states)) {
+      if (!id.startsWith("media_player.")) continue;
+      const e = reg[id];
+      if (!e || e.platform !== "music_assistant") continue;
+      const fn = (this._hass.states[id].attributes.friendly_name || "").trim().toLowerCase();
+      if (fn === want) return id;
+    }
+    return null;
+  }
+
+  /** Amp streams (Axium 1/2) that have a resolvable MA player. */
+  _amps() {
+    return axiumAmps(this._hass, this._hubId())
+      .map((a) => ({ id: a.id, name: a.name, player: this._maByName(a.name) }))
+      .filter((a) => a.player);
+  }
+
+  _slotsKey() {
+    return `axium-quickplay:${this._hubId()}`;
+  }
+
+  _slots() {
+    let arr = [];
+    try {
+      arr = JSON.parse(localStorage.getItem(this._slotsKey()) || "[]");
+    } catch (e) {
+      arr = [];
+    }
+    if (!Array.isArray(arr)) arr = [];
+    while (arr.length < 10) arr.push(null);
+    return arr.slice(0, 10);
+  }
+
+  _saveSlots(arr) {
+    try {
+      localStorage.setItem(this._slotsKey(), JSON.stringify(arr.slice(0, 10)));
+    } catch (e) {
+      /* private mode / quota — buttons just won't persist */
+    }
+  }
+
+  _selPlayer(amps) {
+    if (this._sel && amps.some((a) => a.player === this._sel)) return this._sel;
+    let remembered = null;
+    try {
+      remembered = localStorage.getItem(`axium-quickplay-src:${this._hubId()}`);
+    } catch (e) {
+      /* ignore */
+    }
+    if (remembered && amps.some((a) => a.player === remembered)) return remembered;
+    return amps.length ? amps[0].player : null;
+  }
+
+  _render() {
+    const amps = this._amps();
+    this._sel = this._selPlayer(amps);
+    const slots = this._slots();
+    // Keep an open picker alive across hass updates — just refresh its search.
+    const overlay = this.shadowRoot.getElementById("qpoverlay");
+    if (overlay && !overlay.hidden) {
+      const search = this.shadowRoot.querySelector("axium-ma-search");
+      if (search) search.hass = this._hass;
+      return;
+    }
+    const sig = JSON.stringify({
+      a: amps.map((x) => x.name + "|" + x.player),
+      s: this._sel,
+      e: this._edit,
+      slots,
+      n: this._config.name || "",
+    });
+    if (sig !== this._sig) {
+      this._sig = sig;
+      this._build(amps, slots);
+    }
+  }
+
+  _build(amps, slots) {
+    const title = this._config.name || "Quick play";
+    if (!amps.length) {
+      this.shadowRoot.innerHTML = `<style>${AxiumQuickPlayCard.styles}</style>
+        <ha-card><div class="title">${escHtml(title)}</div>
+        <div class="empty">No Music Assistant stream player found. In Music Assistant, rename each amp's player to the amp's device name (e.g. "Axium 1").</div></ha-card>`;
+      return;
+    }
+    const srcSel =
+      amps.length > 1
+        ? `<select class="src" title="Stream to play on">${amps
+            .map(
+              (a) =>
+                `<option value="${escHtml(a.player)}"${a.player === this._sel ? " selected" : ""}>${escHtml(a.name)}</option>`
+            )
+            .join("")}</select>`
+        : `<div class="srcone">${escHtml(amps[0].name)}</div>`;
+    const grid = slots.map((s, i) => this._btnHtml(s, i)).join("");
+    this.shadowRoot.innerHTML = `<style>${AxiumQuickPlayCard.styles}</style>
+      <ha-card>
+        <div class="head">
+          <div class="title">${escHtml(title)}</div>
+          <div class="headright">
+            ${srcSel}
+            <button class="editbtn iconbtn${this._edit ? " on" : ""}" title="Edit buttons">
+              <ha-icon icon="mdi:pencil"></ha-icon></button>
+          </div>
+        </div>
+        <div class="grid">${grid}</div>
+        <div class="overlay" id="qpoverlay" hidden><div class="sheet" id="qpsheet"></div></div>
+      </ha-card>`;
+
+    const sel = this.shadowRoot.querySelector(".src");
+    if (sel)
+      sel.addEventListener("change", () => {
+        this._sel = sel.value;
+        try {
+          localStorage.setItem(`axium-quickplay-src:${this._hubId()}`, this._sel);
+        } catch (e) {
+          /* ignore */
+        }
+      });
+    this.shadowRoot.querySelector(".editbtn").addEventListener("click", () => {
+      this._edit = !this._edit;
+      this._sig = "";
+      this._render();
+    });
+    for (const btn of this.shadowRoot.querySelectorAll(".qp")) {
+      btn.addEventListener("click", (ev) => {
+        if (ev.target.closest(".clr")) return;
+        this._onButton(Number(btn.dataset.i));
+      });
+    }
+    for (const x of this.shadowRoot.querySelectorAll(".clr")) {
+      x.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        this._clear(Number(x.dataset.i));
+      });
+    }
+    const overlay = this.shadowRoot.getElementById("qpoverlay");
+    overlay.addEventListener("click", (ev) => {
+      if (ev.target === overlay) this._closePicker();
+    });
+  }
+
+  _btnHtml(slot, i) {
+    const clr =
+      this._edit && slot
+        ? `<button class="clr" data-i="${i}" title="Clear"><ha-icon icon="mdi:close"></ha-icon></button>`
+        : "";
+    if (slot && slot.media_content_id) {
+      const art = slot.thumbnail
+        ? `style="background-image:url('${escHtml(slot.thumbnail)}')"`
+        : "";
+      return `<div class="qp filled" role="button" tabindex="0" data-i="${i}" title="${escHtml(slot.title || "Music")}">
+        ${clr}
+        <div class="art" ${art}></div>
+        <div class="lbl">${escHtml(slot.title || "Music")}</div>
+      </div>`;
+    }
+    return `<div class="qp empty" role="button" tabindex="0" data-i="${i}">
+      <ha-icon icon="mdi:plus"></ha-icon>
+      <div class="lbl">${this._edit ? "Set" : "Empty"}</div>
+    </div>`;
+  }
+
+  _onButton(i) {
+    const slot = this._slots()[i];
+    if (this._edit || !slot || !slot.media_content_id) this._openPicker(i);
+    else this._play(this._sel, slot);
+  }
+
+  _play(player, slot) {
+    if (!player || !slot || !slot.media_content_id) return;
+    const args = {
+      entity_id: player,
+      media_content_id: slot.media_content_id,
+      media_content_type: slot.media_content_type || "playlist",
+      enqueue: "play",
+    };
+    const st = this._hass.states[player];
+    this._hass.callService("media_player", "play_media", args);
+    // play_media while already PLAYING stops the amp renderer; a second play from
+    // the now-idle state actually plays it (verified — same as the stream panel).
+    if (st && st.state === "playing") {
+      if (this._playTimer) clearTimeout(this._playTimer);
+      this._playTimer = setTimeout(() => {
+        if (this._hass) this._hass.callService("media_player", "play_media", args);
+      }, 1500);
+    }
+  }
+
+  _clear(i) {
+    const slots = this._slots();
+    slots[i] = null;
+    this._saveSlots(slots);
+    this._sig = "";
+    this._render();
+  }
+
+  _openPicker(i) {
+    const overlay = this.shadowRoot.getElementById("qpoverlay");
+    const sheet = this.shadowRoot.getElementById("qpsheet");
+    if (!overlay || !sheet || !this._sel) return;
+    sheet.innerHTML = `
+      <div class="sheet-head">
+        <span class="sheet-title">Choose music for button ${i + 1}</span>
+        <button class="close iconbtn"><ha-icon icon="mdi:close"></ha-icon></button>
+      </div>
+      <axium-ma-search></axium-ma-search>`;
+    const search = sheet.querySelector("axium-ma-search");
+    search.mode = "pick";
+    search.startBrowse = true;
+    search.hass = this._hass;
+    search.player = this._sel;
+    search.addEventListener("pick", (ev) => this._onPick(i, ev.detail));
+    sheet.querySelector(".close").addEventListener("click", () => this._closePicker());
+    overlay.hidden = false;
+  }
+
+  _onPick(i, it) {
+    if (!it || !it.media_content_id) return;
+    const slots = this._slots();
+    slots[i] = {
+      title: it.title || "Music",
+      media_content_id: it.media_content_id,
+      media_content_type: it.media_content_type || "playlist",
+      thumbnail: it.thumbnail || "",
+    };
+    this._saveSlots(slots);
+    this._closePicker();
+    this._sig = "";
+    this._render();
+  }
+
+  _closePicker() {
+    const overlay = this.shadowRoot.getElementById("qpoverlay");
+    if (overlay) overlay.hidden = true;
+    const sheet = this.shadowRoot.getElementById("qpsheet");
+    if (sheet) sheet.innerHTML = "";
+  }
+}
+
+AxiumQuickPlayCard.styles = `
+  ha-card { padding: 12px 16px; }
+  .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+  .title { font-size: 1.1rem; font-weight: 600; color: var(--primary-text-color); }
+  .headright { display: inline-flex; align-items: center; gap: 8px; }
+  .empty { color: var(--secondary-text-color); padding: 4px 0; }
+  .src {
+    background: var(--secondary-background-color); color: var(--primary-text-color);
+    border: 1px solid var(--divider-color); border-radius: 8px; padding: 5px 8px; font-size: 0.9rem;
+  }
+  .srcone { color: var(--secondary-text-color); font-size: 0.9rem; }
+  .iconbtn { background: none; border: none; cursor: pointer; color: var(--secondary-text-color); padding: 4px; --mdc-icon-size: 20px; border-radius: 8px; }
+  .editbtn.on { color: var(--primary-color); background: var(--secondary-background-color); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
+  .qp {
+    position: relative; display: flex; flex-direction: column; gap: 6px;
+    background: var(--secondary-background-color); border: 1px solid var(--divider-color);
+    border-radius: 12px; padding: 8px; cursor: pointer; color: var(--primary-text-color);
+  }
+  .qp:hover { border-color: var(--primary-color); }
+  .qp:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+  .qp .art { width: 100%; aspect-ratio: 1 / 1; border-radius: 8px; background: var(--divider-color) center/cover no-repeat; }
+  .qp .lbl { font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .qp.empty { align-items: center; justify-content: center; min-height: 120px; color: var(--secondary-text-color); border-style: dashed; --mdc-icon-size: 26px; }
+  .qp .clr {
+    position: absolute; top: 4px; right: 4px; z-index: 2; background: rgba(0,0,0,0.55); color: #fff;
+    border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; display: inline-flex;
+    align-items: center; justify-content: center; --mdc-icon-size: 16px;
+  }
+  .overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0, 0, 0, 0.5); }
+  .overlay[hidden] { display: none; }
+  .sheet {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 94%; max-width: 94%; height: 82vh; max-height: 88vh;
+    background: var(--card-background-color, var(--ha-card-background, #fff));
+    border-radius: 16px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45);
+    box-sizing: border-box; padding: 12px 14px 14px;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  @media (min-width: 768px) { .sheet { width: 480px; max-width: 92%; height: 70vh; } }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .sheet-title { font-weight: 600; color: var(--primary-text-color); }
+  .sheet axium-ma-search { flex: 1 1 auto; min-height: 0; display: block; }
+`;
+
 if (!customElements.get("axium-source-card")) {
   customElements.define("axium-ma-search", AxiumMaSearch);
   customElements.define("axium-source-card", AxiumSourceCard);
@@ -4747,6 +5082,7 @@ if (!customElements.get("axium-source-card")) {
   customElements.define("axium-sleep-card-editor", AxiumSleepCardEditor);
   customElements.define("axium-volumes-card", AxiumVolumesCard);
   customElements.define("axium-volumes-card-editor", AxiumVolumesCardEditor);
+  customElements.define("axium-quickplay-card", AxiumQuickPlayCard);
 
   window.customCards = window.customCards || [];
   window.customCards.push(
@@ -4784,6 +5120,12 @@ if (!customElements.get("axium-source-card")) {
       type: "axium-volumes-card",
       name: "Axium Volumes Card",
       description: "A vertical volume slider per zone for quick balancing (hass-axium).",
+      documentationURL: "https://github.com/t-joosten/hass-axium",
+    },
+    {
+      type: "axium-quickplay-card",
+      name: "Axium Quick Play Card",
+      description: "Pick an amp stream, then 10 buttons for saved Music Assistant songs/playlists (hass-axium).",
       documentationURL: "https://github.com/t-joosten/hass-axium",
     }
   );

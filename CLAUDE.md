@@ -497,7 +497,7 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   unique id is `<entry>_alarm_<name>` for a name no longer in `get_alarms` — so orphaned alarm
   sensors clean themselves up on reload. (Scoped to `domain=="sensor"`; the alarms master switch
   is `<entry>_alarms_enabled`, a different prefix, so it's never touched.)
-- Cards `axium-alarms-card` / `axium-sleep-card` (bundle now has SIX cards) find those
+- Cards `axium-alarms-card` / `axium-sleep-card` (bundle now has SEVEN cards) find those
   sensors via `axiumKindSensors(hass, hub, kind)` and render a live countdown
   (`axiumCountdown`, `setInterval` in connectedCallback, cleared in disconnectedCallback);
   reuse `axium-hub-card-editor`. Don't compute time-left only in the card — it must also
@@ -548,6 +548,17 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   zone** (`_axiumMaxVolCache`) so a transient `unavailable`/`unknown` doesn't briefly UNCAP the slider
   (returning the 100 default). Same greying on the **matrix zone popover** slider (`_openZonePanel`/
   `_refreshPanel`).
+- **Quick-play card** (`axium-quickplay-card`, seventh card, `AxiumQuickPlayCard`): pick an amp stream
+  (source select of the `axiumAmps` that resolve to an MA player by name via `_maByName`), then a grid
+  of **10 buttons** each set to a saved Music Assistant song/album/playlist. Tapping a set button
+  `media_player.play_media` (`enqueue:"play"`, with the same play-while-playing double-fire the stream
+  panel uses); an empty button (or any button in **Edit** mode, pencil toggle) opens a popover with the
+  shared **`<axium-ma-search mode="pick">`** — its `pick` event stores `{title, media_content_id,
+  media_content_type, thumbnail}`. Assignments persist in **localStorage** keyed `axium-quickplay:<hubId>`
+  (per-browser — NOT shared across devices; could move to options if the user wants sync), the selected
+  stream in `axium-quickplay-src:<hubId>`. Reuses `axium-hub-card-editor` (hub + name). The picker
+  overlay is the same responsive sheet pattern as the matrix (mobile almost-full, desktop ~480px). An
+  open picker survives hass updates (`_render` refreshes the search's `.hass` instead of rebuilding).
 - **The internal Media Player source is SPLIT per amp everywhere** (id ≥ `STREAM_SOURCE_MIN`):
   `axiumSourceChoices` emits **one choice per amp** ("Axium 1", "Axium 2" — NOT one combined
   "Media Player" or "Axium 1 / Axium 2"), each amp-scoped by a 3-part token

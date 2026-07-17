@@ -669,6 +669,21 @@ shows on the matrix zone popover's volume slider too. Its visual editor has a
 **Zones to show** field to pick exactly which rooms appear (empty = all); in YAML
 that's `zones:`.
 
+### Quick Play card
+
+The **Axium Quick Play Card** (`type: custom:axium-quickplay-card`) is a grid of
+**10 favourite buttons**, each set to a Music Assistant song, album or playlist.
+Pick which **amp stream** to play on (e.g. *Axium 1* / *Axium 2*) at the top, then
+**tap a button to play** that favourite on it.
+
+To set the buttons, tap the **✎ Edit** toggle (or just tap an empty button): a
+Music Assistant search opens — the same one used elsewhere in these cards — and
+picking a result assigns it to that button. In edit mode each button gets a small
+**✕** to clear it. The 10 assignments are stored in your browser, per amplifier
+(so they're per-device, not synced across phones/tablets — ask if you'd like them
+shared). Requires the amp's Music Assistant player to be named after the amp
+device (e.g. rename it to "Axium 1" in Music Assistant).
+
 ## Sleep timer & alarms
 
 - **Sleep timer** — each zone has a *Sleep timer* number (minutes). Set it and the
