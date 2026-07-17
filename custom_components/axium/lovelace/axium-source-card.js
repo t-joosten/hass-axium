@@ -834,25 +834,27 @@ class AxiumSourceCard extends HTMLElement {
 }
 
 AxiumSourceCard.styles = `
-  ha-card { padding: 12px 16px 8px; }
-  .placeholder { padding: 16px; color: var(--secondary-text-color); }
-  .header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  ha-card { padding: 16px; }
+  .placeholder { padding: 8px 0; color: var(--secondary-text-color); }
+  .header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
   .art {
-    width: 44px; height: 44px; border-radius: 8px; flex: 0 0 auto;
+    width: 46px; height: 46px; border-radius: 10px; flex: 0 0 auto;
     background: var(--secondary-background-color) center/cover no-repeat;
   }
   .art:not(.has-art) { display: none; }
   .titles { min-width: 0; flex: 1 1 auto; }
   .presets {
     flex: 0 0 auto; max-width: 45%;
-    padding: 6px 8px; border-radius: 8px;
+    padding: 7px 12px; border-radius: 999px;
     border: 1px solid var(--divider-color);
     background: var(--card-background-color, var(--ha-card-background));
     color: var(--primary-text-color);
     font: inherit; font-size: 0.85rem; cursor: pointer;
+    transition: border-color 0.15s ease;
   }
+  .presets:hover { border-color: var(--primary-color); }
   .presets[hidden] { display: none; }
-  .title { font-size: 1.1rem; font-weight: 600; color: var(--primary-text-color); }
+  .title { font-size: 1.25rem; font-weight: 500; letter-spacing: 0.2px; color: var(--primary-text-color); }
   .subtitle {
     font-size: 0.85rem; color: var(--secondary-text-color);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -860,37 +862,38 @@ AxiumSourceCard.styles = `
   .chips { display: flex; flex-wrap: wrap; gap: 8px; }
   .chip {
     display: inline-flex; align-items: center; gap: 4px;
-    min-height: 40px; padding: 6px 14px; border-radius: 20px;
+    min-height: 38px; padding: 7px 14px; border-radius: 999px;
     border: 1px solid var(--divider-color);
     background: var(--card-background-color);
     color: var(--primary-text-color);
-    font: inherit; font-size: 0.95rem; cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.05s;
+    font: inherit; font-size: 0.92rem; cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.12s, transform 0.08s;
     touch-action: manipulation; user-select: none; -webkit-user-select: none;
     -webkit-touch-callout: none;
   }
   .chip .tick { --mdc-icon-size: 18px; width: 0; opacity: 0; transition: width 0.15s, opacity 0.15s; }
-  .chip:hover { border-color: var(--primary-color); }
+  .chip:hover { border-color: var(--primary-color); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12); }
   .chip:active { transform: scale(0.96); }
   .chip.active {
     background: var(--primary-color);
     border-color: var(--primary-color);
     color: var(--text-primary-color, #fff);
+    box-shadow: none;
   }
   .chip.active .tick { width: 18px; opacity: 1; }
   .chip.unavailable { opacity: 0.45; pointer-events: none; }
   .controls {
     display: flex; align-items: center; gap: 4px;
-    margin-top: 12px; padding-top: 8px;
+    margin-top: 14px; padding-top: 10px;
     border-top: 1px solid var(--divider-color);
   }
   .spacer { flex: 1 1 auto; }
   .ctrl {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 48px; height: 48px; border-radius: 50%;
+    width: 46px; height: 46px; border-radius: 50%;
     border: none; background: none; cursor: pointer;
     color: var(--primary-text-color);
-    transition: background 0.15s, transform 0.05s;
+    transition: background 0.15s, transform 0.06s;
   }
   .ctrl:hover { background: var(--secondary-background-color); }
   .ctrl:active { transform: scale(0.92); }
