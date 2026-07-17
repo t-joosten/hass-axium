@@ -4034,151 +4034,6 @@ AxiumAlarmsCard.styles = `
   }
 `;
 
-AxiumSleepCard.styles = `
-  ha-card { padding: 16px; position: relative; }
-  .title { font-size: 1.25rem; font-weight: 500; letter-spacing: 0.2px; margin-bottom: 12px; color: var(--primary-text-color); }
-  .empty { color: var(--secondary-text-color); padding: 4px 0; }
-  .f-media { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
-  .mediabtn { align-self: flex-start; }
-  .mediasel { color: var(--primary-color); font-size: 0.9rem; }
-  .mediabrowse {
-    border: 1px solid var(--divider-color); border-radius: 8px; padding: 6px;
-    background: var(--secondary-background-color);
-  }
-  .rows { display: flex; flex-direction: column; gap: 8px; }
-  .row {
-    display: flex; align-items: center; gap: 10px;
-    padding: 10px 12px; border-radius: 12px;
-    border: 1px solid var(--divider-color); background: var(--card-background-color);
-    transition: border-color 0.12s ease, box-shadow 0.12s ease;
-  }
-  .row:hover { border-color: var(--primary-color); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); }
-  .mid { flex: 1 1 auto; min-width: 0; }
-  .n { font-weight: 500; color: var(--primary-text-color); }
-  .sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
-  .zn { font-size: 0.78rem; color: var(--secondary-text-color); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .src { font-size: 0.78rem; color: var(--primary-color); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .src:empty { display: none; }
-  .cd { flex: 0 0 auto; text-align: right; font-size: 0.85rem; }
-  .in { font-weight: 600; color: var(--primary-color); }
-  .off { color: var(--secondary-text-color); }
-  input[type="time"] {
-    font: inherit; font-size: 0.85rem; padding: 2px 4px; border-radius: 6px;
-    border: 1px solid var(--divider-color);
-    background: var(--card-background-color); color: var(--primary-text-color);
-  }
-  .days { display: inline-flex; gap: 2px; }
-  .daychip {
-    min-width: 40px; padding: 7px 0; text-align: center; border-radius: 10px;
-    border: 1px solid var(--divider-color); background: none; cursor: pointer;
-    font: inherit; font-size: 0.82rem; color: var(--primary-text-color);
-  }
-  .daychip.on { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
-  .daychip:hover, .qd:hover { border-color: var(--primary-color); }
-  .x { border: none; background: none; cursor: pointer; color: var(--secondary-text-color); font-size: 0.9rem; flex: 0 0 auto; }
-  .x:hover { color: var(--error-color); }
-  .tog { position: relative; display: inline-block; width: 36px; height: 20px; flex: 0 0 auto; }
-  .tog input { opacity: 0; width: 0; height: 0; }
-  .track { position: absolute; inset: 0; border-radius: 20px; background: var(--divider-color); transition: background 0.15s; }
-  .track::before { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
-  .tog input:checked + .track { background: var(--primary-color); }
-  .tog input:checked + .track::before { transform: translateX(16px); }
-  .addbar { margin-top: 10px; }
-  .link { border: none; background: none; color: var(--primary-color); cursor: pointer; font: inherit; padding: 0; }
-  .addform { display: flex; flex-direction: column; gap: 16px; margin-top: 10px; padding-top: 14px; border-top: 1px solid var(--divider-color); }
-  .addform[hidden] { display: none; }
-  .af-field { display: flex; flex-direction: column; gap: 7px; }
-  .af-row2 { display: grid; grid-template-columns: 1fr 132px; gap: 12px; align-items: end; }
-  .af-label {
-    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em;
-    text-transform: uppercase; color: var(--secondary-text-color);
-  }
-  .af-label .volval { color: var(--primary-color); font-weight: 700; letter-spacing: 0; }
-  .addform input[type="text"], .addform input[type="time"], .addform select, .f-duration {
-    font: inherit; padding: 9px 10px; border-radius: 8px; box-sizing: border-box;
-    border: 1px solid var(--divider-color);
-    background: var(--card-background-color); color: var(--primary-text-color);
-  }
-  .addform input[type="text"], .addform input[type="time"], .addform select { width: 100%; }
-  .addform input:focus, .addform select:focus { outline: none; border-color: var(--primary-color); }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-  .zonechip {
-    padding: 7px 12px; border-radius: 16px; border: 1px solid var(--divider-color);
-    background: none; cursor: pointer; font: inherit; font-size: 0.85rem;
-    color: var(--primary-text-color);
-  }
-  .zonechip:hover { border-color: var(--primary-color); }
-  .zonechip.on { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
-  .af-quickdays { display: flex; flex-wrap: wrap; gap: 6px; }
-  .qd {
-    padding: 4px 11px; border-radius: 14px; border: 1px solid var(--divider-color);
-    background: none; cursor: pointer; font: inherit; font-size: 0.78rem;
-    color: var(--secondary-text-color);
-  }
-  .f-volume { width: 100%; height: 26px; accent-color: var(--primary-color); cursor: pointer; }
-  .af-dur-row { display: flex; align-items: center; gap: 8px; }
-  .f-duration { width: 84px; }
-  .af-unit { color: var(--primary-text-color); font-size: 0.9rem; }
-  .durhint { color: var(--secondary-text-color); font-size: 0.8rem; }
-  .af-actions { display: flex; justify-content: flex-end; align-items: center; gap: 16px; margin-top: 2px; }
-  .addbtn {
-    padding: 10px 22px; border-radius: 10px; border: none;
-    background: var(--primary-color); color: var(--text-primary-color, #fff);
-    cursor: pointer; font: inherit; font-weight: 600;
-  }
-  .addbtn:hover { filter: brightness(1.08); }
-  .quick { display: inline-flex; gap: 4px; margin-top: 4px; }
-  .q, .custom {
-    padding: 4px 12px; border-radius: 999px; border: 1px solid var(--divider-color);
-    background: none; cursor: pointer; font: inherit; font-size: 0.8rem;
-    color: var(--primary-text-color); transition: border-color 0.15s ease;
-  }
-  .custom { border-style: dashed; }
-  .q:hover, .custom:hover { border-color: var(--primary-color); }
-  .overlay {
-    position: absolute; inset: 0; z-index: 5; display: flex;
-    align-items: center; justify-content: center;
-    background: rgba(0, 0, 0, 0.5); border-radius: var(--ha-card-border-radius, 12px);
-  }
-  .overlay[hidden] { display: none; }
-  .sheet {
-    width: min(320px, 92%); box-sizing: border-box; padding: 16px;
-    border-radius: 18px; background: var(--card-background-color, #fff);
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
-  }
-  .sheet-head {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 8px; margin-bottom: 12px;
-  }
-  .sheet-title { font-weight: 500; font-size: 1.05rem; color: var(--primary-text-color); }
-  .iconbtn {
-    display: inline-flex; align-items: center; justify-content: center;
-    background: none; border: none; cursor: pointer; font: inherit;
-    color: var(--secondary-text-color); width: 32px; height: 32px; border-radius: 50%;
-    transition: background 0.15s ease, color 0.15s ease;
-  }
-  .iconbtn:hover { color: var(--primary-text-color); background: var(--secondary-background-color); }
-  .cust-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
-  .cust-input {
-    flex: 1 1 auto; width: 100%; box-sizing: border-box; font: inherit;
-    font-size: 1.4rem; padding: 8px 10px; border-radius: 10px;
-    border: 1px solid var(--divider-color);
-    background: var(--secondary-background-color); color: var(--primary-text-color);
-  }
-  .cust-unit { color: var(--secondary-text-color); }
-  .cust-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
-  .cust-actions { display: flex; justify-content: flex-end; gap: 8px; }
-  .cust-cancel, .cust-set {
-    font: inherit; padding: 8px 14px; border-radius: 10px; cursor: pointer;
-    border: 1px solid var(--divider-color); background: none;
-    color: var(--primary-text-color);
-  }
-  .cust-set {
-    border-color: var(--primary-color); background: var(--primary-color);
-    color: var(--text-primary-color, #fff);
-  }
-`;
-
 /**
  * Axium Sleep Timers Card — start, adjust and cancel a per-zone sleep timer,
  * with the live time left. Writes via the zone's sleep-timer number entity.
@@ -4528,6 +4383,151 @@ class AxiumSleepCard extends HTMLElement {
     }
   }
 }
+
+AxiumSleepCard.styles = `
+  ha-card { padding: 16px; position: relative; }
+  .title { font-size: 1.25rem; font-weight: 500; letter-spacing: 0.2px; margin-bottom: 12px; color: var(--primary-text-color); }
+  .empty { color: var(--secondary-text-color); padding: 4px 0; }
+  .f-media { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
+  .mediabtn { align-self: flex-start; }
+  .mediasel { color: var(--primary-color); font-size: 0.9rem; }
+  .mediabrowse {
+    border: 1px solid var(--divider-color); border-radius: 8px; padding: 6px;
+    background: var(--secondary-background-color);
+  }
+  .rows { display: flex; flex-direction: column; gap: 8px; }
+  .row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: 12px;
+    border: 1px solid var(--divider-color); background: var(--card-background-color);
+    transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  }
+  .row:hover { border-color: var(--primary-color); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); }
+  .mid { flex: 1 1 auto; min-width: 0; }
+  .n { font-weight: 500; color: var(--primary-text-color); }
+  .sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+  .zn { font-size: 0.78rem; color: var(--secondary-text-color); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .src { font-size: 0.78rem; color: var(--primary-color); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .src:empty { display: none; }
+  .cd { flex: 0 0 auto; text-align: right; font-size: 0.85rem; }
+  .in { font-weight: 600; color: var(--primary-color); }
+  .off { color: var(--secondary-text-color); }
+  input[type="time"] {
+    font: inherit; font-size: 0.85rem; padding: 2px 4px; border-radius: 6px;
+    border: 1px solid var(--divider-color);
+    background: var(--card-background-color); color: var(--primary-text-color);
+  }
+  .days { display: inline-flex; gap: 2px; }
+  .daychip {
+    min-width: 40px; padding: 7px 0; text-align: center; border-radius: 10px;
+    border: 1px solid var(--divider-color); background: none; cursor: pointer;
+    font: inherit; font-size: 0.82rem; color: var(--primary-text-color);
+  }
+  .daychip.on { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .daychip:hover, .qd:hover { border-color: var(--primary-color); }
+  .x { border: none; background: none; cursor: pointer; color: var(--secondary-text-color); font-size: 0.9rem; flex: 0 0 auto; }
+  .x:hover { color: var(--error-color); }
+  .tog { position: relative; display: inline-block; width: 36px; height: 20px; flex: 0 0 auto; }
+  .tog input { opacity: 0; width: 0; height: 0; }
+  .track { position: absolute; inset: 0; border-radius: 20px; background: var(--divider-color); transition: background 0.15s; }
+  .track::before { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
+  .tog input:checked + .track { background: var(--primary-color); }
+  .tog input:checked + .track::before { transform: translateX(16px); }
+  .addbar { margin-top: 10px; }
+  .link { border: none; background: none; color: var(--primary-color); cursor: pointer; font: inherit; padding: 0; }
+  .addform { display: flex; flex-direction: column; gap: 16px; margin-top: 10px; padding-top: 14px; border-top: 1px solid var(--divider-color); }
+  .addform[hidden] { display: none; }
+  .af-field { display: flex; flex-direction: column; gap: 7px; }
+  .af-row2 { display: grid; grid-template-columns: 1fr 132px; gap: 12px; align-items: end; }
+  .af-label {
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--secondary-text-color);
+  }
+  .af-label .volval { color: var(--primary-color); font-weight: 700; letter-spacing: 0; }
+  .addform input[type="text"], .addform input[type="time"], .addform select, .f-duration {
+    font: inherit; padding: 9px 10px; border-radius: 8px; box-sizing: border-box;
+    border: 1px solid var(--divider-color);
+    background: var(--card-background-color); color: var(--primary-text-color);
+  }
+  .addform input[type="text"], .addform input[type="time"], .addform select { width: 100%; }
+  .addform input:focus, .addform select:focus { outline: none; border-color: var(--primary-color); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .zonechip {
+    padding: 7px 12px; border-radius: 16px; border: 1px solid var(--divider-color);
+    background: none; cursor: pointer; font: inherit; font-size: 0.85rem;
+    color: var(--primary-text-color);
+  }
+  .zonechip:hover { border-color: var(--primary-color); }
+  .zonechip.on { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .af-quickdays { display: flex; flex-wrap: wrap; gap: 6px; }
+  .qd {
+    padding: 4px 11px; border-radius: 14px; border: 1px solid var(--divider-color);
+    background: none; cursor: pointer; font: inherit; font-size: 0.78rem;
+    color: var(--secondary-text-color);
+  }
+  .f-volume { width: 100%; height: 26px; accent-color: var(--primary-color); cursor: pointer; }
+  .af-dur-row { display: flex; align-items: center; gap: 8px; }
+  .f-duration { width: 84px; }
+  .af-unit { color: var(--primary-text-color); font-size: 0.9rem; }
+  .durhint { color: var(--secondary-text-color); font-size: 0.8rem; }
+  .af-actions { display: flex; justify-content: flex-end; align-items: center; gap: 16px; margin-top: 2px; }
+  .addbtn {
+    padding: 10px 22px; border-radius: 10px; border: none;
+    background: var(--primary-color); color: var(--text-primary-color, #fff);
+    cursor: pointer; font: inherit; font-weight: 600;
+  }
+  .addbtn:hover { filter: brightness(1.08); }
+  .quick { display: inline-flex; gap: 4px; margin-top: 4px; }
+  .q, .custom {
+    padding: 4px 12px; border-radius: 999px; border: 1px solid var(--divider-color);
+    background: none; cursor: pointer; font: inherit; font-size: 0.8rem;
+    color: var(--primary-text-color); transition: border-color 0.15s ease;
+  }
+  .custom { border-style: dashed; }
+  .q:hover, .custom:hover { border-color: var(--primary-color); }
+  .overlay {
+    position: absolute; inset: 0; z-index: 5; display: flex;
+    align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, 0.5); border-radius: var(--ha-card-border-radius, 12px);
+  }
+  .overlay[hidden] { display: none; }
+  .sheet {
+    width: min(320px, 92%); box-sizing: border-box; padding: 16px;
+    border-radius: 18px; background: var(--card-background-color, #fff);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  }
+  .sheet-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin-bottom: 12px;
+  }
+  .sheet-title { font-weight: 500; font-size: 1.05rem; color: var(--primary-text-color); }
+  .iconbtn {
+    display: inline-flex; align-items: center; justify-content: center;
+    background: none; border: none; cursor: pointer; font: inherit;
+    color: var(--secondary-text-color); width: 32px; height: 32px; border-radius: 50%;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .iconbtn:hover { color: var(--primary-text-color); background: var(--secondary-background-color); }
+  .cust-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+  .cust-input {
+    flex: 1 1 auto; width: 100%; box-sizing: border-box; font: inherit;
+    font-size: 1.4rem; padding: 8px 10px; border-radius: 10px;
+    border: 1px solid var(--divider-color);
+    background: var(--secondary-background-color); color: var(--primary-text-color);
+  }
+  .cust-unit { color: var(--secondary-text-color); }
+  .cust-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+  .cust-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .cust-cancel, .cust-set {
+    font: inherit; padding: 8px 14px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--divider-color); background: none;
+    color: var(--primary-text-color);
+  }
+  .cust-set {
+    border-color: var(--primary-color); background: var(--primary-color);
+    color: var(--text-primary-color, #fff);
+  }
+`;
 
 /** Visual editor for the sleep card — amplifier, name, and which sections to show. */
 class AxiumSleepCardEditor extends HTMLElement {

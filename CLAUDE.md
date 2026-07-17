@@ -251,6 +251,16 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `perl -ne 'print "$." if /[\x00-\x08\x0b\x0c\x0e-\x1f]/'`. A null byte has twice
   slipped into a string literal that renders as a space (e.g. `.join(" ")`), making
   `file` report "data"/"binary" — replace the separator with a printable char.
+- **A card's `Axium<Name>Card.styles = \`…\`;` assignment MUST come AFTER its `class`
+  declaration.** `class` declarations are NOT hoisted (TDZ), so a `.styles` assignment
+  placed *before* the class throws `ReferenceError: Cannot access 'Axium…Card' before
+  initialization` at module-eval time — which aborts the whole script so the trailing
+  `customElements.define` block never runs and **every** card fails ("custom element not
+  found"). This bit v0.0.128 (the sleep card's styles were inserted before its class).
+  **`node --check` does NOT catch it** (syntax is valid) — before releasing card JS, also
+  **evaluate the module**: stub `HTMLElement`/`customElements`/`window`/`document` and run
+  `new Function(fs.readFileSync(file,'utf8'))()` in node; a clean run + `window.customCards`
+  length == card count proves it loads.
 - **Shared card design system** (introduced with the Quick Play redesign, then applied
   to ALL cards in v0.0.128, **one self-contained commit per card so any card's look can be
   `git revert`ed on its own**): 16px `ha-card` padding, **1.25rem / weight-500** titles with
