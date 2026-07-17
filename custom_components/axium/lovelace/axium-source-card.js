@@ -3080,8 +3080,8 @@ class AxiumMatrixCard extends HTMLElement {
 }
 
 AxiumMatrixCard.styles = `
-  ha-card { padding: 12px; position: relative; }
-  .title { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: var(--primary-text-color); }
+  ha-card { padding: 16px; position: relative; }
+  .title { font-size: 1.25rem; font-weight: 500; letter-spacing: 0.2px; margin-bottom: 12px; color: var(--primary-text-color); }
   .scroll { overflow-x: auto; }
   .matrix { display: grid; gap: 4px; align-items: stretch; min-width: min-content; }
   .corner { display: flex; align-items: center; justify-content: flex-start; }
@@ -3095,11 +3095,13 @@ AxiumMatrixCard.styles = `
   .allpower.on { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
   .allpower ha-icon { --mdc-icon-size: 20px; }
   .presetsel {
-    font: inherit; padding: 6px 8px; border-radius: 8px; width: 100%;
-    box-sizing: border-box; margin-bottom: 8px;
+    font: inherit; padding: 8px 12px; border-radius: 10px; width: 100%;
+    box-sizing: border-box; margin-bottom: 12px; cursor: pointer;
     border: 1px solid var(--divider-color);
     background: var(--secondary-background-color); color: var(--primary-text-color);
+    transition: border-color 0.15s ease;
   }
+  .presetsel:hover { border-color: var(--primary-color); }
   .colhead, .rowhead {
     font-size: 0.8rem; color: var(--secondary-text-color);
     display: flex; align-items: center; overflow: hidden;
@@ -3134,7 +3136,7 @@ AxiumMatrixCard.styles = `
   }
   .cell {
     display: inline-flex; align-items: center; justify-content: center;
-    min-height: 40px; border-radius: 8px;
+    min-height: 40px; border-radius: 10px;
     border: 1px solid var(--divider-color);
     background: var(--card-background-color); cursor: pointer;
     color: var(--primary-text-color);
@@ -3155,9 +3157,9 @@ AxiumMatrixCard.styles = `
   .browse {
     display: inline-flex; align-items: center; justify-content: center; gap: 8px;
     margin-top: 10px; padding: 10px; width: 100%; box-sizing: border-box;
-    border: 1px solid var(--divider-color); border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--divider-color); border-radius: 12px; cursor: pointer;
     background: var(--secondary-background-color); color: var(--primary-text-color);
-    font-size: 0.95rem;
+    font-size: 0.95rem; transition: border-color 0.15s ease;
   }
   .browse:hover { border-color: var(--primary-color); }
   .browse ha-icon { --mdc-icon-size: 20px; }
@@ -3172,14 +3174,14 @@ AxiumMatrixCard.styles = `
     position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
     width: 94%; max-width: 94%; max-height: 88vh;
     background: var(--card-background-color, var(--ha-card-background, #fff));
-    border-radius: 16px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45);
+    border-radius: 18px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45);
     box-sizing: border-box;
     padding: max(14px, env(safe-area-inset-top)) 16px 16px;
     display: flex; flex-direction: column; overflow-y: auto;
   }
   @media (min-width: 768px) {
     .sheet {
-      width: 360px; max-width: 92%; max-height: 72vh; border-radius: 12px;
+      width: 360px; max-width: 92%; max-height: 72vh; border-radius: 14px;
     }
   }
   .sheet-head {
@@ -3187,7 +3189,7 @@ AxiumMatrixCard.styles = `
     gap: 8px; margin-bottom: 10px;
   }
   .sheet-title {
-    font-weight: 600; color: var(--primary-text-color);
+    font-weight: 500; font-size: 1.05rem; color: var(--primary-text-color);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .sheet-actions { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; }
@@ -3200,7 +3202,7 @@ AxiumMatrixCard.styles = `
   }
   .nowplaying[hidden] { display: none; }
   .np-art {
-    width: 40px; height: 40px; flex: 0 0 auto; border-radius: 6px;
+    width: 40px; height: 40px; flex: 0 0 auto; border-radius: 8px;
     background: var(--secondary-background-color) center/cover no-repeat;
   }
   .np-art:not(.has-art) { display: none; }
@@ -3262,13 +3264,14 @@ AxiumMatrixCard.styles = `
   .preset-list { display: flex; flex-direction: column; gap: 6px; }
   .preset-item {
     display: flex; align-items: center; gap: 8px;
-    padding: 8px 10px; border-radius: 8px;
+    padding: 10px 12px; border-radius: 10px;
     border: 1px solid var(--divider-color);
     background: var(--card-background-color);
     color: var(--primary-text-color);
     font: inherit; text-align: left; cursor: pointer;
+    transition: border-color 0.12s ease, box-shadow 0.12s ease;
   }
-  .preset-item:hover { border-color: var(--primary-color); }
+  .preset-item:hover { border-color: var(--primary-color); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12); }
   .preset-item ha-icon { --mdc-icon-size: 20px; color: var(--primary-color); }
   .empty { color: var(--secondary-text-color); font-size: 0.9rem; padding: 4px 0; }
 `;
