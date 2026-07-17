@@ -1271,18 +1271,23 @@ class AxiumHubCard extends HTMLElement {
 
 AxiumHubCard.styles = `
   .hub {
-    display: flex; align-items: center; gap: 12px;
-    padding: 12px 16px; cursor: pointer;
+    display: flex; align-items: center; gap: 14px;
+    padding: 16px; cursor: pointer;
   }
   .hub:focus-visible { outline: 2px solid var(--primary-color); outline-offset: -2px; }
-  .hicon { --mdc-icon-size: 28px; color: var(--primary-color); flex: 0 0 auto; }
+  .hicon {
+    --mdc-icon-size: 26px; color: var(--primary-color); flex: 0 0 auto;
+    width: 46px; height: 46px; border-radius: 12px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--secondary-background-color);
+  }
   .info { flex: 1 1 auto; min-width: 0; }
-  .hname { font-size: 1.05rem; font-weight: 600; color: var(--primary-text-color); }
+  .hname { font-size: 1.2rem; font-weight: 500; letter-spacing: 0.2px; color: var(--primary-text-color); }
   .hsub {
     font-size: 0.85rem; color: var(--secondary-text-color);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .amps { margin-top: 1px; }
+  .amps { margin-top: 2px; }
   .amprow {
     font-size: 0.82rem; color: var(--secondary-text-color);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -1290,10 +1295,10 @@ AxiumHubCard.styles = `
   .alabel { color: var(--primary-text-color); font-weight: 500; }
   .alloff {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 40px; height: 40px; border-radius: 50%;
+    width: 44px; height: 44px; border-radius: 50%;
     border: none; background: none; cursor: pointer;
     color: var(--primary-text-color); flex: 0 0 auto;
-    transition: background 0.15s, transform 0.05s;
+    transition: background 0.15s, transform 0.06s;
   }
   .alloff:hover { background: var(--secondary-background-color); }
   .alloff:active { transform: scale(0.92); }
