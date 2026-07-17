@@ -4808,12 +4808,18 @@ class AxiumVolumesCard extends HTMLElement {
 }
 
 AxiumVolumesCard.styles = `
-  ha-card { padding: 12px 16px; }
-  .title { font-size: 1.1rem; font-weight: 600; margin-bottom: 12px; color: var(--primary-text-color); }
+  ha-card { padding: 16px; }
+  .title { font-size: 1.25rem; font-weight: 500; letter-spacing: 0.2px; margin-bottom: 14px; color: var(--primary-text-color); }
   .empty { color: var(--secondary-text-color); padding: 4px 0; }
-  .cols { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
-  .col { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 58px; }
-  .pct { font-size: 0.8rem; color: var(--secondary-text-color); min-height: 1em; }
+  .cols { display: flex; flex-wrap: wrap; gap: 12px; align-items: stretch; }
+  .col {
+    display: flex; flex-direction: column; align-items: center; gap: 8px; width: 64px;
+    padding: 12px 6px; border-radius: 14px;
+    border: 1px solid var(--divider-color); background: var(--card-background-color);
+    transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  }
+  .col:hover { border-color: var(--primary-color); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12); }
+  .pct { font-size: 0.8rem; font-weight: 500; color: var(--secondary-text-color); min-height: 1em; }
   .volwrap { position: relative; width: 28px; height: 150px; }
   .vol {
     writing-mode: vertical-lr; direction: rtl;
@@ -4828,14 +4834,17 @@ AxiumVolumesCard.styles = `
   }
   .col.off .vol { opacity: 0.45; }
   .zn {
-    font-size: 0.78rem; color: var(--primary-text-color); text-align: center;
-    max-width: 58px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 0.78rem; font-weight: 500; color: var(--primary-text-color); text-align: center;
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .iconbtn {
+    display: inline-flex; align-items: center; justify-content: center;
     background: none; border: none; cursor: pointer; color: var(--secondary-text-color);
-    padding: 2px; --mdc-icon-size: 20px;
+    width: 34px; height: 34px; border-radius: 50%; --mdc-icon-size: 20px;
+    transition: background 0.15s ease, color 0.15s ease;
   }
-  .mute.on { color: var(--primary-color); }
+  .iconbtn:hover { background: var(--secondary-background-color); color: var(--primary-text-color); }
+  .mute.on, .mute.on:hover { color: var(--primary-color); }
 `;
 
 /** Visual editor for the volumes card: amplifier, zone whitelist, card name. */
