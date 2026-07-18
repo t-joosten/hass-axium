@@ -3542,12 +3542,11 @@ class AxiumAlarmsCard extends HTMLElement {
       row.innerHTML = `
         <label class="tog"><input type="checkbox" class="en"><span class="track"></span></label>
         <div class="mid">
-          <div class="rhead"><div class="n"></div><div class="cd" data-id="${id}"></div></div>
+          <div class="rhead"><div class="n"></div><div class="rright"><div class="cd" data-id="${id}"></div><button class="x" title="Remove">&#10005;</button></div></div>
           <div class="sub"><input type="time" class="time"><span class="days"></span></div>
           <div class="zn"></div>
           <div class="src"></div>
-        </div>
-        <button class="x" title="Remove">&#10005;</button>`;
+        </div>`;
       row.querySelector(".en").addEventListener("change", (e) =>
         this._svc("set_alarm", { name, enabled: e.target.checked })
       );
@@ -3929,6 +3928,7 @@ AxiumAlarmsCard.styles = `
   .row:hover { border-color: var(--primary-color); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); }
   .mid { flex: 1 1 auto; min-width: 0; }
   .rhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .rright { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
   .n { font-weight: 500; color: var(--primary-text-color); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
   .zn { font-size: 0.78rem; color: var(--secondary-text-color); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
