@@ -673,6 +673,18 @@ shows on the matrix zone popover's volume slider too. Its visual editor has a
 **Zones to show** field to pick exactly which rooms appear (empty = all); in YAML
 that's `zones:`.
 
+Two toolbar toggles change how a drag affects the other rooms (only one can be on
+at a time, or neither):
+
+- **Link** — pick the rooms you want to move together (tap the circle above each
+  slider; all start selected), then dragging any of them raises/lowers **the whole
+  group by the same amount** while keeping their differences. Each room still stops
+  at its own max.
+- **Match** — dragging any slider sets **every** room to that same level (each
+  clamped to its own max). Great for "make the whole house this loud."
+
+With neither toggle on, each slider controls just its own room as before.
+
 ### Quick Play card
 
 The **Axium Quick Play Card** (`type: custom:axium-quickplay-card`) is a grid of

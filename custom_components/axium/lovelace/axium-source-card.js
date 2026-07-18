@@ -4659,6 +4659,12 @@ class AxiumVolumesCard extends HTMLElement {
     this._sig = "";
     this._drag = {};
     this._timers = {};
+    // Gang modes: null (per-zone), "link" (move selected zones by the same delta)
+    // or "match" (set all zones to the slider's absolute level). Mutually exclusive.
+    this._mode = null;
+    this._selected = new Set(); // zones linked in "link" mode
+    this._lastVal = {}; // last non-drag % per zone (drag-delta baseline)
+    this._gang = null; // active drag snapshot: {anchor, start, snap, mode, targets}
   }
 
   setConfig(config) {
@@ -4722,54 +4728,208 @@ class AxiumVolumesCard extends HTMLElement {
   }
 
   _build(zones) {
+    this._loadMode();
+    if (this._mode === "link") this._selected = new Set(zones);
     const title = this._config.name || "Volumes";
     this.shadowRoot.innerHTML = `
       <style>${AxiumVolumesCard.styles}</style>
       <ha-card>
-        ${this._config.hide_title === true ? "" : `<div class="title">${escHtml(title)}</div>`}
+        <div class="vhead">
+          ${this._config.hide_title === true ? "" : `<div class="title">${escHtml(title)}</div>`}
+          <div class="modes">
+            <button class="modebtn link" title="Link: move the selected zones together by the same amount">
+              <ha-icon icon="mdi:link-variant"></ha-icon><span>Link</span></button>
+            <button class="modebtn match" title="Match: set all zones to the level you drag to">
+              <ha-icon icon="mdi:equal"></ha-icon><span>Match</span></button>
+          </div>
+        </div>
         ${
           zones.length
             ? `<div class="cols"></div>`
             : `<div class="empty">No Axium zones.</div>`
         }
       </ha-card>`;
+    this.shadowRoot
+      .querySelector(".modebtn.link")
+      .addEventListener("click", () => this._setMode("link"));
+    this.shadowRoot
+      .querySelector(".modebtn.match")
+      .addEventListener("click", () => this._setMode("match"));
     const cols = this.shadowRoot.querySelector(".cols");
     this._cells = {};
-    if (!cols) return;
-    for (const z of zones) {
-      const col = document.createElement("div");
-      col.className = "col";
-      col.innerHTML = `
-        <div class="pct"></div>
-        <div class="volwrap">
-          <div class="volcap"></div>
-          <input type="range" class="vol" min="0" max="100" step="1" orient="vertical">
-        </div>
-        <button class="mute iconbtn" title="Mute"><ha-icon icon="mdi:volume-high"></ha-icon></button>
-        <div class="zn"></div>`;
-      const slider = col.querySelector(".vol");
-      slider.addEventListener("input", () => {
-        // Can't drag past the zone's max volume (the greyed cap).
-        const maxv = axiumMaxVolume(this._hass, z);
-        if (Number(slider.value) > maxv) slider.value = maxv;
-        this._drag[z] = true;
-        col.querySelector(".pct").textContent = slider.value + "%";
-        this._scheduleVolume(z, Number(slider.value) / 100);
-      });
-      slider.addEventListener("change", () => {
-        this._drag[z] = false;
-        this._setVolume(z, Number(slider.value) / 100);
-      });
-      col.querySelector(".mute").addEventListener("click", () => {
-        const st = this._hass.states[z];
-        this._hass.callService("media_player", "volume_mute", {
-          entity_id: z,
-          is_volume_muted: !(st && st.attributes.is_volume_muted),
+    if (cols) {
+      for (const z of zones) {
+        const col = document.createElement("div");
+        col.className = "col";
+        col.innerHTML = `
+          <button class="selbtn" title="Link this zone" tabindex="-1"><ha-icon icon="mdi:checkbox-blank-circle-outline"></ha-icon></button>
+          <div class="pct"></div>
+          <div class="volwrap">
+            <div class="volcap"></div>
+            <input type="range" class="vol" min="0" max="100" step="1" orient="vertical">
+          </div>
+          <button class="mute iconbtn" title="Mute"><ha-icon icon="mdi:volume-high"></ha-icon></button>
+          <div class="zn"></div>`;
+        const slider = col.querySelector(".vol");
+        slider.addEventListener("input", () => {
+          // Can't drag past the zone's max volume (the greyed cap).
+          const maxv = axiumMaxVolume(this._hass, z);
+          let v = Number(slider.value);
+          if (v > maxv) {
+            v = maxv;
+            slider.value = String(v);
+          }
+          if (!this._drag[z]) this._startGang(z); // first move of this drag
+          this._drag[z] = true;
+          col.querySelector(".pct").textContent = v + "%";
+          this._scheduleVolume(z, v / 100);
+          this._applyGang(z, v); // move linked / all zones alongside
         });
-      });
-      cols.appendChild(col);
-      this._cells[z] = col;
+        slider.addEventListener("change", () => {
+          this._drag[z] = false;
+          this._setVolume(z, Number(slider.value) / 100);
+          this._commitGang(z);
+        });
+        col.querySelector(".mute").addEventListener("click", () => {
+          const st = this._hass.states[z];
+          this._hass.callService("media_player", "volume_mute", {
+            entity_id: z,
+            is_volume_muted: !(st && st.attributes.is_volume_muted),
+          });
+        });
+        col.querySelector(".selbtn").addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          if (this._selected.has(z)) this._selected.delete(z);
+          else this._selected.add(z);
+          this._reflectMode();
+        });
+        cols.appendChild(col);
+        this._cells[z] = col;
+      }
     }
+    this._reflectMode();
+  }
+
+  // -- gang modes (link = relative, match = absolute) ------------------
+
+  _modeKey() {
+    return `axium-volumes-mode:${this._hubId()}`;
+  }
+
+  _loadMode() {
+    let m = null;
+    try {
+      m = localStorage.getItem(this._modeKey());
+    } catch (e) {
+      /* ignore */
+    }
+    this._mode = m === "link" || m === "match" ? m : null;
+  }
+
+  _persistMode() {
+    try {
+      if (this._mode) localStorage.setItem(this._modeKey(), this._mode);
+      else localStorage.removeItem(this._modeKey());
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  _setMode(mode) {
+    // Toggle off if re-clicked; otherwise switch (the two are mutually exclusive).
+    this._mode = this._mode === mode ? null : mode;
+    if (this._mode === "link") this._selected = new Set(this._zones());
+    this._persistMode();
+    this._reflectMode();
+  }
+
+  _reflectMode() {
+    const root = this.shadowRoot;
+    const cols = root.querySelector(".cols");
+    const linkBtn = root.querySelector(".modebtn.link");
+    const matchBtn = root.querySelector(".modebtn.match");
+    if (linkBtn) linkBtn.classList.toggle("active", this._mode === "link");
+    if (matchBtn) matchBtn.classList.toggle("active", this._mode === "match");
+    if (cols) cols.classList.toggle("linksel", this._mode === "link");
+    for (const z of Object.keys(this._cells || {})) {
+      const col = this._cells[z];
+      const sel = this._mode === "link" && this._selected.has(z);
+      col.classList.toggle("sel", sel);
+      const icon = col.querySelector(".selbtn ha-icon");
+      if (icon)
+        icon.setAttribute(
+          "icon",
+          sel ? "mdi:check-circle" : "mdi:checkbox-blank-circle-outline"
+        );
+    }
+  }
+
+  _selectedZones() {
+    return this._zones().filter((z) => this._selected.has(z));
+  }
+
+  _curPct(z) {
+    const st = this._hass.states[z];
+    const a = st ? st.attributes : {};
+    const lvl =
+      typeof a.volume_level === "number"
+        ? a.volume_level
+        : typeof a.axium_volume === "number"
+          ? a.axium_volume
+          : 0;
+    return Math.round(lvl * 100);
+  }
+
+  /** Snapshot the group at drag start so the others track the anchor without drift. */
+  _startGang(z) {
+    this._gang = null;
+    let targets = null;
+    if (this._mode === "match") targets = this._zones();
+    else if (this._mode === "link" && this._selected.has(z))
+      targets = this._selectedZones();
+    if (!targets || targets.length < 2) return; // nothing to gang with
+    const snap = {};
+    for (const zz of targets) {
+      snap[zz] = this._lastVal[zz] != null ? this._lastVal[zz] : this._curPct(zz);
+      this._drag[zz] = true; // freeze so _update doesn't fight the live drag
+    }
+    const start = snap[z] != null ? snap[z] : this._curPct(z);
+    this._gang = { anchor: z, start, snap, mode: this._mode, targets };
+  }
+
+  /** Move the ganged zones as the anchor slider moves. */
+  _applyGang(z, v) {
+    const g = this._gang;
+    if (!g) return;
+    const delta = v - g.start;
+    for (const zz of g.targets) {
+      if (zz === z) continue; // the dragged zone moves itself
+      const maxv = axiumMaxVolume(this._hass, zz);
+      let target = g.mode === "match" ? v : g.snap[zz] + delta;
+      target = Math.max(0, Math.min(maxv, Math.round(target)));
+      const col = this._cells[zz];
+      if (col) {
+        const s = col.querySelector(".vol");
+        if (s) s.value = String(target);
+        const p = col.querySelector(".pct");
+        if (p) p.textContent = target + "%";
+      }
+      this._scheduleVolume(zz, target / 100);
+    }
+  }
+
+  /** Commit the ganged zones' final levels when the drag ends. */
+  _commitGang(z) {
+    const g = this._gang;
+    if (!g) return;
+    for (const zz of g.targets) {
+      if (zz === z) continue;
+      this._drag[zz] = false;
+      const col = this._cells[zz];
+      const s = col && col.querySelector(".vol");
+      if (s) this._setVolume(zz, Number(s.value) / 100);
+    }
+    this._gang = null;
   }
 
   // Debounce live drags so we don't flood the amp; the final `change` still fires.
@@ -4817,6 +4977,7 @@ class AxiumVolumesCard extends HTMLElement {
       if (!this._drag[z] && this.shadowRoot.activeElement !== slider) {
         slider.value = pctv;
         col.querySelector(".pct").textContent = pctv + "%";
+        this._lastVal[z] = pctv; // baseline for the next drag's delta
       }
       // Grey out the range above the zone's max volume.
       axiumApplyVolCap(col.querySelector(".volcap"), this._hass, z, "height");
@@ -4832,7 +4993,17 @@ class AxiumVolumesCard extends HTMLElement {
 
 AxiumVolumesCard.styles = `
   ha-card { padding: 16px; }
-  .title { font-size: 1.25rem; font-weight: 500; letter-spacing: 0.2px; margin-bottom: 14px; color: var(--primary-text-color); }
+  .vhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .title { font-size: 1.25rem; font-weight: 500; letter-spacing: 0.2px; color: var(--primary-text-color); }
+  .modes { margin-left: auto; display: inline-flex; gap: 6px; }
+  .modebtn {
+    display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 999px;
+    border: 1px solid var(--divider-color); background: var(--card-background-color);
+    color: var(--secondary-text-color); cursor: pointer; font: inherit; font-size: 0.85rem;
+    --mdc-icon-size: 18px; transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+  .modebtn:hover { border-color: var(--primary-color); color: var(--primary-color); }
+  .modebtn.active { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
   .empty { color: var(--secondary-text-color); padding: 4px 0; }
   .cols { display: flex; flex-wrap: wrap; gap: 12px; align-items: stretch; }
   .col {
@@ -4842,6 +5013,14 @@ AxiumVolumesCard.styles = `
     transition: border-color 0.12s ease, box-shadow 0.12s ease;
   }
   .col:hover { border-color: var(--primary-color); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12); }
+  .selbtn {
+    display: none; align-items: center; justify-content: center;
+    border: none; background: none; cursor: pointer; color: var(--secondary-text-color);
+    padding: 0; --mdc-icon-size: 20px;
+  }
+  .cols.linksel .selbtn { display: inline-flex; }
+  .col.sel { border-color: var(--primary-color); box-shadow: inset 0 0 0 1px var(--primary-color); }
+  .col.sel .selbtn { color: var(--primary-color); }
   .pct { font-size: 0.8rem; font-weight: 500; color: var(--secondary-text-color); min-height: 1em; }
   .volwrap { position: relative; width: 28px; height: 150px; }
   .vol {
