@@ -4729,8 +4729,17 @@ class AxiumVolumesCard extends HTMLElement {
 
   _build(zones) {
     this._loadMode();
-    if (this._mode === "link") this._selected = new Set(zones);
     const title = this._config.name || "Volumes";
+    // Zone presets → chips that select several zones at once (Link mode only).
+    this._presetList = this._presets();
+    const presetChips = this._presetList
+      .map(
+        (p, i) =>
+          `<button class="presetchip" data-i="${i}" title="Link the zones in ${escHtml(
+            p.name
+          )}">${escHtml(p.name)}</button>`
+      )
+      .join("");
     this.shadowRoot.innerHTML = `
       <style>${AxiumVolumesCard.styles}</style>
       <ha-card>
@@ -4739,9 +4748,15 @@ class AxiumVolumesCard extends HTMLElement {
           <div class="modes">
             <button class="modebtn link" title="Link: move the selected zones together by the same amount">
               <ha-icon icon="mdi:link-variant"></ha-icon><span>Link</span></button>
-            <button class="modebtn match" title="Match: set all zones to the level you drag to">
+            <button class="modebtn match" title="Match: set the selected zones to the level you drag to">
               <ha-icon icon="mdi:equal"></ha-icon><span>Match</span></button>
           </div>
+        </div>
+        <div class="selbar" hidden>
+          <span class="selbar-label">Zones:</span>
+          ${presetChips}
+          <button class="selq selall">All</button>
+          <button class="selq selnone">None</button>
         </div>
         ${
           zones.length
@@ -4755,6 +4770,13 @@ class AxiumVolumesCard extends HTMLElement {
     this.shadowRoot
       .querySelector(".modebtn.match")
       .addEventListener("click", () => this._setMode("match"));
+    for (const chip of this.shadowRoot.querySelectorAll(".presetchip")) {
+      chip.addEventListener("click", () => this._togglePreset(Number(chip.dataset.i)));
+    }
+    const allBtn = this.shadowRoot.querySelector(".selall");
+    if (allBtn) allBtn.addEventListener("click", () => this._selectAll());
+    const noneBtn = this.shadowRoot.querySelector(".selnone");
+    if (noneBtn) noneBtn.addEventListener("click", () => this._selectNone());
     const cols = this.shadowRoot.querySelector(".cols");
     this._cells = {};
     if (cols) {
@@ -4837,9 +4859,47 @@ class AxiumVolumesCard extends HTMLElement {
 
   _setMode(mode) {
     // Toggle off if re-clicked; otherwise switch (the two are mutually exclusive).
+    // Link starts with NO zones selected (the user picks them via chips/circles).
     this._mode = this._mode === mode ? null : mode;
-    if (this._mode === "link") this._selected = new Set(this._zones());
     this._persistMode();
+    this._reflectMode();
+  }
+
+  /** The hub's zone presets (named zone sets), read from any hub zone's attribute. */
+  _presets() {
+    for (const id of axiumMediaPlayers(this._hass, this._hubId())) {
+      const st = this._hass.states[id];
+      const p = st && st.attributes.axium_presets;
+      if (Array.isArray(p)) return p;
+    }
+    return [];
+  }
+
+  /** A preset's zones that this card actually shows. */
+  _presetZones(p) {
+    const shown = new Set(this._zones());
+    return (p && Array.isArray(p.zones) ? p.zones : []).filter((z) => shown.has(z));
+  }
+
+  /** Tapping a preset chip adds its zones to the selection, or clears them if all set. */
+  _togglePreset(i) {
+    const zs = this._presetZones((this._presetList || [])[i]);
+    if (!zs.length) return;
+    const allSel = zs.every((z) => this._selected.has(z));
+    for (const z of zs) {
+      if (allSel) this._selected.delete(z);
+      else this._selected.add(z);
+    }
+    this._reflectMode();
+  }
+
+  _selectAll() {
+    this._selected = new Set(this._zones());
+    this._reflectMode();
+  }
+
+  _selectNone() {
+    this._selected = new Set();
     this._reflectMode();
   }
 
@@ -4850,10 +4910,19 @@ class AxiumVolumesCard extends HTMLElement {
     const matchBtn = root.querySelector(".modebtn.match");
     if (linkBtn) linkBtn.classList.toggle("active", this._mode === "link");
     if (matchBtn) matchBtn.classList.toggle("active", this._mode === "match");
-    if (cols) cols.classList.toggle("linksel", this._mode === "link");
+    if (cols) cols.classList.toggle("selmode", this._mode != null);
+    const selbar = root.querySelector(".selbar");
+    if (selbar) selbar.hidden = this._mode == null;
+    for (const chip of root.querySelectorAll(".presetchip")) {
+      const zs = this._presetZones((this._presetList || [])[Number(chip.dataset.i)]);
+      chip.classList.toggle(
+        "active",
+        zs.length > 0 && zs.every((z) => this._selected.has(z))
+      );
+    }
     for (const z of Object.keys(this._cells || {})) {
       const col = this._cells[z];
-      const sel = this._mode === "link" && this._selected.has(z);
+      const sel = this._mode != null && this._selected.has(z);
       col.classList.toggle("sel", sel);
       const icon = col.querySelector(".selbtn ha-icon");
       if (icon)
@@ -4883,11 +4952,11 @@ class AxiumVolumesCard extends HTMLElement {
   /** Snapshot the group at drag start so the others track the anchor without drift. */
   _startGang(z) {
     this._gang = null;
-    let targets = null;
-    if (this._mode === "match") targets = this._zones();
-    else if (this._mode === "link" && this._selected.has(z))
-      targets = this._selectedZones();
-    if (!targets || targets.length < 2) return; // nothing to gang with
+    // Both modes act on the SELECTED zones; dragging an unselected zone moves it alone.
+    if ((this._mode !== "link" && this._mode !== "match") || !this._selected.has(z))
+      return;
+    const targets = this._selectedZones();
+    if (targets.length < 2) return; // nothing to gang with
     const snap = {};
     for (const zz of targets) {
       snap[zz] = this._lastVal[zz] != null ? this._lastVal[zz] : this._curPct(zz);
@@ -5004,6 +5073,17 @@ AxiumVolumesCard.styles = `
   }
   .modebtn:hover { border-color: var(--primary-color); color: var(--primary-color); }
   .modebtn.active { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .selbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 14px; }
+  .selbar[hidden] { display: none; }
+  .selbar-label { font-size: 0.8rem; color: var(--secondary-text-color); margin-right: 2px; }
+  .presetchip, .selq {
+    padding: 5px 12px; border-radius: 999px; border: 1px solid var(--divider-color);
+    background: none; cursor: pointer; font: inherit; font-size: 0.8rem; color: var(--primary-text-color);
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+  .presetchip:hover, .selq:hover { border-color: var(--primary-color); }
+  .presetchip.active { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .selq { color: var(--secondary-text-color); }
   .empty { color: var(--secondary-text-color); padding: 4px 0; }
   .cols { display: flex; flex-wrap: wrap; gap: 12px; align-items: stretch; }
   .col {
@@ -5018,7 +5098,7 @@ AxiumVolumesCard.styles = `
     border: none; background: none; cursor: pointer; color: var(--secondary-text-color);
     padding: 0; --mdc-icon-size: 20px;
   }
-  .cols.linksel .selbtn { display: inline-flex; }
+  .cols.selmode .selbtn { display: inline-flex; }
   .col.sel { border-color: var(--primary-color); box-shadow: inset 0 0 0 1px var(--primary-color); }
   .col.sel .selbtn { color: var(--primary-color); }
   .pct { font-size: 0.8rem; font-weight: 500; color: var(--secondary-text-color); min-height: 1em; }

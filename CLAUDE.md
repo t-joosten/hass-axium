@@ -590,15 +590,18 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   (returning the 100 default). Same greying on the **matrix zone popover** slider (`_openZonePanel`/
   `_refreshPanel`). **Gang modes** (two mutually-exclusive toolbar toggles, state in
   `this._mode` = null|"link"|"match", persisted per hub in `localStorage["axium-volumes-mode:<hub>"]`):
-  **Link** = move a **selected subset** together by the SAME delta (relative); **Match** = set **all**
-  zones to the slider's absolute level. Link mode shows a per-column select button (`.selbtn`, only when
-  `.cols.linksel`), defaults all zones selected, tap to toggle (`_selected` Set, `.col.sel` highlight);
-  Match needs no selection. On the first `input` of a drag `_startGang` snapshots the group's current %
-  (from `_lastVal`, the last non-drag value recorded in `_update`) and **freezes their `_drag` flags** so
-  `_update` doesn't fight the live drag; `_applyGang` moves the others each `input`
-  (`match`→anchor value, `link`→`snap[zz]+delta`), clamped to each zone's own `axiumMaxVolume`; `change`
-  → `_commitGang` sends the final `_setVolume` for each and clears the snapshot. Only the anchor zone is
-  ganged for `link` if it's itself selected (dragging an unselected zone moves it alone).
+  **BOTH act on a user-selected subset** (`_selected` Set) — **Link** moves them together by the SAME
+  delta (relative), **Match** sets them all to the slider's absolute level. **Selection starts EMPTY**
+  (no auto-select) and is shared by both modes; when either mode is active the card shows a **selection
+  bar** (`.selbar`) with **zone-preset chips** (`_presets()`→`axium_presets`; `_togglePreset` adds/removes
+  a preset's shown zones — `.presetchip.active` when all its zones are selected) plus **All/None**
+  (`_selectAll`/`_selectNone`), and a per-column select circle (`.selbtn`, shown when `.cols.selmode`;
+  `.col.sel` highlight). On the first `input` of a drag `_startGang` (only if the dragged zone is
+  selected) snapshots the selected group's current % (from `_lastVal`, the last non-drag value recorded
+  in `_update`) and **freezes their `_drag` flags** so `_update` doesn't fight the live drag; `_applyGang`
+  moves the others each `input` (`match`→anchor value, `link`→`snap[zz]+delta`), clamped to each zone's own
+  `axiumMaxVolume`; `change` → `_commitGang` sends the final `_setVolume` for each and clears the snapshot.
+  Dragging an **unselected** zone moves it alone.
 - **Quick-play card** (`axium-quickplay-card`, seventh card, `AxiumQuickPlayCard`): pick an amp stream
   (segmented **stream pills** of the `axiumAmps` that resolve to an MA player by name via `_maByName`),
   a **Now playing** strip for the selected stream, then a grid of favourite **tiles** (cover art +

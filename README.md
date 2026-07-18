@@ -674,16 +674,19 @@ shows on the matrix zone popover's volume slider too. Its visual editor has a
 that's `zones:`.
 
 Two toolbar toggles change how a drag affects the other rooms (only one can be on
-at a time, or neither):
+at a time, or neither). Both work on a **set of rooms you choose** — turning either
+on shows a selection bar with your **zone presets** (tap a preset to select all its
+rooms at once), **All** / **None**, and a select circle above each slider. Nothing
+is selected until you pick it.
 
-- **Link** — pick the rooms you want to move together (tap the circle above each
-  slider; all start selected), then dragging any of them raises/lowers **the whole
-  group by the same amount** while keeping their differences. Each room still stops
-  at its own max.
-- **Match** — dragging any slider sets **every** room to that same level (each
-  clamped to its own max). Great for "make the whole house this loud."
+- **Link** — dragging any *selected* room raises/lowers **the whole selected group
+  by the same amount**, keeping their differences. Each room still stops at its max.
+- **Match** — dragging any *selected* room sets **every selected room** to that same
+  level (each clamped to its own max). Great for "make these rooms this loud" — tap
+  **All** first for the whole house.
 
-With neither toggle on, each slider controls just its own room as before.
+Dragging a room that isn't selected just moves that room. With neither toggle on,
+each slider controls only its own room, as before.
 
 ### Quick Play card
 
