@@ -765,7 +765,9 @@ class AxiumSourceCard extends HTMLElement {
 
   _update() {
     const root = this.shadowRoot;
-    root.getElementById("title").textContent = this._title();
+    const titleEl = root.getElementById("title");
+    titleEl.textContent = this._title();
+    titleEl.hidden = this._config.hide_title === true;
     this._updatePresets();
 
     const leader = this._leader();
@@ -992,9 +994,11 @@ class AxiumSourceCardEditor extends HTMLElement {
           : { entity: { integration: "axium", domain: "media_player", multiple: true } },
       },
       { name: "name", selector: { text: {} } },
+      { name: "hide_title", selector: { boolean: {} } },
     ];
     this._form.computeLabel = (s) =>
       ({
+        hide_title: "Hide card title",
         source: "Source",
         zones: "Zones to show (empty = all)",
         name: "Card name (optional)",
@@ -1197,16 +1201,18 @@ class AxiumHubCard extends HTMLElement {
   _build() {
     this.shadowRoot.innerHTML = `
       <style>${AxiumHubCard.styles}</style>
-      <ha-card class="hub" role="button" tabindex="0" title="Open amplifier settings">
-        <ha-icon class="hicon" icon="mdi:amplifier"></ha-icon>
-        <div class="info">
-          <div class="hname" id="hname"></div>
-          <div class="hsub" id="hsub"></div>
-          <div class="amps" id="amps"></div>
+      <ha-card>
+        <div class="title" id="title" hidden></div>
+        <div class="hub" role="button" tabindex="0" title="Open amplifier settings">
+          <ha-icon class="hicon" icon="mdi:amplifier"></ha-icon>
+          <div class="info">
+            <div class="hsub" id="hsub"></div>
+            <div class="amps" id="amps"></div>
+          </div>
+          <button class="alloff" id="alloff" title="Turn all zones off">
+            <ha-icon icon="mdi:power"></ha-icon>
+          </button>
         </div>
-        <button class="alloff" id="alloff" title="Turn all zones off">
-          <ha-icon icon="mdi:power"></ha-icon>
-        </button>
       </ha-card>
     `;
     const card = this.shadowRoot.querySelector(".hub");
@@ -1230,8 +1236,9 @@ class AxiumHubCard extends HTMLElement {
   _update() {
     const root = this.shadowRoot;
     const hub = this._hub();
-    root.getElementById("hname").textContent =
-      this._config.name || (hub ? hub.name : "Axium");
+    const titleEl = root.getElementById("title");
+    titleEl.textContent = this._config.name || (hub ? hub.name : "Axium");
+    titleEl.hidden = this._config.hide_title === true;
 
     const on = this._zonesOn().length;
     const clip = this._clipping();
@@ -1270,11 +1277,13 @@ class AxiumHubCard extends HTMLElement {
 }
 
 AxiumHubCard.styles = `
+  ha-card { padding: 16px; }
+  .title { font-size: 1.25rem; font-weight: 500; letter-spacing: 0.2px; color: var(--primary-text-color); margin-bottom: 12px; }
+  .title[hidden] { display: none; }
   .hub {
-    display: flex; align-items: center; gap: 14px;
-    padding: 16px; cursor: pointer;
+    display: flex; align-items: center; gap: 14px; cursor: pointer;
   }
-  .hub:focus-visible { outline: 2px solid var(--primary-color); outline-offset: -2px; }
+  .hub:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; border-radius: 10px; }
   .hicon {
     --mdc-icon-size: 26px; color: var(--primary-color); flex: 0 0 auto;
     width: 46px; height: 46px; border-radius: 12px;
@@ -1282,7 +1291,6 @@ AxiumHubCard.styles = `
     background: var(--secondary-background-color);
   }
   .info { flex: 1 1 auto; min-width: 0; }
-  .hname { font-size: 1.2rem; font-weight: 500; letter-spacing: 0.2px; color: var(--primary-text-color); }
   .hsub {
     font-size: 0.85rem; color: var(--secondary-text-color);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -1351,9 +1359,11 @@ class AxiumHubCardEditor extends HTMLElement {
           : { text: {} },
       },
       { name: "name", selector: { text: {} } },
+      { name: "hide_title", selector: { boolean: {} } },
     ];
     this._form.computeLabel = (s) =>
-      ({ hub: "Amplifier", name: "Card name (optional)" }[s.name] || s.name);
+      ({
+        hide_title: "Hide card title", hub: "Amplifier", name: "Card name (optional)" }[s.name] || s.name);
   }
 
   _changed(ev) {
@@ -2101,7 +2111,7 @@ class AxiumMatrixCard extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>${AxiumMatrixCard.styles}</style>
       <ha-card>
-        ${this._config.name ? `<div class="title">${escHtml(this._config.name)}</div>` : ""}
+        ${this._config.hide_title === true ? "" : `<div class="title">${escHtml(this._config.name || "Zones")}</div>`}
         <div class="scroll">
           <div class="matrix" style="grid-template-columns: minmax(72px,auto) repeat(${
             columns.length
@@ -3084,7 +3094,7 @@ AxiumMatrixCard.styles = `
   .title { font-size: 1.25rem; font-weight: 500; letter-spacing: 0.2px; margin-bottom: 12px; color: var(--primary-text-color); }
   .scroll { overflow-x: auto; }
   .matrix { display: grid; gap: 4px; align-items: stretch; min-width: min-content; }
-  .corner { display: flex; align-items: center; justify-content: flex-start; }
+  .corner { display: flex; align-items: flex-start; justify-content: flex-start; padding-top: 4px; }
   .allpower {
     display: inline-flex; align-items: center; justify-content: center;
     width: 34px; height: 34px; border-radius: 50%; cursor: pointer;
@@ -3347,9 +3357,11 @@ class AxiumMatrixCardEditor extends HTMLElement {
           : { text: {} },
       },
       { name: "name", selector: { text: {} } },
+      { name: "hide_title", selector: { boolean: {} } },
     ];
     this._form.computeLabel = (s) =>
       ({
+        hide_title: "Hide card title",
         hub: "Amplifier",
         zones: "Zones to show (empty = all)",
         sources: "Sources to show (empty = all)",
@@ -3516,7 +3528,7 @@ class AxiumAlarmsCard extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>${AxiumAlarmsCard.styles}</style>
       <ha-card>
-        <div class="title">${title}</div>
+        ${this._config.hide_title === true ? "" : `<div class="title">${escHtml(title)}</div>`}
         <div class="rows" id="rows"></div>
         <div class="addbar"><button class="link" id="addtoggle">+ Add alarm</button></div>
         <div class="addform" id="addform" hidden></div>
@@ -3530,12 +3542,11 @@ class AxiumAlarmsCard extends HTMLElement {
       row.innerHTML = `
         <label class="tog"><input type="checkbox" class="en"><span class="track"></span></label>
         <div class="mid">
-          <div class="n"></div>
+          <div class="rhead"><div class="n"></div><div class="cd" data-id="${id}"></div></div>
           <div class="sub"><input type="time" class="time"><span class="days"></span></div>
           <div class="zn"></div>
           <div class="src"></div>
         </div>
-        <div class="cd" data-id="${id}"></div>
         <button class="x" title="Remove">&#10005;</button>`;
       row.querySelector(".en").addEventListener("change", (e) =>
         this._svc("set_alarm", { name, enabled: e.target.checked })
@@ -3704,11 +3715,6 @@ class AxiumAlarmsCard extends HTMLElement {
           .join("")}${streams
           .map((a) => `<option value="stream:${escHtml(a.player)}">${escHtml(a.name)}</option>`)
           .join("")}</select>
-        <div class="f-media">
-          <button type="button" class="mediabtn link">♪ Pick a Music Assistant track…</button>
-          <span class="mediasel"></span>
-          <div class="mediabrowse" hidden></div>
-        </div>
       </div>
       <div class="af-field">
         <span class="af-label">Volume <span class="volval">30%</span></span>
@@ -3720,6 +3726,14 @@ class AxiumAlarmsCard extends HTMLElement {
           <input type="number" class="f-duration" min="0" max="1440" step="1" value="0" inputmode="numeric">
           <span class="af-unit">min</span>
           <span class="durhint">0 = stay on</span>
+        </div>
+      </div>
+      <div class="af-field">
+        <span class="af-label">Or a Music Assistant track</span>
+        <div class="f-media">
+          <button type="button" class="mediabtn link">♪ Pick a Music Assistant track…</button>
+          <span class="mediasel"></span>
+          <div class="mediabrowse" hidden></div>
         </div>
       </div>
       <div class="af-actions">
@@ -3855,6 +3869,11 @@ class AxiumAlarmsCard extends HTMLElement {
 
   _openMediaBrowse(form) {
     const box = form.querySelector(".mediabrowse");
+    // Toggle: if the browser is already open, collapse it (re-clicking closes).
+    if (!box.hidden) {
+      box.hidden = true;
+      return;
+    }
     const player = this._masterStreamPlayer();
     if (!player) {
       box.hidden = false;
@@ -3909,7 +3928,8 @@ AxiumAlarmsCard.styles = `
   }
   .row:hover { border-color: var(--primary-color); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); }
   .mid { flex: 1 1 auto; min-width: 0; }
-  .n { font-weight: 500; color: var(--primary-text-color); }
+  .rhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .n { font-weight: 500; color: var(--primary-text-color); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
   .zn { font-size: 0.78rem; color: var(--secondary-text-color); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .src { font-size: 0.78rem; color: var(--primary-color); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -4244,7 +4264,7 @@ class AxiumSleepCard extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>${AxiumSleepCard.styles}</style>
       <ha-card>
-        <div class="title">${title}</div>
+        ${this._config.hide_title === true ? "" : `<div class="title">${escHtml(title)}</div>`}
         <div class="rows" id="rows"></div>
         <div class="overlay" id="overlay" hidden><div class="sheet" id="sheet"></div></div>
       </ha-card>`;
@@ -4259,14 +4279,13 @@ class AxiumSleepCard extends HTMLElement {
       row.className = "row";
       const label = d.kind === "preset" ? d.label : this._zoneName(d.numberId);
       row.innerHTML = `
-        <div class="mid">
-          <div class="n">${label}</div>
-          <div class="quick">${[15, 30, 60, 90]
-            .map((m) => `<button class="q" data-m="${m}">${m}m</button>`)
-            .join("")}<button class="custom" title="Custom minutes">Custom…</button></div>
+        <div class="rhead">
+          <div class="n">${escHtml(label)}</div>
+          <div class="rright"><span class="cd"></span><button class="x" title="Cancel" hidden>&#10005;</button></div>
         </div>
-        <div class="cd"></div>
-        <button class="x" title="Cancel" hidden>&#10005;</button>`;
+        <div class="quick">${[15, 30, 60, 90]
+          .map((m) => `<button class="q" data-m="${m}">${m}m</button>`)
+          .join("")}<button class="custom" title="Custom minutes">Custom…</button></div>`;
       const apply = (minutes) => {
         if (d.kind === "preset") this._setZones(d.zones, minutes);
         else
@@ -4397,14 +4416,16 @@ AxiumSleepCard.styles = `
   }
   .rows { display: flex; flex-direction: column; gap: 8px; }
   .row {
-    display: flex; align-items: center; gap: 10px;
+    display: flex; flex-direction: column; gap: 8px;
     padding: 10px 12px; border-radius: 12px;
     border: 1px solid var(--divider-color); background: var(--card-background-color);
     transition: border-color 0.12s ease, box-shadow 0.12s ease;
   }
   .row:hover { border-color: var(--primary-color); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); }
   .mid { flex: 1 1 auto; min-width: 0; }
-  .n { font-weight: 500; color: var(--primary-text-color); }
+  .rhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .rright { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+  .n { font-weight: 500; color: var(--primary-text-color); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
   .zn { font-size: 0.78rem; color: var(--secondary-text-color); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .src { font-size: 0.78rem; color: var(--primary-color); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -4594,9 +4615,11 @@ class AxiumSleepCardEditor extends HTMLElement {
           : { entity: { integration: "axium", domain: "media_player", multiple: true } },
       },
       { name: "name", selector: { text: {} } },
+      { name: "hide_title", selector: { boolean: {} } },
     ];
     this._form.computeLabel = (s) =>
       ({
+        hide_title: "Hide card title",
         hub: "Amplifier",
         sections: "Show",
         zones: "Zones to show (empty = all)",
@@ -4703,7 +4726,7 @@ class AxiumVolumesCard extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>${AxiumVolumesCard.styles}</style>
       <ha-card>
-        <div class="title">${escHtml(title)}</div>
+        ${this._config.hide_title === true ? "" : `<div class="title">${escHtml(title)}</div>`}
         ${
           zones.length
             ? `<div class="cols"></div>`
@@ -4899,9 +4922,11 @@ class AxiumVolumesCardEditor extends HTMLElement {
           : { entity: { integration: "axium", domain: "media_player", multiple: true } },
       },
       { name: "name", selector: { text: {} } },
+      { name: "hide_title", selector: { boolean: {} } },
     ];
     this._form.computeLabel = (s) =>
       ({
+        hide_title: "Hide card title",
         hub: "Amplifier",
         zones: "Zones to show (empty = all)",
         name: "Card name (optional)",
@@ -5218,7 +5243,7 @@ class AxiumQuickPlayCard extends HTMLElement {
     this.shadowRoot.innerHTML = `<style>${AxiumQuickPlayCard.styles}</style>
       <ha-card>
         <div class="head">
-          <div class="title">${escHtml(title)}</div>
+          ${this._config.hide_title === true ? "" : `<div class="title">${escHtml(title)}</div>`}
           <button class="editbtn iconbtn${this._edit ? " on" : ""}" title="Edit favourites"
             aria-label="Edit favourites" aria-pressed="${this._edit}">
             <ha-icon icon="mdi:pencil"></ha-icon></button>
@@ -5396,6 +5421,7 @@ AxiumQuickPlayCard.styles = `
     padding: 6px; --mdc-icon-size: 22px; border-radius: 50%; display: inline-flex; align-items: center;
   }
   .iconbtn:hover { background: var(--secondary-background-color); color: var(--primary-text-color); }
+  .editbtn { margin-left: auto; }
   .editbtn.on { color: var(--primary-color); background: var(--secondary-background-color); }
 
   .streams { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }

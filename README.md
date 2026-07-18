@@ -534,6 +534,10 @@ playing that source.
 It follows touch/UX guidance: chips use a clear *selected* state (accent fill +
 check), ≥40px tall with 8px spacing, and the transport buttons are 48px targets.
 
+**Every Axium card** shows a title (its name, or a default) that you can turn off
+with the **"Hide card title"** toggle in the card's visual editor (or
+`hide_title: true` in YAML) — handy when a dashboard heading already labels it.
+
 **Install** — nothing to do. The integration **registers the card
 automatically**; just clear your browser cache / hard-refresh after installing
 or updating. (If it doesn't appear, add the resource manually: Settings →

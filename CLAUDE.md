@@ -273,6 +273,25 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   then redesigned) so alarms/sleep are independently revertible; don't re-point it back at the alarms
   styles. When restyling, prefer **styles-only** edits (no markup/handler changes) so a card's
   redesign is a clean, revertible diff.
+- **Card title + `hide_title`**: every card renders a title (**source** = source name, **hub** = hub/amp
+  name, **matrix** = `name || "Zones"`, **alarms** = "Alarms", **sleep** = "Sleep timers", **volumes** =
+  "Volumes", **quickplay** = "Quick Play"), overridable by `config.name`. A **`hide_title: true`** config
+  key hides it on any card (default shown); each editor has a **"Hide card title"** boolean
+  (`{name:"hide_title", selector:{boolean:{}}}` + a `computeLabel` entry). Cards that rebuild markup gate
+  it with `${this._config.hide_title === true ? "" : \`<div class="title">…\`}`; the build-once cards
+  (source, hub) toggle `titleEl.hidden`. The hub card's title is a top row **above** the icon/status
+  body (the amp name moved out of the body into the title, so `.hub`'s `align-items:center` centers the
+  **icon against the status+amp-list**, per the request).
+- **Alarm/sleep countdown lives in a row header, NOT a full-height right column.** Both cards put the
+  countdown (`.cd`) in a `.rhead` flex line next to the name (`justify-content:space-between`), so it sits
+  **top-right by the name** instead of vertically-centered over the day/quick buttons (the reported
+  overlap). Sleep's `.row` is `flex-direction:column` (`.rhead` over the `.quick` buttons); its `.cd`+
+  cancel `.x` sit in a `.rright` group. Alarm's `.cd` keeps its `data-id` (that's how `_tickCountdowns`
+  finds it). Matrix corner all-power button is `align-items:flex-start; padding-top:4px` so it tops the
+  header row instead of centering low.
+- **Alarm add-form media picker** ("Pick a Music Assistant track") is the **last** field and
+  **collapsible**: `_openMediaBrowse` toggles (`if (!box.hidden) { box.hidden = true; return; }`) so
+  re-clicking closes it instead of re-expanding.
 - Chip interactions: **tap** toggles the zone, **long-press (500ms)** opens the zone's
   device page (`_attachChipHandlers`/`_openZoneDevice`, pointer events; navigates to
   `/config/devices/device/<device_id>` via a `location-changed` event, more-info
