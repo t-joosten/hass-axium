@@ -662,6 +662,13 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   UI pref). Reuses `axium-hub-card-editor` (hub + name). The picker overlay is the responsive sheet pattern
   (mobile almost-full, desktop ~520px); an open picker survives hass updates (`_render` refreshes the
   search's `.hass`).
+  **Rooms picker (v0.0.138):** a `.roomsbtn` under the stream pills summarises the selected amp's rooms on
+  the stream and expands `.room` chips (`_roomsHtml`); `_roomOn` = powered (checked FIRST — off zones report
+  0x12 while the amp streams) + current source id ≥ `STREAM_SOURCE_MIN`; `_toggleRoom` routes via
+  `select_source` to the zone's first ≥0x10 source (+ `media_play` the amp MA player if not playing) or
+  `turn_off`s the room (never stops the stream). `_onButton` calls `_ensureRooms` before `_play`: with no
+  room on, it re-routes the last non-empty room set (`localStorage axium-quickplay-rooms:<hub>` per amp id)
+  or opens the picker with a hint. `_amps()` now carries each amp's sorted `zones`.
   **Sheet-scroll trap (fixed):** the sheet CSS must NOT set `display: block` on the embedded
   `<axium-ma-search>` — that overrides the component's `:host{display:flex;flex-direction:column}`, which
   collapses the flex chain so `.ssresults` (which has `overflow-y:auto`) never gets a bounded height and
