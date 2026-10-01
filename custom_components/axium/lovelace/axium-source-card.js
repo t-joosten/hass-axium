@@ -5844,11 +5844,15 @@ class AxiumQuickPlayCard extends HTMLElement {
   }
 
   _build(amps, items, np) {
-    const title = this._config.name || "Quick Play";
+    // No default title — only shown when the card is given a name.
+    const title = this._config.hide_title === true ? "" : this._config.name || "";
+    const headHtml = title
+      ? `<div class="head"><div class="title">${escHtml(title)}</div></div>`
+      : "";
     if (!amps.length) {
       this.shadowRoot.innerHTML = `<style>${AxiumQuickPlayCard.styles}</style>
         <ha-card>
-          <div class="head"><div class="title">${escHtml(title)}</div></div>
+          ${headHtml}
           <div class="nostream">No Music Assistant stream player found. In Music
             Assistant, rename each amp's player to its device name (e.g.
             &quot;Axium 1&quot;).</div>
@@ -5904,13 +5908,17 @@ class AxiumQuickPlayCard extends HTMLElement {
 
     this.shadowRoot.innerHTML = `<style>${AxiumQuickPlayCard.styles}</style>
       <ha-card>
-        <div class="head">
-          ${this._config.hide_title === true ? "" : `<div class="title">${escHtml(title)}</div>`}
-          <button class="editbtn iconbtn${this._edit ? " on" : ""}" title="Edit favourites"
-            aria-label="Edit favourites" aria-pressed="${this._edit}">
-            <ha-icon icon="mdi:pencil"></ha-icon></button>
+        ${headHtml}
+        <div class="topbar">
+          ${streams}
+          <span class="tools">
+            <button class="searchbtn iconbtn" title="Search music" aria-label="Search music">
+              <ha-icon icon="mdi:magnify"></ha-icon></button>
+            <button class="editbtn iconbtn${this._edit ? " on" : ""}" title="Edit favourites"
+              aria-label="Edit favourites" aria-pressed="${this._edit}">
+              <ha-icon icon="mdi:pencil"></ha-icon></button>
+          </span>
         </div>
-        ${streams}
         ${this._roomsHtml(amps.find((a) => a.player === this._sel))}
         ${this._volumeHtml(amps.find((a) => a.player === this._sel))}
         ${npHtml}
@@ -5942,6 +5950,9 @@ class AxiumQuickPlayCard extends HTMLElement {
       sl.addEventListener("input", () => this._onVolInput(sl.dataset.z, Number(sl.value), false));
       sl.addEventListener("change", () => this._onVolInput(sl.dataset.z, Number(sl.value), true));
     }
+    this.shadowRoot
+      .querySelector(".searchbtn")
+      .addEventListener("click", () => this._openSearch());
     this.shadowRoot.querySelector(".editbtn").addEventListener("click", () => {
       this._edit = !this._edit;
       this._sig = "";
@@ -6070,6 +6081,30 @@ class AxiumQuickPlayCard extends HTMLElement {
     search.player = this._sel;
     search.addEventListener("pick", (ev) => this._onPick(i, ev.detail));
     sheet.querySelector(".close").addEventListener("click", () => this._closePicker());
+    this._searchOpen = false;
+    overlay.hidden = false;
+  }
+
+  /** Search Music Assistant and play a result on the selected stream right away. */
+  _openSearch() {
+    const overlay = this.shadowRoot.getElementById("qpoverlay");
+    const sheet = this.shadowRoot.getElementById("qpsheet");
+    if (!overlay || !sheet || !this._sel) return;
+    const amp = this._selAmp();
+    sheet.innerHTML = `
+      <div class="sheet-head">
+        <span class="sheet-title">Search${amp ? ` · ${escHtml(amp.name)}` : ""}</span>
+        <button class="close iconbtn" aria-label="Close"><ha-icon icon="mdi:close"></ha-icon></button>
+      </div>
+      <axium-ma-search></axium-ma-search>`;
+    const search = sheet.querySelector("axium-ma-search");
+    search.mode = "play";
+    search.hass = this._hass;
+    search.player = this._sel;
+    // A result started playing: make sure a room is on so it's actually heard.
+    search.addEventListener("play", () => this._ensureRooms());
+    sheet.querySelector(".close").addEventListener("click", () => this._closePicker());
+    this._searchOpen = true;
     overlay.hidden = false;
   }
 
@@ -6094,8 +6129,19 @@ class AxiumQuickPlayCard extends HTMLElement {
   _closePicker() {
     const overlay = this.shadowRoot.getElementById("qpoverlay");
     if (overlay) overlay.hidden = true;
-    const sheet = this.shadowRoot.getElementById("qpsheet");
-    if (sheet) sheet.innerHTML = "";
+    // The play-mode search may still owe its deferred second play_media (the
+    // switch-from-playing double fire, ~1.5s); emptying the sheet would
+    // disconnect it and cancel that, stopping the music. Just hide it — the
+    // next open replaces the sheet anyway.
+    if (this._searchOpen) {
+      this._searchOpen = false;
+    } else {
+      const sheet = this.shadowRoot.getElementById("qpsheet");
+      if (sheet) sheet.innerHTML = "";
+    }
+    // Catch up on anything that changed while the sheet was open.
+    this._sig = "";
+    this._render();
   }
 }
 
@@ -6109,8 +6155,11 @@ AxiumQuickPlayCard.styles = `
     padding: 6px; --mdc-icon-size: 22px; border-radius: 50%; display: inline-flex; align-items: center;
   }
   .iconbtn:hover { background: var(--secondary-background-color); color: var(--primary-text-color); }
-  .editbtn { margin-left: auto; }
   .editbtn.on { color: var(--primary-color); background: var(--secondary-background-color); }
+  .head + .topbar { margin-top: 14px; }
+  .topbar { display: flex; align-items: center; gap: 8px; }
+  .topbar > .streams, .topbar > .streamsone { flex: 1 1 auto; min-width: 0; margin-top: 0; }
+  .tools { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; flex: 0 0 auto; }
 
   .streams { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
   .stream {

@@ -767,7 +767,12 @@ which **amp stream** to play on with the pills at the top (e.g. *Axium 1* /
 *Axium 2*), then **tap a tile to play** that favourite on it. A **Now playing**
 strip shows the stream's current track, and the matching tile is highlighted.
 Only tiles you've set are shown, each with cover art, title and the source
-(Spotify · Playlist, …).
+(Spotify · Playlist, …). The card has **no title** unless you give it a name.
+
+The **🔍 search** button (next to the stream pills) opens the same Music Assistant
+search as the matrix stream panel and **plays a result straight away** on the
+selected stream — no need to add it as a favourite first. Like a tile, it turns
+your last-used rooms on if none are on.
 
 A **Rooms** button under the stream pills shows which rooms are on that stream
 ("Woonkamer, Keuken" or "No rooms"); tap it to expand a chip per room of that amp

@@ -275,7 +275,7 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   redesign is a clean, revertible diff.
 - **Card title + `hide_title`**: every card renders a title (**source** = source name, **hub** = hub/amp
   name, **matrix** = `name || "Zones"`, **alarms** = "Alarms", **sleep** = "Sleep timers", **volumes** =
-  "Volumes", **quickplay** = "Quick Play"), overridable by `config.name`. A **`hide_title: true`** config
+  "Volumes", **quickplay** = NONE by default — shown only when `config.name` is set, per user request), overridable by `config.name`. A **`hide_title: true`** config
   key hides it on any card (default shown); each editor has a **"Hide card title"** boolean
   (`{name:"hide_title", selector:{boolean:{}}}` + a `computeLabel` entry). Cards that rebuild markup gate
   it with `${this._config.hide_title === true ? "" : \`<div class="title">…\`}`; the build-once cards
@@ -669,6 +669,10 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `turn_off`s the room (never stops the stream). `_onButton` calls `_ensureRooms` before `_play`: with no
   room on, it re-routes the last non-empty room set (`localStorage axium-quickplay-rooms:<hub>` per amp id)
   or opens the picker with a hint. `_amps()` now carries each amp's sorted `zones`.
+  **Search (v0.0.140):** a `.searchbtn` in the `.topbar` (stream pills + tools on one row) opens
+  `_openSearch` = the shared `<axium-ma-search mode="play">` on the selected stream; its `play` event calls
+  `_ensureRooms`. `_closePicker` only HIDES the sheet in search mode (`_searchOpen`) — emptying it would
+  disconnect the element and cancel its deferred switch-from-playing second `play_media`.
   **Volume (v0.0.139):** `_volumeHtml` (only while ≥1 room is on the stream) = a master slider
   (`data-z="__master"`, shows the loudest room; a drag snapshots `_volSnap` and moves every on-room by the
   same delta, clamped to `axiumMaxVolume`) + ⌄ per-room sliders (`_volOpen`, in the sig). Levels are NOT in
