@@ -539,6 +539,20 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   announcement's resume works). User presses play in Spotify. Not fixable integration-side. **Ducking
   (music lowered under the voice) is impossible**: a zone is one source and an amp's zones share one
   stream; nothing upstream mixes. Don't re-attempt.
+  **Per-zone announce levels (v0.0.136):** each zone has `AxiumNotifyVolume` numbers (number.py,
+  `RestoreNumber`, HA-side, unique id `<entry>_zone_<n>_{notification,alarm}_volume`, defaults in
+  `NOTIFY_VOLUME_DEFAULTS` 50/85) published into `hass.data[DATA_NOTIFY_VOLUMES][entry][zone][kind]`.
+  `play_notification` has `type: notification|alarm` (default notification); per-zone level = explicit
+  `volume` (all zones) → that zone's number → default. NB their entity ids are device-name based
+  (e.g. `number.gang_wc_notification_volume`, created after the `axium_<uid>_` migration ran), so the
+  card resolves them via `axiumZoneNumberEntity` (fast path, then device scan). **Listener volume timing:**
+  on the MA path, zones already on the stream ("listeners") are activated with level None and only get
+  their announcement level after the MA player leaves "playing", and their music level back when the
+  clip ends — history showed zone 1 jumping to 85 % ~1 s BEFORE MA stopped the music. Those mid-
+  announcement volume sets aren't read back (no echo), so HA history won't show the transient level.
+  **Volumes card** has a Music / Notification / Alarm switch (`_vtype`, localStorage
+  `axium-volumes-vtype:<hub>`): non-music modes read/write those numbers (`number.set_value`), hide mute,
+  don't dim off rooms; Link/Match work in all modes.
 - **Stream volume** (`AxiumStreamVolume`, number.py, one per amp, unique id `<entry>_stream_volume`
   (+`_unit_<uid>`)): value = loudest zone of that amp that's on + on a `MEDIA_SOURCE_BYTES` source
   (keeps the last value when none, so MA's slider doesn't drop to 0); set = move every such zone by the
