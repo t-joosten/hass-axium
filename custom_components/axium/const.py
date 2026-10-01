@@ -42,6 +42,9 @@ DATA_SLEEP_DEADLINES: Final = f"{DOMAIN}_sleep_deadlines"  # {entry_id: {zone: d
 DATA_PREV_OPTIONS: Final = f"{DOMAIN}_prev_options"  # {entry_id: options snapshot}
 # {entry_id: bool} — a play_notification is running (stream-volume sets are ignored)
 DATA_NOTIFYING: Final = f"{DOMAIN}_notifying"
+# {entry_id: {zone: {"notification": pct, "alarm": pct}}} — per-zone announce levels
+DATA_NOTIFY_VOLUMES: Final = f"{DOMAIN}_notify_volumes"
+NOTIFY_VOLUME_DEFAULTS: Final = {"notification": 50, "alarm": 85}
 SIGNAL_SLEEP_UPDATE: Final = f"{DOMAIN}_sleep_update"  # + "_{entry_id}"
 SIGNAL_ALARM_UPDATE: Final = f"{DOMAIN}_alarm_update"  # + "_{entry_id}"
 SIGNAL_QUICKPLAY_UPDATE: Final = f"{DOMAIN}_quickplay_update"  # + "_{entry_id}"

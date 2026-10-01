@@ -495,16 +495,26 @@ The **`axium.play_notification`** service plays a sound on the zones you choose
 and then **puts every zone back exactly as it was** — same source, volume, mute
 (or off if it was off). Because the amplifier can't *mix* audio (a zone plays one
 source at a time), it **overrides** the source for the notification rather than
-ducking under it; give the notification its own (louder) volume so it's heard,
-and each zone's original volume is restored afterwards.
+ducking under it — you hear the music *or* the announcement, never both — and each
+zone's original volume is restored afterwards.
+
+**Per-zone volumes.** Every zone has two settings on its device page
+(Configuration): **Notification volume** (default 50 %) and **Alarm volume**
+(default 85 %). A call plays each zone at its own level — pick which with
+`type: notification` (default) or `type: alarm` — so a hallway can be louder than
+a bedroom. An explicit `volume` in the call overrides them for every zone. The
+amp still caps each zone at its *Maximum volume*. (*Alarm volume* is for alarm
+**announcements** such as a security alarm; wake-up alarms have their own volume.)
 
 **When the zone's amp has a Music Assistant player** (named after the amp device,
 e.g. "Axium 1" — see the matrix card), the sound is played as a **Music Assistant
 announcement** on that player: MA stops the music, plays the clip, and **resumes
 the same track at the same position**. Rooms that weren't listening to the stream
 are held muted until the music has stopped, and muted again the moment the clip
-ends, so they hear only the announcement. (The amplifier can't mix audio, so the
-music is paused for the announcement rather than ducked under it.)
+ends, so they hear only the announcement. Rooms that *were* listening keep their
+music volume until the music stops, switch to their announcement level, and get
+their music volume back before it resumes — so you never get a burst of music at
+alarm volume.
 
 > **Spotify Connect:** if the amp is playing via Spotify Connect (your phone),
 > the notification still plays, but the music does **not** resume by itself —
@@ -538,7 +548,7 @@ actions:
       zones:
         - media_player.hallway
         - media_player.kitchen
-      volume: 55                       # notification volume (%)
+      # no volume → each zone's own "Notification volume"
       media_content_id: media-source://media_source/local/doorbell.mp3
 ```
 
@@ -551,9 +561,20 @@ actions:
   - action: axium.play_notification
     data:
       zones: [media_player.kitchen]
-      volume: 50
+      volume: 50            # optional: same level in every zone
       message: The washing machine is done
       language: en          # optional; e.g. "nl" with Google Translate for Dutch
+```
+
+For an alarm, add `type: alarm` (uses each zone's *Alarm volume*):
+
+```yaml
+actions:
+  - action: axium.play_notification
+    data:
+      type: alarm
+      presets: [Downstairs]
+      message: Alarm! Intrusion detected
 ```
 
 It uses your first TTS engine unless you set `tts_engine`. You can target

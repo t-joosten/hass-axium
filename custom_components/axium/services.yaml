@@ -157,12 +157,13 @@ play_notification:
   name: Play notification
   description: >-
     Play a sound on selected zones, then restore exactly what they were doing
-    (source, volume, mute — or off). The amp can't mix audio, so this overrides
-    the source for the duration; give it a louder notification volume to be
-    heard over quieter content. By default the sound is pushed straight to each
-    zone's built-in amp renderer (works on every zone, no DLNA discovery needed),
-    so the amp must be able to reach Home Assistant on your main LAN. Set a
-    Renderer only to route through a specific media_player instead.
+    (source, volume, mute — or off). The amp can't mix audio, so music pauses
+    for the announcement. When the zone's amp has a Music Assistant player
+    (named after the amp) the sound plays as an MA announcement, which resumes
+    the same track afterwards; otherwise it's pushed straight to each zone's
+    built-in amp renderer (the amp must reach Home Assistant on your main LAN).
+    Each zone plays at its own Notification or Alarm volume (see Type) unless
+    you set Volume. Set a Renderer only to route through a specific media_player.
   fields:
     hub:
       name: Amplifier
@@ -188,9 +189,23 @@ play_notification:
           multiple: true
           custom_value: true
           options: []
+    type:
+      name: Type
+      description: >-
+        Which per-zone level to use when Volume is left out: each zone's
+        "Notification volume" (default 50 %) or "Alarm volume" (default 85 %).
+      required: false
+      default: notification
+      selector:
+        select:
+          options:
+            - notification
+            - alarm
     volume:
-      name: Notification volume
-      description: Volume for the notification (percent). Left out = keep current.
+      name: Volume
+      description: >-
+        Volume for every zone (percent). Left out = each zone's own
+        Notification/Alarm volume (see Type).
       required: false
       selector:
         number:

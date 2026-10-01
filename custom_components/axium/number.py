@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from homeassistant.components.number import NumberEntity, NumberMode
+from homeassistant.components.number import NumberEntity, NumberMode, RestoreNumber
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
@@ -37,12 +37,14 @@ from .const import (
     CMD_TREBLE,
     CMD_VOLUME,
     CMD_ZONE_GAIN,
+    DATA_NOTIFY_VOLUMES,
     DATA_NOTIFYING,
     DATA_SLEEP_DEADLINES,
     DEFAULT_SOURCE_COUNT,
     DOMAIN,
     ID_KEY,
     MEDIA_SOURCE_BYTES,
+    NOTIFY_VOLUME_DEFAULTS,
     POWER_OFF,
     SIGNAL_SLEEP_UPDATE,
     SOURCE_BYTE_TO_NAME,
@@ -192,6 +194,12 @@ async def async_setup_entry(
         )
     entities.append(AxiumStandbyTime(controller, entry))
     entities.extend(_stream_volume_entities(controller, entry))
+    # Per-zone announcement levels used by axium.play_notification (type).
+    entities.extend(
+        AxiumNotifyVolume(entry, item[ZONE_KEY], kind)
+        for item in get_zones(entry)
+        for kind in NOTIFY_VOLUME_DEFAULTS
+    )
     async_add_entities(entities)
 
 
@@ -330,6 +338,63 @@ class AxiumStreamVolume(NumberEntity):
         # The amp doesn't echo a set — read the volumes back.
         for zone in zones:
             await self._controller.async_send(CMD_VOLUME, zone)
+
+
+class AxiumNotifyVolume(RestoreNumber):
+    """Per-zone announcement level for ``axium.play_notification``.
+
+    ``kind`` "notification" or "alarm" matches the action's ``type``; a call
+    without an explicit ``volume`` plays each zone at its own level here. Stored
+    HA-side (restored across restarts) — not an amp setting, so it's editable
+    while the amp is offline. The amp still caps it at the zone's max volume.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = "%"
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(self, entry: ConfigEntry, zone: int, kind: str) -> None:
+        """Initialise the notification/alarm volume for one zone."""
+        self._entry_id = entry.entry_id
+        self._zone = zone
+        self._kind = kind
+        self._value = NOTIFY_VOLUME_DEFAULTS[kind]
+        self._attr_name = "Alarm volume" if kind == "alarm" else "Notification volume"
+        self._attr_icon = "mdi:alarm-light" if kind == "alarm" else "mdi:bell-ring"
+        self._attr_unique_id = f"{entry.entry_id}_zone_{zone}_{kind}_volume"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_zone_{zone}")}
+        )
+
+    def _publish(self) -> None:
+        """Share the level with the play_notification action."""
+        self.hass.data.setdefault(DATA_NOTIFY_VOLUMES, {}).setdefault(
+            self._entry_id, {}
+        ).setdefault(self._zone, {})[self._kind] = self._value
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last level (default when never set)."""
+        await super().async_added_to_hass()
+        last = await self.async_get_last_number_data()
+        if last is not None and last.native_value is not None:
+            self._value = int(last.native_value)
+        self._publish()
+
+    @property
+    def native_value(self) -> int:
+        """Return the level (percent)."""
+        return self._value
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Store the new level."""
+        self._value = int(value)
+        self._publish()
+        self.async_write_ha_state()
 
 
 class AxiumSleepTimer(NumberEntity):

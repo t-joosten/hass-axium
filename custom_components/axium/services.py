@@ -37,11 +37,13 @@ from .const import (
     CMD_VOLUME,
     CONF_ALARMS,
     CONF_QUICKPLAY,
+    DATA_NOTIFY_VOLUMES,
     DATA_NOTIFYING,
     DOMAIN,
     MEDIA_SOURCE_BYTES,
     MUTE_OFF,
     MUTE_ON,
+    NOTIFY_VOLUME_DEFAULTS,
     POWER_OFF,
     SOURCE_FLAG_TURN_ON,
     SOURCE_MEDIA_PLAYER_BYTE,
@@ -201,6 +203,9 @@ _PLAY_NOTIFICATION_SCHEMA = vol.Schema(
         vol.Optional("hub"): cv.string,
         vol.Optional("zones"): vol.All(cv.ensure_list, [cv.string]),
         vol.Optional("presets"): vol.All(cv.ensure_list, [cv.string]),
+        vol.Optional("type", default="notification"): vol.In(
+            list(NOTIFY_VOLUME_DEFAULTS)
+        ),
         vol.Optional("volume"): vol.All(vol.Coerce(int), vol.Range(0, 100)),
         vol.Optional("source"): vol.Coerce(int),
         vol.Optional("media_player"): cv.entity_id,
@@ -479,7 +484,19 @@ async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> No
     if source is None:
         detected = controller.media_sources()
         source = detected[0] if detected else SOURCE_MEDIA_PLAYER_BYTE
-    level = call.data["volume"] / 100 if "volume" in call.data else None
+    # Per-zone level: an explicit 'volume' wins, else each zone's own
+    # Notification/Alarm volume number (by 'type'), else the default.
+    kind = call.data["type"]
+    store = hass.data.get(DATA_NOTIFY_VOLUMES, {}).get(entry.entry_id, {})
+    levels = {
+        zone: (
+            call.data["volume"]
+            if "volume" in call.data
+            else store.get(zone, {}).get(kind, NOTIFY_VOLUME_DEFAULTS[kind])
+        )
+        / 100
+        for zone in zones
+    }
 
     # A spoken 'message' becomes a TTS media-source id (validated up front so a
     # missing engine fails before any zone is overridden); an explicit
@@ -515,16 +532,19 @@ async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> No
             # An override renderer that doesn't exist falls back to the push.
             push_zones = list(zones)
 
-        # Rooms not already listening to their amp's stream "join" for the
-        # announcement. On the MA path they're held muted until MA has stopped
-        # the music, and muted again as soon as the clip ends (before MA resumes
-        # the music), so they only hear the announcement — never a burst of music.
+        # On the MA path, rooms not already listening to their amp's stream
+        # ("joiners") are held muted until MA has stopped the music and muted
+        # again as soon as the clip ends (before MA resumes), so they hear only
+        # the announcement. Rooms already listening ("listeners") keep their
+        # music volume until the music stops and get it back before it resumes —
+        # never a burst of music at the (louder) announcement level.
+        ma_all = {zone for zone_list in ma_zones.values() for zone in zone_list}
         joiners = {
             zone
-            for zone_list in ma_zones.values()
-            for zone in zone_list
+            for zone in ma_all
             if not (snapshot[zone][0] and snapshot[zone][1] in MEDIA_SOURCE_BYTES)
         }
+        listeners = ma_all - joiners
 
         pushed_urls: list[str] = []
         notifying = hass.data.setdefault(DATA_NOTIFYING, {})
@@ -535,7 +555,10 @@ async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> No
                 if zone in joiners:
                     await controller.async_send(CMD_MUTE, zone, MUTE_ON)
                 await controller.async_activate_zone(
-                    zone, source, level, unmute=zone not in joiners
+                    zone,
+                    source,
+                    None if zone in listeners else levels[zone],
+                    unmute=zone not in joiners,
                 )
             for zone in zones:
                 await controller.async_request_zone_state(zone)
@@ -591,9 +614,19 @@ async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> No
                             CMD_MUTE, zone, MUTE_ON if muted else MUTE_OFF
                         )
 
+                async def _set_levels(group: list[int], restore: bool) -> None:
+                    """Apply the announcement level, or restore the music level."""
+                    for zone in group:
+                        lvl = snapshot[zone][2] if restore else levels[zone]
+                        if lvl is not None:
+                            await controller.async_send(
+                                CMD_VOLUME, zone, level_to_volume(lvl)
+                            )
+
                 async def _announce(player: str, player_zones: list[int]) -> None:
                     """Announce via the amp's MA player; push if MA fails."""
                     joining = [z for z in player_zones if z in joiners]
+                    listening = [z for z in player_zones if z in listeners]
                     was_playing = (
                         st := hass.states.get(player)
                     ) is not None and st.state == "playing"
@@ -607,19 +640,20 @@ async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> No
                     unsub = async_track_state_change_event(hass, [player], _on_change)
                     task = hass.async_create_task(_ma_announce(hass, player, media_url))
                     try:
-                        if joining:
-                            if was_playing:  # MA stops the music first
-                                await _wait_player_state(
-                                    states, task, lambda s: s != "playing", 8
-                                )
-                            await _set_muted(joining, False)
+                        if was_playing:  # MA stops the music first
                             await _wait_player_state(
-                                states, task, lambda s: s == "playing", 15
+                                states, task, lambda s: s != "playing", 5
                             )
-                            await _wait_player_state(
-                                states, task, lambda s: s != "playing", 300
-                            )
-                            await _set_muted(joining, True)
+                        await _set_levels(listening, restore=False)
+                        await _set_muted(joining, False)
+                        await _wait_player_state(
+                            states, task, lambda s: s == "playing", 15
+                        )
+                        await _wait_player_state(
+                            states, task, lambda s: s != "playing", 300
+                        )
+                        await _set_muted(joining, True)
+                        await _set_levels(listening, restore=True)
                         await task
                     except Exception as err:  # noqa: BLE001 - fall back to push
                         _LOGGER.warning(
@@ -628,6 +662,7 @@ async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> No
                             player,
                             err,
                         )
+                        await _set_levels(listening, restore=False)
                         await _set_muted(joining, False)
                         await _push(player_zones)
                         await _wait_pushed()
