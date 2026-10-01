@@ -325,6 +325,24 @@ function axiumApplyVolCap(el, hass, zoneId, prop) {
   if (el) el.style[prop] = Math.max(0, 100 - axiumMaxVolume(hass, zoneId)) + "%";
 }
 
+// The id of a zone's own Axium number entity with the given suffix (e.g.
+// "_notification_volume"), or null. Same fast path / device-scan fallback as
+// axiumMaxVolume.
+function axiumZoneNumberEntity(hass, zoneId, suffix) {
+  const states = hass.states || {};
+  const fast = "number." + zoneId.slice(zoneId.indexOf(".") + 1) + suffix;
+  if (states[fast]) return fast;
+  const ents = hass.entities || {};
+  const dev = ents[zoneId] && ents[zoneId].device_id;
+  if (!dev) return null;
+  for (const id of Object.keys(ents)) {
+    if (!id.startsWith("number.") || !id.endsWith(suffix)) continue;
+    const e = ents[id];
+    if (e.device_id === dev && e.platform === "axium") return id;
+  }
+  return null;
+}
+
 function axiumSourceChoices(hass) {
   const hubs = axiumHubs(hass);
   const multi = hubs.length > 1;
@@ -4665,6 +4683,9 @@ class AxiumVolumesCard extends HTMLElement {
     this._selected = new Set(); // zones linked in "link" mode
     this._lastVal = {}; // last non-drag % per zone (drag-delta baseline)
     this._gang = null; // active drag snapshot: {anchor, start, snap, mode, targets}
+    // What the sliders control: the playing volume ("music") or each zone's
+    // announcement level used by axium.play_notification ("notification"/"alarm").
+    this._vtype = "music";
   }
 
   setConfig(config) {
@@ -4752,6 +4773,14 @@ class AxiumVolumesCard extends HTMLElement {
               <ha-icon icon="mdi:equal"></ha-icon><span>Match</span></button>
           </div>
         </div>
+        <div class="vtypes">
+          <button class="vtype" data-v="music" title="The zones' playing volume">
+            <ha-icon icon="mdi:music"></ha-icon><span>Music</span></button>
+          <button class="vtype" data-v="notification" title="Each zone's notification volume (axium.play_notification)">
+            <ha-icon icon="mdi:bell-ring"></ha-icon><span>Notification</span></button>
+          <button class="vtype" data-v="alarm" title="Each zone's alarm volume (axium.play_notification, type: alarm)">
+            <ha-icon icon="mdi:alarm-light"></ha-icon><span>Alarm</span></button>
+        </div>
         <div class="selbar" hidden>
           <span class="selbar-label">Zones:</span>
           ${presetChips}
@@ -4770,6 +4799,9 @@ class AxiumVolumesCard extends HTMLElement {
     this.shadowRoot
       .querySelector(".modebtn.match")
       .addEventListener("click", () => this._setMode("match"));
+    for (const btn of this.shadowRoot.querySelectorAll(".vtype")) {
+      btn.addEventListener("click", () => this._setVtype(btn.dataset.v));
+    }
     for (const chip of this.shadowRoot.querySelectorAll(".presetchip")) {
       chip.addEventListener("click", () => this._togglePreset(Number(chip.dataset.i)));
     }
@@ -4846,6 +4878,62 @@ class AxiumVolumesCard extends HTMLElement {
       /* ignore */
     }
     this._mode = m === "link" || m === "match" ? m : null;
+    let v = null;
+    try {
+      v = localStorage.getItem(this._vtypeKey());
+    } catch (e) {
+      /* ignore */
+    }
+    this._vtype = v === "notification" || v === "alarm" ? v : "music";
+  }
+
+  _vtypeKey() {
+    return `axium-volumes-vtype:${this._hubId()}`;
+  }
+
+  /** Switch what the sliders control (music / notification / alarm volume). */
+  _setVtype(v) {
+    if (v === this._vtype) return;
+    this._vtype = v;
+    try {
+      if (v === "music") localStorage.removeItem(this._vtypeKey());
+      else localStorage.setItem(this._vtypeKey(), v);
+    } catch (e) {
+      /* ignore */
+    }
+    // Drop any in-flight drag state from the other volume type.
+    for (const t of Object.values(this._timers)) if (t) clearTimeout(t);
+    this._timers = {};
+    this._drag = {};
+    this._gang = null;
+    this._lastVal = {};
+    this._reflectMode();
+    this._update(this._zones());
+  }
+
+  /** The number entity behind a zone's slider in notification/alarm mode. */
+  _levelEntity(z) {
+    if (this._vtype === "music") return null;
+    return axiumZoneNumberEntity(this._hass, z, `_${this._vtype}_volume`);
+  }
+
+  /** A zone's current slider level in percent (null = not available). */
+  _levelPct(z) {
+    if (this._vtype !== "music") {
+      const id = this._levelEntity(z);
+      const v = id && this._hass.states[id] ? Number(this._hass.states[id].state) : NaN;
+      return Number.isFinite(v) ? Math.round(v) : null;
+    }
+    const st = this._hass.states[z];
+    const a = st ? st.attributes : {};
+    // HA strips volume_level from an OFF media_player — fall back to axium_volume.
+    const lvl =
+      typeof a.volume_level === "number"
+        ? a.volume_level
+        : typeof a.axium_volume === "number"
+          ? a.axium_volume
+          : 0;
+    return Math.round(lvl * 100);
   }
 
   _persistMode() {
@@ -4908,6 +4996,10 @@ class AxiumVolumesCard extends HTMLElement {
     const cols = root.querySelector(".cols");
     const linkBtn = root.querySelector(".modebtn.link");
     const matchBtn = root.querySelector(".modebtn.match");
+    for (const b of root.querySelectorAll(".vtype")) {
+      b.classList.toggle("active", b.dataset.v === this._vtype);
+    }
+    if (cols) cols.classList.toggle("alt", this._vtype !== "music");
     if (linkBtn) linkBtn.classList.toggle("active", this._mode === "link");
     if (matchBtn) matchBtn.classList.toggle("active", this._mode === "match");
     if (cols) cols.classList.toggle("selmode", this._mode != null);
@@ -4938,15 +5030,8 @@ class AxiumVolumesCard extends HTMLElement {
   }
 
   _curPct(z) {
-    const st = this._hass.states[z];
-    const a = st ? st.attributes : {};
-    const lvl =
-      typeof a.volume_level === "number"
-        ? a.volume_level
-        : typeof a.axium_volume === "number"
-          ? a.axium_volume
-          : 0;
-    return Math.round(lvl * 100);
+    const v = this._levelPct(z);
+    return v == null ? 0 : v;
   }
 
   /** Snapshot the group at drag start so the others track the anchor without drift. */
@@ -5016,9 +5101,19 @@ class AxiumVolumesCard extends HTMLElement {
       this._timers[z] = null;
     }
     const maxv = axiumMaxVolume(this._hass, z) / 100;
+    const clamped = Math.max(0, Math.min(maxv, level));
+    if (this._vtype !== "music") {
+      const id = this._levelEntity(z);
+      if (id)
+        this._hass.callService("number", "set_value", {
+          entity_id: id,
+          value: Math.round(clamped * 100),
+        });
+      return;
+    }
     this._hass.callService("media_player", "volume_set", {
       entity_id: z,
-      volume_level: Math.max(0, Math.min(maxv, level)),
+      volume_level: clamped,
     });
   }
 
@@ -5027,25 +5122,24 @@ class AxiumVolumesCard extends HTMLElement {
       const col = this._cells[z];
       if (!col) continue;
       const st = this._hass.states[z];
-      const off = !st || OFF_STATES.includes(st.state);
+      const music = this._vtype === "music";
+      // Notification/alarm levels apply whether or not the room is on.
+      const off = music && (!st || OFF_STATES.includes(st.state));
       const a = st ? st.attributes : {};
       // HA strips volume_level/is_volume_muted from an OFF media_player, so fall
       // back to axium_volume/axium_muted to still show an off zone's real level.
       const muted = !!(
         typeof a.is_volume_muted === "boolean" ? a.is_volume_muted : a.axium_muted
       );
-      const lvl =
-        typeof a.volume_level === "number"
-          ? a.volume_level
-          : typeof a.axium_volume === "number"
-            ? a.axium_volume
-            : 0;
-      const pctv = Math.round(lvl * 100);
+      const level = this._levelPct(z);
+      const pctv = level == null ? 0 : level;
       col.classList.toggle("off", off);
       const slider = col.querySelector(".vol");
+      // No level entity (e.g. an older integration) -> nothing to control.
+      slider.disabled = level == null;
       if (!this._drag[z] && this.shadowRoot.activeElement !== slider) {
         slider.value = pctv;
-        col.querySelector(".pct").textContent = pctv + "%";
+        col.querySelector(".pct").textContent = level == null ? "-" : pctv + "%";
         this._lastVal[z] = pctv; // baseline for the next drag's delta
       }
       // Grey out the range above the zone's max volume.
@@ -5073,6 +5167,20 @@ AxiumVolumesCard.styles = `
   }
   .modebtn:hover { border-color: var(--primary-color); color: var(--primary-color); }
   .modebtn.active { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .vtypes {
+    display: inline-flex; gap: 2px; padding: 3px; margin-bottom: 14px; border-radius: 999px;
+    border: 1px solid var(--divider-color); max-width: 100%; flex-wrap: wrap;
+  }
+  .vtype {
+    display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: 999px;
+    border: none; background: none; cursor: pointer; font: inherit; font-size: 0.85rem;
+    color: var(--secondary-text-color); --mdc-icon-size: 18px;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .vtype:hover { color: var(--primary-text-color); }
+  .vtype.active { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .cols.alt .mute { visibility: hidden; }
+  .vol:disabled { opacity: 0.3; cursor: default; }
   .selbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 14px; }
   .selbar[hidden] { display: none; }
   .selbar-label { font-size: 0.8rem; color: var(--secondary-text-color); margin-right: 2px; }

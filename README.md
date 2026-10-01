@@ -752,6 +752,13 @@ is selected until you pick it.
 Dragging a room that isn't selected just moves that room. With neither toggle on,
 each slider controls only its own room, as before.
 
+A **Music / Notification / Alarm** switch picks *which* volume the sliders control:
+**Music** is the rooms' playing volume; **Notification** and **Alarm** edit each
+zone's *Notification volume* / *Alarm volume* — the levels `axium.play_notification`
+uses (see [Sound notifications](#sound-notifications-doorbell-chime-tts)). Link and
+Match work in every mode, so you can e.g. set the whole house's alarm level in one
+drag. The choice is remembered per browser.
+
 ### Quick Play card
 
 The **Axium Quick Play Card** (`type: custom:axium-quickplay-card`) is a grid of
