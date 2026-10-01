@@ -5331,6 +5331,10 @@ class AxiumQuickPlayCard extends HTMLElement {
     this._pending = null;
     this._roomsOpen = false; // rooms picker expanded
     this._roomsHint = false; // "pick a room" nudge after playing with no rooms on
+    this._volOpen = false; // per-room volume sliders expanded
+    this._volDrag = {}; // slider key ("__master" or zone id) -> being dragged
+    this._volTimers = {}; // zone id -> debounce timer
+    this._volSnap = null; // master drag snapshot {start, levels:{zone: pct}}
   }
 
   setConfig(config) {
@@ -5350,6 +5354,8 @@ class AxiumQuickPlayCard extends HTMLElement {
 
   disconnectedCallback() {
     if (this._playTimer) clearTimeout(this._playTimer);
+    for (const t of Object.values(this._volTimers)) if (t) clearTimeout(t);
+    this._volTimers = {};
   }
 
   static getConfigElement() {
@@ -5491,6 +5497,149 @@ class AxiumQuickPlayCard extends HTMLElement {
     this._roomsHint = true;
     this._sig = "";
     this._render();
+  }
+
+  // -- volume of the rooms on the selected stream --------------------------
+
+  /** A room's volume in percent (HA strips volume_level when off -> axium_volume). */
+  _roomPct(z) {
+    const a = (this._hass.states[z] || {}).attributes || {};
+    const lvl =
+      typeof a.volume_level === "number"
+        ? a.volume_level
+        : typeof a.axium_volume === "number"
+          ? a.axium_volume
+          : 0;
+    return Math.round(lvl * 100);
+  }
+
+  _onRooms(amp) {
+    return amp ? amp.zones.filter((z) => this._roomOn(z)) : [];
+  }
+
+  _volumeHtml(amp) {
+    const on = this._onRooms(amp);
+    if (!on.length) return "";
+    const rows = this._volOpen
+      ? on
+          .map(
+            (z) => `<div class="volrow">
+              <span class="vname" title="${escHtml(this._roomName(z))}">${escHtml(
+                this._roomName(z)
+              )}</span>
+              <div class="slidwrap">
+                <input class="slider" type="range" min="0" max="100" step="1"
+                  data-z="${escHtml(z)}" aria-label="${escHtml(this._roomName(z))} volume">
+                <div class="slidcap" data-z="${escHtml(z)}"></div>
+              </div>
+              <span class="volval" data-z="${escHtml(z)}"></span>
+            </div>`
+          )
+          .join("")
+      : "";
+    return `<div class="volume">
+        <div class="volrow master">
+          <ha-icon class="vicon" icon="mdi:volume-high"></ha-icon>
+          <div class="slidwrap">
+            <input class="slider" type="range" min="0" max="100" step="1"
+              data-z="__master" aria-label="Volume of all rooms on this stream">
+            <div class="slidcap" data-z="__master"></div>
+          </div>
+          <span class="volval" data-z="__master"></span>
+          <button class="iconbtn volexp${this._volOpen ? " open" : ""}" title="Per-room volume"
+            aria-label="Per-room volume" aria-expanded="${this._volOpen}">
+            <ha-icon icon="mdi:chevron-down"></ha-icon></button>
+        </div>
+        ${rows ? `<div class="volrooms">${rows}</div>` : ""}
+      </div>`;
+  }
+
+  _volEl(sel, key) {
+    for (const el of this.shadowRoot.querySelectorAll(sel)) {
+      if (el.dataset.z === key) return el;
+    }
+    return null;
+  }
+
+  _showVol(key, pct) {
+    const slider = this._volEl(".volume .slider", key);
+    if (slider) slider.value = String(pct);
+    const lbl = this._volEl(".volume .volval", key);
+    if (lbl) lbl.textContent = pct + "%";
+  }
+
+  /** Refresh the sliders from HA without rebuilding (skips the ones being dragged). */
+  _updateVolumes(amp) {
+    const on = this._onRooms(amp);
+    if (!on.length) return;
+    for (const z of on) {
+      if (!this._volDrag[z] && !this._volSnap) this._showVol(z, this._roomPct(z));
+      axiumApplyVolCap(this._volEl(".volume .slidcap", z), this._hass, z, "width");
+    }
+    if (!this._volDrag.__master)
+      this._showVol("__master", Math.max(...on.map((z) => this._roomPct(z))));
+    // The master can rise until every room is at its own max.
+    const cap = this._volEl(".volume .slidcap", "__master");
+    if (cap)
+      cap.style.width =
+        Math.max(0, 100 - Math.max(...on.map((z) => axiumMaxVolume(this._hass, z)))) + "%";
+  }
+
+  _onVolInput(key, v, commit) {
+    const amp = this._selAmp();
+    const on = this._onRooms(amp);
+    if (!on.length) return;
+    if (key === "__master") {
+      // Move every room on the stream by the same amount (keeps their balance).
+      if (!this._volSnap) {
+        const levels = {};
+        for (const z of on) levels[z] = this._roomPct(z);
+        this._volSnap = { start: Math.max(...Object.values(levels)), levels };
+      }
+      this._volDrag.__master = true;
+      const delta = v - this._volSnap.start;
+      for (const z of Object.keys(this._volSnap.levels)) {
+        const maxv = axiumMaxVolume(this._hass, z);
+        const target = Math.max(0, Math.min(maxv, Math.round(this._volSnap.levels[z] + delta)));
+        this._showVol(z, target);
+        if (commit) this._setVol(z, target);
+        else this._scheduleVol(z, target);
+      }
+      const lbl = this._volEl(".volume .volval", "__master");
+      if (lbl) lbl.textContent = v + "%";
+      if (commit) {
+        this._volDrag.__master = false;
+        this._volSnap = null;
+      }
+      return;
+    }
+    // A single room: can't go past its max volume.
+    const maxv = axiumMaxVolume(this._hass, key);
+    if (v > maxv) v = maxv;
+    this._showVol(key, v);
+    this._volDrag[key] = !commit;
+    if (commit) this._setVol(key, v);
+    else this._scheduleVol(key, v);
+  }
+
+  // Debounce live drags so we don't flood the amp; the final `change` still fires.
+  _scheduleVol(z, pct) {
+    if (this._volTimers[z]) clearTimeout(this._volTimers[z]);
+    this._volTimers[z] = setTimeout(() => {
+      this._volTimers[z] = null;
+      this._setVol(z, pct);
+    }, 200);
+  }
+
+  _setVol(z, pct) {
+    if (this._volTimers[z]) {
+      clearTimeout(this._volTimers[z]);
+      this._volTimers[z] = null;
+    }
+    this._hass.callService("media_player", "volume_set", {
+      entity_id: z,
+      volume_level: Math.max(0, Math.min(100, pct)) / 100,
+    });
   }
 
   _roomsHtml(amp) {
@@ -5679,6 +5828,7 @@ class AxiumQuickPlayCard extends HTMLElement {
         : [],
       ro: this._roomsOpen,
       rh: this._roomsHint,
+      vo: this._volOpen,
       s: this._sel,
       e: this._edit,
       items,
@@ -5689,6 +5839,8 @@ class AxiumQuickPlayCard extends HTMLElement {
       this._sig = sig;
       this._build(amps, items, np);
     }
+    // Volumes update in place (a rebuild would kill an in-progress drag).
+    this._updateVolumes(selAmp);
   }
 
   _build(amps, items, np) {
@@ -5760,6 +5912,7 @@ class AxiumQuickPlayCard extends HTMLElement {
         </div>
         ${streams}
         ${this._roomsHtml(amps.find((a) => a.player === this._sel))}
+        ${this._volumeHtml(amps.find((a) => a.player === this._sel))}
         ${npHtml}
         ${body}
         <div class="overlay" id="qpoverlay" hidden><div class="sheet" id="qpsheet"></div></div>
@@ -5777,6 +5930,17 @@ class AxiumQuickPlayCard extends HTMLElement {
       });
     for (const chip of this.shadowRoot.querySelectorAll(".room")) {
       chip.addEventListener("click", () => this._toggleRoom(chip.dataset.z));
+    }
+    const volExp = this.shadowRoot.querySelector(".volexp");
+    if (volExp)
+      volExp.addEventListener("click", () => {
+        this._volOpen = !this._volOpen;
+        this._sig = "";
+        this._render();
+      });
+    for (const sl of this.shadowRoot.querySelectorAll(".volume .slider")) {
+      sl.addEventListener("input", () => this._onVolInput(sl.dataset.z, Number(sl.value), false));
+      sl.addEventListener("change", () => this._onVolInput(sl.dataset.z, Number(sl.value), true));
     }
     this.shadowRoot.querySelector(".editbtn").addEventListener("click", () => {
       this._edit = !this._edit;
@@ -5975,6 +6139,27 @@ AxiumQuickPlayCard.styles = `
   .roomsbtn .chev { color: var(--secondary-text-color); transition: transform 0.15s ease; }
   .roomsbtn.open .chev { transform: rotate(180deg); }
   .roomchips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .volume {
+    margin-top: 8px; padding: 4px 6px 4px 12px; border-radius: 12px;
+    border: 1px solid var(--divider-color);
+  }
+  .volrow { display: flex; align-items: center; gap: 10px; min-height: 36px; }
+  .vicon { color: var(--primary-color); --mdc-icon-size: 18px; flex: 0 0 auto; }
+  .vname {
+    flex: 0 0 84px; font-size: 0.82rem; color: var(--primary-text-color);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .slidwrap { position: relative; flex: 1 1 auto; min-width: 80px; display: flex; align-items: center; }
+  .slider { flex: 1 1 auto; min-width: 0; height: 24px; accent-color: var(--primary-color); cursor: pointer; }
+  /* Greyed-out region above the max volume. */
+  .slidcap {
+    position: absolute; top: 4px; bottom: 4px; right: 0; width: 0;
+    background: var(--divider-color); opacity: 0.5; border-radius: 4px; pointer-events: none;
+  }
+  .volval { width: 40px; text-align: right; font-size: 0.82rem; color: var(--secondary-text-color); flex: 0 0 auto; }
+  .volexp ha-icon { transition: transform 0.15s ease; }
+  .volexp.open ha-icon { transform: rotate(180deg); }
+  .volrooms { border-top: 1px solid var(--divider-color); margin: 2px 6px 0 0; padding-top: 4px; }
   .roomhint { width: 100%; font-size: 0.8rem; color: var(--primary-color); margin-bottom: 2px; }
   .room {
     padding: 6px 12px; border-radius: 999px; border: 1px solid var(--divider-color);

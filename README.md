@@ -777,6 +777,11 @@ on the stream, the card switches your **last-used rooms** back on so the music i
 actually heard — or, the first time, opens the room picker with a hint. The
 remembered rooms are per device (browser).
 
+Below it, while any room is on the stream, a **Volume** slider controls **all
+those rooms at once**: it shows the loudest room and moves every room by the same
+amount, so their balance stays (each stops at its own *Maximum volume*, greyed
+out on the slider). Tap **⌄** to show a slider **per room** for fine-tuning.
+
 To manage the tiles, tap the **✎ Edit** toggle: an **Add** tile appears — tap it
 to open a Music Assistant search (the same one used elsewhere in these cards) and
 pick a result to add a favourite. There's **no fixed limit** — add as many as you
