@@ -873,6 +873,12 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `{repository: 1285095493}` (returns `success: True` when done), then restart. (HACS's
   `hacs/repository/info` may report `installed: None` in this broken state — trust the card-path
   200 + entry `loaded`, not HACS's own flags.)
+  **Seen again 2026-10-01 (v0.0.140) with a different root cause:** HACS logged `Download failed -
+  Got status code 404 when trying to download .../archive/refs/heads/<sha>.zip` (GitHub serves a commit
+  at `archive/<sha>.zip`, not `refs/heads/<sha>`), yet `update/install` still returned 200 and flipped the
+  update entity to the new sha. After restart: entry `not_loaded`, card path 404. Same recovery worked
+  (`hacs/repository/download` → restart). So after EVERY deploy check the HA core log for
+  `custom_components.hacs ... Download failed` and the entry state before calling it done.
 - Restarting HA is disruptive; the user has delegated updates, but keep them informed.
 
 ## Other
