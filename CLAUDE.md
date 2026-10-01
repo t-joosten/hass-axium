@@ -519,14 +519,34 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   Uses only existing control commands for override/restore (no sim change; DLNA push is real-amp
   only — sim is control-protocol-only). Needs the amp on the main LAN so HA can reach its HTTP/UPnP
   port (the 17037-only bridge doesn't pass UPnP). Verified push on AX-800-X fw 5.6.0.
-  **Resume the amp MA stream after a notification**: the direct push hijacks the amp's *shared* MA
-  renderer (its 8 zone renderers alias one stream), and `dlna.async_stop` + restoring the control
-  source to Media Player does NOT restart Music Assistant — so the streams (Axium 1/2) stayed silent
-  after a notification. Fix: snapshot which amp MA players were active (`_amp_ma_player_for_zone`:
-  zone device → `via_device` amp device → the MA player named after it; state in
-  playing/paused/buffering) BEFORE, and `media_play` them in the `finally` after restore so MA
-  re-pushes its flow. Only for the default push path (`renderer is None`); an explicit renderer
-  override is the caller's own.
+  **Default path since v0.0.135 = Music Assistant announcement** (`_ma_announce` →
+  `music_assistant.play_announcement`) on each zone's amp MA player (`_amp_ma_player_for_zone`: zone
+  device → `via_device` amp → the MA player named after it), when that player exists and isn't
+  unavailable; the direct push is only the FALLBACK (no MA player / MA call raised). **Why:** pushing to
+  the renderer under MA hijacked MA's flow stream — MA restarted it, logged "produced no audio data -
+  skipping" and advanced the queue, so after a notification the music came back on a DIFFERENT song
+  (the old `media_play`-resume just resumed the skipped-to track). MA's own announcement stops, plays,
+  and resumes the same track (verified on hardware: Bohemian Rhapsody before and after, no skip).
+  `announce_volume` is pinned to the player's current volume (MA's default percentual +85%/max 75
+  strategy would otherwise change it; with Spotify Connect active MA's volume sync to the Spotify
+  backend times out ~10s BEFORE the clip plays). Rooms not already on the stream (`joiners`) are muted
+  before activation, unmuted once the MA player leaves "playing" (MA stopped the music), and re-muted
+  when the clip ends (before MA resumes) — via `async_track_state_change_event` + `_wait_player_state`
+  (returns on match / announcement-task done / timeout). The `finally` restore now sends MUTE_OFF as
+  well as MUTE_ON (it used to only re-mute). `DATA_NOTIFYING[entry_id]` is set for the duration.
+  **Spotify Connect can't be resumed** (MA 2.10.4 `spotify_connect` plugin: `cmd/play` → go-librespot
+  `resume()` fails "Failed to send play command to backend" — verified; neither `media_play` nor the
+  announcement's resume works). User presses play in Spotify. Not fixable integration-side. **Ducking
+  (music lowered under the voice) is impossible**: a zone is one source and an amp's zones share one
+  stream; nothing upstream mixes. Don't re-attempt.
+- **Stream volume** (`AxiumStreamVolume`, number.py, one per amp, unique id `<entry>_stream_volume`
+  (+`_unit_<uid>`)): value = loudest zone of that amp that's on + on a `MEDIA_SOURCE_BYTES` source
+  (keeps the last value when none, so MA's slider doesn't drop to 0); set = move every such zone by the
+  same delta, clamped to each zone's `max_volume`, then re-read volumes. Exists because the amp IGNORES
+  the DLNA renderer volume, so MA's slider / phone volume buttons (Spotify Connect) did nothing. The user
+  sets it in MA as the amp player's **volume control** (HA plugin → player controls → volume controls;
+  MA 2.10 supports `number`/`input_number` via `set_value` 0-100 and reads the state as an int). Sets are
+  ignored while `DATA_NOTIFYING` is true (MA applies/restores a temp announcement volume).
 - **Time-left is exposed as `device_class: timestamp` sensors** (automation-usable):
   `AxiumAlarmSensor` (per alarm, next fire via `helpers.next_alarm_fire`; recomputes on a
   minute tick + `SIGNAL_ALARM_UPDATE` from the switch) and `AxiumSleepSensor` (per zone,
