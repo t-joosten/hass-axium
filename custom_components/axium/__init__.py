@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -70,6 +71,21 @@ PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.TEXT,
 ]
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Register the integration's actions once, independent of any amp link.
+
+    Registering them from ``async_setup_entry`` meant they only existed after a
+    successful connect — while the amp was unreachable (entry in setup-retry)
+    every automation calling e.g. ``axium.play_notification`` failed as an
+    *unknown action* and raised a repair. Registered here they always exist; a
+    call that needs the amp fails with a clear "not connected" error instead.
+    """
+    async_register_services(hass)
+    return True
 
 
 _CARD_URL = "/axium/axium-source-card.js"
@@ -470,7 +486,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DATA_ALARMS_ENABLED, {}).setdefault(entry.entry_id, True)
     hass.data.setdefault(DATA_PREV_OPTIONS, {})[entry.entry_id] = dict(entry.options)
 
-    async_register_services(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _async_setup_alarms(hass, entry, controller)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))

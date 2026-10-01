@@ -20,7 +20,7 @@ from homeassistant.components import media_source
 from homeassistant.components.media_player import async_process_play_media_url
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import (
     config_validation as cv,
     device_registry as dr,
@@ -403,7 +403,13 @@ async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> No
     notification's own (louder) volume plus the restore is the closest equivalent.
     """
     entry = _resolve_entry(hass, call.data.get("hub"))
-    controller = hass.data[DOMAIN][entry.entry_id]
+    controller = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if controller is None:
+        # The action is registered at integration setup, so it exists even
+        # while the amp is unreachable (entry not loaded / setup-retry).
+        raise HomeAssistantError(
+            f"Axium amplifier '{entry.title}' is not connected; can't play a notification."
+        )
 
     # Target zones = explicit zones + the zones of each named preset.
     entity_ids = list(call.data.get("zones", []))

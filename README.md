@@ -482,6 +482,11 @@ HA on your **main LAN**. This integration handles the amplifier side too (which
 zones, volume, source, and the exact restore). Loudness is set on the Axium zone,
 not the renderer — the amp stores a DLNA volume but doesn't apply it to output.
 
+All `axium.*` actions are registered when the integration loads, so they exist
+even while the amplifier is offline. If the amp is unreachable, a
+`play_notification` call fails with an "amplifier is not connected" error
+(rather than the automation being flagged for an *unknown action*).
+
 ```yaml
 # Doorbell → chime in the hallway + kitchen, then restore
 alias: "Doorbell chime"
