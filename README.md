@@ -769,6 +769,14 @@ strip shows the stream's current track, and the matching tile is highlighted.
 Only tiles you've set are shown, each with cover art, title and the source
 (Spotify · Playlist, …).
 
+A **Rooms** button under the stream pills shows which rooms are on that stream
+("Woonkamer, Keuken" or "No rooms"); tap it to expand a chip per room of that amp
+and tap a chip to put the room on the stream or turn it off (turning a room off
+never stops the music in the others). If you tap a favourite while **no room** is
+on the stream, the card switches your **last-used rooms** back on so the music is
+actually heard — or, the first time, opens the room picker with a hint. The
+remembered rooms are per device (browser).
+
 To manage the tiles, tap the **✎ Edit** toggle: an **Add** tile appears — tap it
 to open a Music Assistant search (the same one used elsewhere in these cards) and
 pick a result to add a favourite. There's **no fixed limit** — add as many as you

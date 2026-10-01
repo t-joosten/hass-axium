@@ -5329,6 +5329,8 @@ class AxiumQuickPlayCard extends HTMLElement {
     this._sel = null;
     // Optimistic list shown until the synced options round-trip back to us.
     this._pending = null;
+    this._roomsOpen = false; // rooms picker expanded
+    this._roomsHint = false; // "pick a room" nudge after playing with no rooms on
   }
 
   setConfig(config) {
@@ -5378,11 +5380,144 @@ class AxiumQuickPlayCard extends HTMLElement {
     return null;
   }
 
-  /** Amp streams (Axium 1/2) that have a resolvable MA player. */
+  /** Amp streams (Axium 1/2) that have a resolvable MA player, with their zones. */
   _amps() {
     return axiumAmps(this._hass, this._hubId())
-      .map((a) => ({ id: a.id, name: a.name, player: this._maByName(a.name) }))
+      .map((a) => ({
+        id: a.id,
+        name: a.name,
+        player: this._maByName(a.name),
+        zones: axiumSortZones(this._hass, a.zones),
+      }))
       .filter((a) => a.player);
+  }
+
+  // -- rooms on the selected stream -------------------------------------
+
+  _selAmp(amps) {
+    return (amps || this._amps()).find((a) => a.player === this._sel) || null;
+  }
+
+  _roomName(z) {
+    const st = this._hass.states[z];
+    return (st && st.attributes.friendly_name) || z.split(".")[1].replace(/_/g, " ");
+  }
+
+  /** A room is "on the stream" when powered and on an internal media source.
+   *  Power is checked first: while the amp's player streams, OFF zones also
+   *  report the Media Player source. */
+  _roomOn(z) {
+    const st = this._hass.states[z];
+    if (!st || OFF_STATES.includes(st.state)) return false;
+    const names = st.attributes.source_list;
+    const ids = st.attributes.source_ids;
+    if (!Array.isArray(names) || !Array.isArray(ids)) return false;
+    const i = names.indexOf(st.attributes.source);
+    return i >= 0 && Number(ids[i]) >= STREAM_SOURCE_MIN;
+  }
+
+  /** Put a room on its amp's Media Player source (select_source powers it on). */
+  _routeRoom(z) {
+    const st = this._hass.states[z];
+    const ids = st && st.attributes.source_ids;
+    const names = st && st.attributes.source_list;
+    if (!Array.isArray(ids) || !Array.isArray(names)) return;
+    const i = ids.findIndex((id) => Number(id) >= STREAM_SOURCE_MIN);
+    if (i < 0) return;
+    this._hass.callService("media_player", "select_source", {
+      entity_id: z,
+      source: names[i],
+    });
+  }
+
+  _roomsKey() {
+    return `axium-quickplay-rooms:${this._hubId() || "x"}`;
+  }
+
+  _recallRooms(ampId) {
+    try {
+      const all = JSON.parse(localStorage.getItem(this._roomsKey()) || "{}") || {};
+      return Array.isArray(all[ampId]) ? all[ampId] : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /** Remember the last non-empty room set per amp (restored when playing with none on). */
+  _rememberRooms(ampId, zones) {
+    if (!zones.length) return;
+    try {
+      const all = JSON.parse(localStorage.getItem(this._roomsKey()) || "{}") || {};
+      all[ampId] = zones;
+      localStorage.setItem(this._roomsKey(), JSON.stringify(all));
+    } catch (e) {
+      /* storage unavailable — no memory */
+    }
+  }
+
+  /** Tap a room chip: add it to / remove it from the selected stream. */
+  _toggleRoom(z) {
+    const amp = this._selAmp();
+    if (!amp) return;
+    const on = new Set(amp.zones.filter((zz) => this._roomOn(zz)));
+    if (on.has(z)) {
+      // Only power the room off — never stop the stream (other rooms share it).
+      this._hass.callService("media_player", "turn_off", { entity_id: z });
+      on.delete(z);
+    } else {
+      this._routeRoom(z);
+      on.add(z);
+      // Resume the amp's stream so the room actually hears something.
+      const st = this._hass.states[amp.player];
+      if (st && st.state !== "playing")
+        this._hass.callService("media_player", "media_play", { entity_id: amp.player });
+    }
+    this._rememberRooms(amp.id, amp.zones.filter((zz) => on.has(zz)));
+  }
+
+  /** Before playing: if no room is on the stream, bring back the last-used rooms
+   *  (or open the picker with a hint when there are none to restore). */
+  _ensureRooms() {
+    const amp = this._selAmp();
+    if (!amp || amp.zones.some((z) => this._roomOn(z))) return;
+    const mem = this._recallRooms(amp.id).filter(
+      (z) => amp.zones.includes(z) && this._hass.states[z]
+    );
+    if (mem.length) {
+      for (const z of mem) this._routeRoom(z);
+      return;
+    }
+    this._roomsOpen = true;
+    this._roomsHint = true;
+    this._sig = "";
+    this._render();
+  }
+
+  _roomsHtml(amp) {
+    if (!amp || !amp.zones.length) return "";
+    const on = amp.zones.filter((z) => this._roomOn(z));
+    const summary = on.length ? on.map((z) => this._roomName(z)).join(", ") : "No rooms";
+    const chips = amp.zones
+      .map(
+        (z) =>
+          `<button class="room${on.includes(z) ? " on" : ""}" data-z="${escHtml(z)}"
+            aria-pressed="${on.includes(z)}">${escHtml(this._roomName(z))}</button>`
+      )
+      .join("");
+    const hint =
+      this._roomsHint && !on.length
+        ? `<div class="roomhint">Pick the rooms to hear it in.</div>`
+        : "";
+    return `<div class="rooms">
+        <button class="roomsbtn${on.length ? " has" : ""}${this._roomsOpen ? " open" : ""}"
+          aria-expanded="${this._roomsOpen}" title="Choose which rooms play this stream">
+          <ha-icon icon="mdi:speaker-multiple"></ha-icon>
+          <span class="rlbl">Rooms</span>
+          <span class="rsum">${escHtml(summary)}</span>
+          <ha-icon class="chev" icon="mdi:chevron-down"></ha-icon>
+        </button>
+        ${this._roomsOpen ? `<div class="roomchips">${hint}${chips}</div>` : ""}
+      </div>`;
   }
 
   /** The synced favourites, read from any Axium zone's `axium_quickplay` attr. */
@@ -5496,6 +5631,7 @@ class AxiumQuickPlayCard extends HTMLElement {
   _selectStream(player) {
     if (!player) return;
     this._sel = player;
+    this._roomsHint = false;
     try {
       localStorage.setItem(`axium-quickplay-src:${this._hubId()}`, player);
     } catch (e) {
@@ -5534,8 +5670,15 @@ class AxiumQuickPlayCard extends HTMLElement {
     this._migrateLegacy(server);
     const items = this._items(server);
     const np = this._nowPlaying();
+    const selAmp = this._selAmp(amps);
+    if (selAmp && selAmp.zones.some((z) => this._roomOn(z))) this._roomsHint = false;
     const sig = JSON.stringify({
       a: amps.map((x) => x.name + "|" + x.player),
+      r: selAmp
+        ? selAmp.zones.map((z) => `${z}:${this._roomOn(z) ? 1 : 0}:${this._roomName(z)}`)
+        : [],
+      ro: this._roomsOpen,
+      rh: this._roomsHint,
       s: this._sel,
       e: this._edit,
       items,
@@ -5616,6 +5759,7 @@ class AxiumQuickPlayCard extends HTMLElement {
             <ha-icon icon="mdi:pencil"></ha-icon></button>
         </div>
         ${streams}
+        ${this._roomsHtml(amps.find((a) => a.player === this._sel))}
         ${npHtml}
         ${body}
         <div class="overlay" id="qpoverlay" hidden><div class="sheet" id="qpsheet"></div></div>
@@ -5623,6 +5767,16 @@ class AxiumQuickPlayCard extends HTMLElement {
 
     for (const p of this.shadowRoot.querySelectorAll(".stream")) {
       p.addEventListener("click", () => this._selectStream(p.dataset.p));
+    }
+    const roomsBtn = this.shadowRoot.querySelector(".roomsbtn");
+    if (roomsBtn)
+      roomsBtn.addEventListener("click", () => {
+        this._roomsOpen = !this._roomsOpen;
+        this._sig = "";
+        this._render();
+      });
+    for (const chip of this.shadowRoot.querySelectorAll(".room")) {
+      chip.addEventListener("click", () => this._toggleRoom(chip.dataset.z));
     }
     this.shadowRoot.querySelector(".editbtn").addEventListener("click", () => {
       this._edit = !this._edit;
@@ -5703,7 +5857,10 @@ class AxiumQuickPlayCard extends HTMLElement {
       return;
     }
     if (this._edit) this._openPicker(i); // reassign an existing tile
-    else if (items[i]) this._play(this._sel, items[i]);
+    else if (items[i]) {
+      this._ensureRooms(); // so the music is actually heard somewhere
+      this._play(this._sel, items[i]);
+    }
   }
 
   _play(player, item) {
@@ -5800,6 +5957,33 @@ AxiumQuickPlayCard.styles = `
   }
   .stream:hover { border-color: var(--primary-color); color: var(--primary-text-color); }
   .stream.on { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .rooms { margin-top: 12px; }
+  .roomsbtn {
+    display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px;
+    border-radius: 12px; border: 1px solid var(--divider-color); background: none;
+    cursor: pointer; font: inherit; color: var(--primary-text-color); text-align: left;
+    --mdc-icon-size: 18px; transition: border-color 0.15s ease;
+  }
+  .roomsbtn:hover { border-color: var(--primary-color); }
+  .roomsbtn > ha-icon:first-child { color: var(--secondary-text-color); }
+  .roomsbtn.has > ha-icon:first-child { color: var(--primary-color); }
+  .roomsbtn .rlbl { font-weight: 500; font-size: 0.9rem; }
+  .roomsbtn .rsum {
+    flex: 1 1 auto; min-width: 0; font-size: 0.85rem; color: var(--secondary-text-color);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .roomsbtn .chev { color: var(--secondary-text-color); transition: transform 0.15s ease; }
+  .roomsbtn.open .chev { transform: rotate(180deg); }
+  .roomchips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .roomhint { width: 100%; font-size: 0.8rem; color: var(--primary-color); margin-bottom: 2px; }
+  .room {
+    padding: 6px 12px; border-radius: 999px; border: 1px solid var(--divider-color);
+    background: var(--card-background-color); color: var(--primary-text-color);
+    font: inherit; font-size: 0.85rem; cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+  .room:hover { border-color: var(--primary-color); }
+  .room.on { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
   .streamsone {
     display: inline-flex; align-items: center; gap: 6px; margin-top: 12px;
     color: var(--secondary-text-color); font-size: 0.95rem; --mdc-icon-size: 18px;
