@@ -391,6 +391,30 @@ shows **now-playing and transport** (play/pause/next/prev).
 > the TCP control protocol); if that were ever done, the integration probes
 > `0x12`–`0x19` on every connect and would surface it automatically.
 
+### Stream volume (phone / Music Assistant volume control)
+
+The amplifier **ignores the DLNA renderer volume**, so turning the volume up or
+down in Music Assistant — or on your phone while it's connected via **Spotify
+Connect** — doesn't change the sound by itself. Each amp therefore gets a
+**Stream volume** number (on the amp device, 0–100 %):
+
+- its value is the level of the **loudest zone** currently on that amp's Media
+  Player stream;
+- setting it moves **every zone on the stream by the same amount** (each keeps
+  its offset to the others and stays under its own *Maximum volume*).
+
+Hook it up in Music Assistant once:
+
+1. **Settings → Providers → Home Assistant** (the plugin) → add the amp's
+   `number.…_stream_volume` entity under **volume controls**.
+2. **Settings → Players → Axium 1 → Volume control** → pick that entity.
+   Repeat for Axium 2 with its own Stream volume.
+
+From then on the MA volume slider, and your phone's volume buttons on Spotify
+Connect, move the actual rooms. While a notification plays, MA's temporary
+announcement volume changes are ignored (the notification sets the zones'
+volume itself).
+
 ### AirPlay via Music Assistant (only on amps with AirPlay)
 
 On an amp whose probe reveals **AirPlay**, [Music Assistant](https://www.music-assistant.io/)'s
@@ -474,13 +498,27 @@ source at a time), it **overrides** the source for the notification rather than
 ducking under it; give the notification its own (louder) volume so it's heard,
 and each zone's original volume is restored afterwards.
 
-The sound is **pushed straight to each zone's built-in amp renderer** over UPnP —
-no DLNA discovery, no Music Assistant, and it works on **every** zone (the amp
-only advertises one of its per-zone renderers, so auto-discovery alone can't
-reach them all). Home Assistant serves the media, so the amp just needs to reach
-HA on your **main LAN**. This integration handles the amplifier side too (which
-zones, volume, source, and the exact restore). Loudness is set on the Axium zone,
-not the renderer — the amp stores a DLNA volume but doesn't apply it to output.
+**When the zone's amp has a Music Assistant player** (named after the amp device,
+e.g. "Axium 1" — see the matrix card), the sound is played as a **Music Assistant
+announcement** on that player: MA stops the music, plays the clip, and **resumes
+the same track at the same position**. Rooms that weren't listening to the stream
+are held muted until the music has stopped, and muted again the moment the clip
+ends, so they hear only the announcement. (The amplifier can't mix audio, so the
+music is paused for the announcement rather than ducked under it.)
+
+> **Spotify Connect:** if the amp is playing via Spotify Connect (your phone),
+> the notification still plays, but the music does **not** resume by itself —
+> Music Assistant 2.10 can't send *play* back to a Spotify Connect session. Press
+> play in the Spotify app afterwards.
+
+**Otherwise** (no matching Music Assistant player, or it's unavailable) the sound is
+**pushed straight to each zone's built-in amp renderer** over UPnP — no DLNA
+discovery needed, and it works on **every** zone (the amp only advertises one of its
+per-zone renderers, so auto-discovery alone can't reach them all). Home Assistant
+serves the media, so the amp just needs to reach HA on your **main LAN**. Either way
+this integration handles the amplifier side (which zones, volume, source, and the
+exact restore). Loudness is set on the Axium zone, not the renderer — the amp stores
+a DLNA volume but doesn't apply it to output.
 
 All `axium.*` actions are registered when the integration loads, so they exist
 even while the amplifier is offline. If the amp is unreachable, a

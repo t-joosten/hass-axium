@@ -37,10 +37,12 @@ from .const import (
     CMD_TREBLE,
     CMD_VOLUME,
     CMD_ZONE_GAIN,
+    DATA_NOTIFYING,
     DATA_SLEEP_DEADLINES,
     DEFAULT_SOURCE_COUNT,
     DOMAIN,
     ID_KEY,
+    MEDIA_SOURCE_BYTES,
     POWER_OFF,
     SIGNAL_SLEEP_UPDATE,
     SOURCE_BYTE_TO_NAME,
@@ -54,10 +56,17 @@ from .const import (
     ZONE_GAIN_MAX,
     ZONE_GAIN_MIN,
     ZONE_KEY,
+    UNIT_KEY,
 )
 from .controller import AxiumController, ZoneState
 from .protocol import level_to_volume, to_signed_byte
-from .helpers import get_advanced, get_sources, get_zones, primary_amp_identifier
+from .helpers import (
+    get_advanced,
+    get_sources,
+    get_units,
+    get_zones,
+    primary_amp_identifier,
+)
 
 # Sleep-timer fade: ramp the volume down over the final part of the countdown
 # (capped) before turning the zone off, so it doesn't cut out abruptly.
@@ -182,7 +191,145 @@ async def async_setup_entry(
             for item in get_sources(entry)
         )
     entities.append(AxiumStandbyTime(controller, entry))
+    entities.extend(_stream_volume_entities(controller, entry))
     async_add_entities(entities)
+
+
+def _stream_volume_entities(
+    controller: AxiumController, entry: ConfigEntry
+) -> list[NumberEntity]:
+    """One Stream volume number per amp, covering that amp's zones."""
+    units = get_units(entry)
+    primary_uid = next((u[UNIT_KEY] for u in units if u.get("primary")), None)
+    by_amp: dict[int | None, list[int]] = {}
+    for item in get_zones(entry):
+        uid = item.get(UNIT_KEY)
+        # None = the primary amp (also legacy single-amp configs without units).
+        key = None if uid is None or not units or uid == primary_uid else uid
+        by_amp.setdefault(key, []).append(item[ZONE_KEY])
+    return [
+        AxiumStreamVolume(
+            controller,
+            entry,
+            zones,
+            uid,
+            None if uid is None else (DOMAIN, f"{entry.entry_id}_unit_{uid}"),
+        )
+        for uid, zones in by_amp.items()
+    ]
+
+
+class AxiumStreamVolume(NumberEntity):
+    """An amp's stream volume — for Music Assistant's per-player volume control.
+
+    The amp ignores the DLNA renderer volume that Music Assistant (and a phone
+    on Spotify Connect) changes, so MA's volume slider does nothing by itself.
+    This number is the level of the loudest zone listening to the amp's Media
+    Player stream; setting it moves every such zone by the same amount (each
+    keeps its offset and stays under its max volume). In MA, set this entity as
+    the amp player's volume control (Home Assistant plugin → player controls).
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_name = "Stream volume"
+    _attr_icon = "mdi:speaker-wireless"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = "%"
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(
+        self,
+        controller: AxiumController,
+        entry: ConfigEntry,
+        zones: list[int],
+        unit_id: int | None = None,
+        device_ident: tuple[str, str] | None = None,
+    ) -> None:
+        """Initialise the stream volume for one amp (None = primary)."""
+        self._controller = controller
+        self._entry_id = entry.entry_id
+        self._zones = zones
+        self._level: int | None = None
+        suffix = "" if unit_id is None else f"_unit_{unit_id}"
+        self._attr_unique_id = f"{entry.entry_id}_stream_volume{suffix}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={device_ident or primary_amp_identifier(entry.entry_id)}
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Follow every zone of this amp."""
+        for zone in self._zones:
+            self.async_on_remove(
+                self._controller.register_listener(zone, self._handle_update)
+            )
+        self._recompute()
+
+    def _stream_zones(self) -> list[int]:
+        """Zones that are on and listening to the amp's Media Player stream."""
+        out = []
+        for zone in self._zones:
+            state = self._controller.zone_state(zone)
+            if (
+                state.power
+                and state.source in MEDIA_SOURCE_BYTES
+                and state.volume is not None
+            ):
+                out.append(zone)
+        return out
+
+    def _recompute(self) -> None:
+        # Keep the last level while no zone is on the stream, so MA's slider
+        # doesn't drop to 0 just because the rooms are off.
+        levels = [
+            round(self._controller.zone_state(z).volume * 100)
+            for z in self._stream_zones()
+        ]
+        if levels:
+            self._level = max(levels)
+
+    @callback
+    def _handle_update(self) -> None:
+        """Recompute and write state when a zone changes."""
+        self._recompute()
+        self.async_write_ha_state()
+
+    @property
+    def available(self) -> bool:
+        """Return whether the amplifier connection is up."""
+        return self._controller.available
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the loudest stream zone's volume (percent)."""
+        return self._level
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Move every stream zone by the same amount, clamped to its max volume."""
+        if self.hass.data.get(DATA_NOTIFYING, {}).get(self._entry_id):
+            # Music Assistant applies (and restores) a temporary announcement
+            # volume around a notification; the notification sets the zones'
+            # volume itself, so ignore MA's change and keep reporting the truth.
+            self.async_write_ha_state()
+            return
+        zones = self._stream_zones()
+        if not zones:
+            self.async_write_ha_state()
+            return
+        current = max(self._controller.zone_state(z).volume * 100 for z in zones)
+        delta = value - current
+        for zone in zones:
+            state = self._controller.zone_state(zone)
+            cap = state.max_volume if state.max_volume is not None else 100
+            target = min(max(state.volume * 100 + delta, 0), cap)
+            await self._controller.async_send(
+                CMD_VOLUME, zone, level_to_volume(target / 100)
+            )
+        # The amp doesn't echo a set — read the volumes back.
+        for zone in zones:
+            await self._controller.async_send(CMD_VOLUME, zone)
 
 
 class AxiumSleepTimer(NumberEntity):

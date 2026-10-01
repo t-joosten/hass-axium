@@ -9,6 +9,7 @@ a reload is needed (field-only edits refresh in place).
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from functools import partial
 import logging
 import mimetypes
@@ -19,13 +20,14 @@ import voluptuous as vol
 from homeassistant.components import media_source
 from homeassistant.components.media_player import async_process_play_media_url
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import Event, HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import (
     config_validation as cv,
     device_registry as dr,
     entity_registry as er,
 )
+from homeassistant.helpers.event import async_track_state_change_event
 
 from . import dlna
 from .const import (
@@ -35,7 +37,10 @@ from .const import (
     CMD_VOLUME,
     CONF_ALARMS,
     CONF_QUICKPLAY,
+    DATA_NOTIFYING,
     DOMAIN,
+    MEDIA_SOURCE_BYTES,
+    MUTE_OFF,
     MUTE_ON,
     POWER_OFF,
     SOURCE_FLAG_TURN_ON,
@@ -297,6 +302,48 @@ def _amp_ma_player_for_zone(
     return None
 
 
+async def _ma_announce(hass: HomeAssistant, player: str, media_url: str) -> None:
+    """Play ``media_url`` as a Music Assistant announcement; blocks until done.
+
+    MA stops what the player was streaming, plays the clip, then resumes the
+    same track at the same position (not for Spotify Connect: MA 2.10's plugin
+    can't send play back to the Spotify session). ``announce_volume`` is pinned
+    to the player's current volume so MA doesn't change it — the zones already
+    got the notification volume over the control protocol, and with Spotify
+    Connect active MA's volume sync times out (~10s) before the clip plays.
+    """
+    data: dict = {"entity_id": player, "url": media_url, "use_pre_announce": False}
+    state = hass.states.get(player)
+    level = state.attributes.get("volume_level") if state else None
+    if level is not None:
+        data["announce_volume"] = max(1, min(100, round(level * 100)))
+    await hass.services.async_call(
+        "music_assistant", "play_announcement", data, blocking=True
+    )
+
+
+async def _wait_player_state(
+    states: asyncio.Queue[str],
+    task: asyncio.Task,
+    predicate: Callable[[str], bool],
+    timeout: float,
+) -> None:
+    """Wait for a queued player state matching ``predicate``.
+
+    Returns early when ``task`` (the announcement) has finished or after
+    ``timeout`` seconds, so a missed state transition never stalls the caller.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not task.done() and (remaining := deadline - loop.time()) > 0:
+        try:
+            state = await asyncio.wait_for(states.get(), min(remaining, 0.5))
+        except TimeoutError:
+            continue
+        if predicate(state):
+            return
+
+
 async def _resolve_media(
     hass: HomeAssistant, content_id: str, content_type: str | None
 ) -> tuple[str, str]:
@@ -448,26 +495,47 @@ async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> No
             state = controller.zone_state(zone)
             snapshot[zone] = (state.power, state.source, state.volume, state.muted)
 
-        # The default push hijacks each amp's shared Music Assistant stream, and
-        # restoring the control-protocol source doesn't restart it — so remember
-        # which amp MA players were streaming and resume them afterwards. Only for
-        # the direct-push path (an explicit renderer override is the caller's own).
-        resume_players: set[str] = set()
+        # Default path: announce through each zone's amp Music Assistant player.
+        # MA stops its own stream, plays the clip and resumes the SAME track at
+        # the same position. Pushing straight to the amp renderer instead hijacks
+        # the stream under MA, which then restarts it, sees "no audio data" and
+        # skips tracks. Zones whose amp has no usable MA player (none named after
+        # the amp, or unavailable) fall back to the direct push.
+        ma_zones: dict[str, list[int]] = {}
+        push_zones: list[int] = []
         if renderer is None:
             for zone in zones:
                 player = _amp_ma_player_for_zone(hass, entry, zone)
-                if not player:
-                    continue
-                st = hass.states.get(player)
-                if st and st.state in ("playing", "paused", "buffering"):
-                    resume_players.add(player)
+                st = hass.states.get(player) if player else None
+                if st is not None and st.state not in ("unavailable", "unknown"):
+                    ma_zones.setdefault(player, []).append(zone)
+                else:
+                    push_zones.append(zone)
+        else:
+            # An override renderer that doesn't exist falls back to the push.
+            push_zones = list(zones)
+
+        # Rooms not already listening to their amp's stream "join" for the
+        # announcement. On the MA path they're held muted until MA has stopped
+        # the music, and muted again as soon as the clip ends (before MA resumes
+        # the music), so they only hear the announcement — never a burst of music.
+        joiners = {
+            zone
+            for zone_list in ma_zones.values()
+            for zone in zone_list
+            if not (snapshot[zone][0] and snapshot[zone][1] in MEDIA_SOURCE_BYTES)
+        }
 
         pushed_urls: list[str] = []
+        notifying = hass.data.setdefault(DATA_NOTIFYING, {})
+        notifying[entry.entry_id] = True
         try:
             # Override: power on, unmute, select the source, set the volume.
             for zone in zones:
+                if zone in joiners:
+                    await controller.async_send(CMD_MUTE, zone, MUTE_ON)
                 await controller.async_activate_zone(
-                    zone, source, level, unmute=True
+                    zone, source, level, unmute=zone not in joiners
                 )
             for zone in zones:
                 await controller.async_request_zone_state(zone)
@@ -489,46 +557,108 @@ async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> No
                 )
                 played_via_ha = True
             elif content_id:
-                # Default: push the sound straight to each zone's amp renderer —
-                # works for every zone with no DLNA discovery needed.
                 media_url, mime = await _resolve_media(
                     hass, content_id, call.data.get("media_content_type")
                 )
-                for zone in zones:
-                    url = _renderer_url_for_zone(controller, entry, zone)
-                    if url is None:
-                        _LOGGER.warning(
-                            "axium.play_notification: renderer URL unknown for "
-                            "zone %s (amp IP not discovered) — no audio there",
-                            zone,
+
+                async def _push(push: list[int]) -> None:
+                    """Push straight to each zone's amp renderer (no discovery)."""
+                    for zone in push:
+                        url = _renderer_url_for_zone(controller, entry, zone)
+                        if url is None:
+                            _LOGGER.warning(
+                                "axium.play_notification: renderer URL unknown "
+                                "for zone %s (amp IP not discovered) — no audio "
+                                "there",
+                                zone,
+                            )
+                            continue
+                        try:
+                            await dlna.async_push(hass, url, media_url, mime=mime)
+                            pushed_urls.append(url)
+                        except Exception as err:  # noqa: BLE001 - keep going
+                            _LOGGER.warning(
+                                "axium.play_notification: push to zone %s (%s) "
+                                "failed: %s",
+                                zone,
+                                url,
+                                err,
+                            )
+
+                async def _set_muted(group: list[int], muted: bool) -> None:
+                    for zone in group:
+                        await controller.async_send(
+                            CMD_MUTE, zone, MUTE_ON if muted else MUTE_OFF
                         )
-                        continue
+
+                async def _announce(player: str, player_zones: list[int]) -> None:
+                    """Announce via the amp's MA player; push if MA fails."""
+                    joining = [z for z in player_zones if z in joiners]
+                    was_playing = (
+                        st := hass.states.get(player)
+                    ) is not None and st.state == "playing"
+                    states: asyncio.Queue[str] = asyncio.Queue()
+
+                    @callback
+                    def _on_change(event: Event) -> None:
+                        if (new := event.data.get("new_state")) is not None:
+                            states.put_nowait(new.state)
+
+                    unsub = async_track_state_change_event(hass, [player], _on_change)
+                    task = hass.async_create_task(_ma_announce(hass, player, media_url))
                     try:
-                        await dlna.async_push(hass, url, media_url, mime=mime)
-                        pushed_urls.append(url)
-                    except Exception as err:  # noqa: BLE001 - keep the rest going
+                        if joining:
+                            if was_playing:  # MA stops the music first
+                                await _wait_player_state(
+                                    states, task, lambda s: s != "playing", 8
+                                )
+                            await _set_muted(joining, False)
+                            await _wait_player_state(
+                                states, task, lambda s: s == "playing", 15
+                            )
+                            await _wait_player_state(
+                                states, task, lambda s: s != "playing", 300
+                            )
+                            await _set_muted(joining, True)
+                        await task
+                    except Exception as err:  # noqa: BLE001 - fall back to push
                         _LOGGER.warning(
-                            "axium.play_notification: push to zone %s (%s) "
-                            "failed: %s",
-                            zone,
-                            url,
+                            "axium.play_notification: Music Assistant announcement "
+                            "on %s failed (%s) — pushing to the amp instead",
+                            player,
                             err,
                         )
+                        await _set_muted(joining, False)
+                        await _push(player_zones)
+                        await _wait_pushed()
+                    finally:
+                        unsub()
+
+                async def _wait_pushed() -> None:
+                    duration = call.data.get("duration")
+                    if duration is not None:
+                        await asyncio.sleep(duration)
+                    elif pushed_urls:
+                        await _wait_dlna_done(hass, list(pushed_urls))
+
+                await _push(push_zones)
+                await asyncio.gather(
+                    _wait_pushed(),
+                    *(_announce(p, z) for p, z in ma_zones.items()),
+                )
             else:
                 _LOGGER.warning(
                     "axium.play_notification: no media_content_id — overriding "
                     "the zones without audio, then restoring"
                 )
+                await asyncio.sleep(call.data.get("duration") or 5)
 
-            duration = call.data.get("duration")
-            if duration is not None:
-                await asyncio.sleep(duration)
-            elif played_via_ha:
-                await _wait_media_done(hass, renderer)
-            elif pushed_urls:
-                await _wait_dlna_done(hass, pushed_urls)
-            else:
-                await asyncio.sleep(5)
+            if played_via_ha:
+                duration = call.data.get("duration")
+                if duration is not None:
+                    await asyncio.sleep(duration)
+                else:
+                    await _wait_media_done(hass, renderer)
         finally:
             # Silence any renderers we pushed to before switching sources back.
             for url in pushed_urls:
@@ -553,19 +683,15 @@ async def _async_play_notification(hass: HomeAssistant, call: ServiceCall) -> No
                     await controller.async_send(
                         CMD_VOLUME, zone, level_to_volume(prev_level)
                     )
-                if muted:
-                    await controller.async_send(CMD_MUTE, zone, MUTE_ON)
+                if muted is not None:
+                    await controller.async_send(
+                        CMD_MUTE, zone, MUTE_ON if muted else MUTE_OFF
+                    )
                 if was_off:
                     await controller.async_send(CMD_POWER, zone, POWER_OFF)
             for zone in zones:
                 await controller.async_request_zone_state(zone)
-            # Resume any amp Music Assistant streams the notification interrupted
-            # (the push replaced the shared renderer; restoring the source can't
-            # restart MA). media_play re-pushes MA's flow so the music comes back.
-            for player in resume_players:
-                await hass.services.async_call(
-                    "media_player", "media_play", {"entity_id": player}, blocking=False
-                )
+            notifying[entry.entry_id] = False
 
 
 def async_register_services(hass: HomeAssistant) -> None:

@@ -40,6 +40,8 @@ CONF_QUICKPLAY: Final = "quickplay"  # saved Music Assistant favourites (Quick P
 DATA_ALARMS_ENABLED: Final = f"{DOMAIN}_alarms_enabled"  # {entry_id: bool}
 DATA_SLEEP_DEADLINES: Final = f"{DOMAIN}_sleep_deadlines"  # {entry_id: {zone: dt}}
 DATA_PREV_OPTIONS: Final = f"{DOMAIN}_prev_options"  # {entry_id: options snapshot}
+# {entry_id: bool} — a play_notification is running (stream-volume sets are ignored)
+DATA_NOTIFYING: Final = f"{DOMAIN}_notifying"
 SIGNAL_SLEEP_UPDATE: Final = f"{DOMAIN}_sleep_update"  # + "_{entry_id}"
 SIGNAL_ALARM_UPDATE: Final = f"{DOMAIN}_alarm_update"  # + "_{entry_id}"
 SIGNAL_QUICKPLAY_UPDATE: Final = f"{DOMAIN}_quickplay_update"  # + "_{entry_id}"
