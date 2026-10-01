@@ -669,6 +669,12 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `turn_off`s the room (never stops the stream). `_onButton` calls `_ensureRooms` before `_play`: with no
   room on, it re-routes the last non-empty room set (`localStorage axium-quickplay-rooms:<hub>` per amp id)
   or opens the picker with a hint. `_amps()` now carries each amp's sorted `zones`.
+  **Volume (v0.0.139):** `_volumeHtml` (only while ≥1 room is on the stream) = a master slider
+  (`data-z="__master"`, shows the loudest room; a drag snapshots `_volSnap` and moves every on-room by the
+  same delta, clamped to `axiumMaxVolume`) + ⌄ per-room sliders (`_volOpen`, in the sig). Levels are NOT in
+  the render sig — `_updateVolumes` refreshes sliders in place after every render, skipping dragged ones
+  (`_volDrag`/`_volSnap`), else a hass tick would rebuild the card mid-drag. Debounced 200 ms
+  (`_scheduleVol`), `change` commits immediately; timers cleared in `disconnectedCallback`.
   **Sheet-scroll trap (fixed):** the sheet CSS must NOT set `display: block` on the embedded
   `<axium-ma-search>` — that overrides the component's `:host{display:flex;flex-direction:column}`, which
   collapses the flex chain so `.ssresults` (which has `overflow-y:auto`) never gets a bounded height and
