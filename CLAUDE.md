@@ -826,6 +826,13 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
 
 ## Other
 
+- **Actions (`axium.*`) are registered in `async_setup`, NOT `async_setup_entry`** (`CONFIG_SCHEMA =
+  cv.config_entry_only_config_schema(DOMAIN)`). Registering them after the amp connect meant they didn't
+  exist while the amp was offline (entry in setup-retry), so user automations calling
+  `axium.play_notification` raised "uses an unknown action" repairs. Handlers that need the amp must look
+  the controller up with `hass.data.get(DOMAIN, {}).get(entry_id)` and raise `HomeAssistantError` ("not
+  connected") when absent — never `hass.data[DOMAIN][…]`.
+
 - **Entity-id prefix migration** (`__init__._async_migrate_entity_ids`, guarded by
   `_ENTITY_ID_MIGRATION` in `entry.data`): a one-time rename of every Axium entity_id to
   `<domain>.axium_<primary unit id hex>_<suffix>` (e.g. `media_player.axium_0681_zone_1`), derived
