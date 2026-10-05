@@ -848,6 +848,15 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
 
 ## Deploying to / debugging the user's live HA
 
+- **"Zones on Media Player but no sound" = check the amp renderer, not MA's state.** MA's amp player can
+  report `playing` for hours after its stream died (2026-10-04 22:39: MA's UPnP subscription to the amp
+  failed — `async_upnp_client ... Failed (re-)subscribing` — and MA never noticed; `media_position_updated_at`
+  was ~10 h stale). Ground truth = UPnP `GetTransportInfo` on the amp: **MA streams to
+  `http://<amp-ip>/upnp/av_transport_ctrl7`** (the SSDP-advertised renderer — ctrl0-6 read
+  `NO_MEDIA_PRESENT`; all 8 alias one stream). Recovery: `media_stop` the MA player, WAIT until MA is
+  really idle (a `media_play` sent too soon is dropped: "Ignore PLAY request … already playing"), then
+  `media_play` → ctrl7 goes `PLAYING` (restarts the current track).
+
 - Test instance: `http://192.168.1.119:8123` (LAN, reachable from the user's PC).
   The card view is `requires_auth=False`, so the card JS and the frontend index HTML
   can be fetched unauthenticated to check MIME/injection.
