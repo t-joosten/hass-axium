@@ -856,6 +856,12 @@ amplifiers over Ethernet (TCP 17037), distributed via HACS. Repo:
   `NO_MEDIA_PRESENT`; all 8 alias one stream). Recovery: `media_stop` the MA player, WAIT until MA is
   really idle (a `media_play` sent too soon is dropped: "Ignore PLAY request … already playing"), then
   `media_play` → ctrl7 goes `PLAYING` (restarts the current track).
+  **Automated since v0.0.141:** `stream_watchdog.py` (`StreamWatchdog`, 30 s, wired in `__init__` next to the
+  zone poll): for amps with a listening room whose MA player says `playing`, queries ALL 8 renderers
+  (`amp_renderer_urls`); `stream_is_dead` = amp answered and none in `dlna.ACTIVE_STATES` (all-unreachable is
+  NOT dead). Acts after `DEAD_CHECKS`=2 consecutive dead checks, `COOLDOWN` 300 s per player, silent while
+  `DATA_NOTIFYING` and `QUIET_AFTER_NOTIFY` 60 s after. Recovery = stop → wait until MA leaves "playing" → +1 s
+  → play. Reuses `services._amp_ma_player_for_zone` / `_renderer_url_for_zone`.
 
 - Test instance: `http://192.168.1.119:8123` (LAN, reachable from the user's PC).
   The card view is `requires_auth=False`, so the card JS and the frontend index HTML

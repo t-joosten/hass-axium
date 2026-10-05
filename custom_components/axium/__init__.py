@@ -56,6 +56,7 @@ from .helpers import (
 from . import intent as axium_intent
 from .protocol import level_to_volume
 from .services import async_register_services
+from .stream_watchdog import async_setup_stream_watchdog
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -559,6 +560,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(
         async_track_time_interval(hass, _poll_zones, timedelta(seconds=30))
     )
+    # Restart an amp's Music Assistant stream that died while MA still reports
+    # "playing" (rooms on Media Player but silent) — see stream_watchdog.py.
+    entry.async_on_unload(async_setup_stream_watchdog(hass, entry, controller))
 
     # Voice: (re)generate the per-language sentence files with the live zone/
     # source/preset names, and refresh them when a source is renamed on the amp.

@@ -391,6 +391,19 @@ shows **now-playing and transport** (play/pause/next/prev).
 > the TCP control protocol); if that were ever done, the integration probes
 > `0x12`–`0x19` on every connect and would surface it automatically.
 
+### Stream watchdog (automatic recovery)
+
+Music Assistant streams to each amp over the network. If that link breaks (a network
+blip, a Home Assistant / Music Assistant restart), MA can keep showing the amp as
+**playing** while the amp actually receives nothing — the rooms are on the Media
+Player source but silent. The integration watches for this: every ~30 s, for each amp
+with a room listening to its stream, it asks the amp itself whether it's playing. If the
+amp has had nothing for two checks in a row while MA claims to play, it **restarts the
+stream automatically** (stop, then play — the current track starts over) and logs a
+warning. It never acts during or right after a notification, and at most once every 5
+minutes per amp. A Spotify Connect stream can't be restarted this way (press play in
+Spotify).
+
 ### Stream volume (phone / Music Assistant volume control)
 
 The amplifier **ignores the DLNA renderer volume**, so turning the volume up or
